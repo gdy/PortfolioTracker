@@ -946,8 +946,11 @@ const COLUMNS = [
 ];
 
 // ==================== STATE ====================
-let portfolio = JSON.parse(localStorage.getItem('stonks_portfolio') || '[]');
-let notes = JSON.parse(localStorage.getItem('stonks_notes') || '{}');
+function lsGet(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key) || fallback); } catch (_) { return JSON.parse(fallback); }
+}
+let portfolio = lsGet('stonks_portfolio', '[]');
+let notes = lsGet('stonks_notes', '{}');
 let quoteData = {};
 let errorSymbols = new Set(); // track symbols that failed to resolve
 let prevPrices = {};
@@ -963,6 +966,7 @@ let wsRenderPending = false; // debounce WebSocket-triggered renders
 let fetchedSummary = new Set(); // track symbols we already fetched quoteSummary for
 let fetchedAfterHours = new Set(); // track symbols we already tried after-hours fetch for
 let fetchedFundamentals = new Set(); // track symbols with cached FinnHub fundamentals
+let fetchedPerformance = new Set(); // track symbols whose YTD/6M/1Y perf has been fetched
 let fundamentalsCache = {}; // cache profile, metrics, earnings, dividends from FinnHub
 let alpacaWorkingFeed = null; // cache which Alpaca feed works ('', 'iex', or null=unknown)
 
@@ -2563,7 +2567,6 @@ async function fillFundamentals(symbols) {
 // ==================== MAIN REFRESH ====================
 let refreshInProgress = false;
 let pendingRefreshAfter = false; // queued refresh (e.g. symbol added during refresh)
-let fetchedPerformance = new Set(); // cache perf data per session
 async function refreshAll() {
   if (refreshInProgress) return Promise.resolve(); // prevent overlapping refreshes
   refreshInProgress = true;
