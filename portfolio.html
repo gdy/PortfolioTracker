@@ -1,0 +1,3595 @@
+<!DOCTYPE html>
+<html lang="en" style="color-scheme: dark;">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Portfolio Tracker</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop offset='0%25' stop-color='%23003d1a'/%3E%3Cstop offset='100%25' stop-color='%230a0a0a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='url(%23g)'/%3E%3Cpolyline points='4,24 9,20 13,22 17,13 21,16 25,8 28,5' fill='none' stroke='%2300c853' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='25,5 28,5 28,8' fill='%2300c853'/%3E%3Cline x1='4' y1='27' x2='28' y2='27' stroke='%23333' stroke-width='1'/%3E%3C/svg%3E" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* Custom scrollbars */
+  ::-webkit-scrollbar { height: 6px; width: 6px; }
+  ::-webkit-scrollbar-track { background: #0a0a0a; }
+  ::-webkit-scrollbar-thumb {
+    background: #2a2a4a;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: #4a4a6a; }
+  ::-webkit-scrollbar-corner { background: #0a0a0a; }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2a2a4a #0a0a0a;
+  }
+  body {
+    background: #0a0a0a;
+    color: #d0d0d0;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+    overflow-x: auto;
+  }
+  .toolbar {
+    background: #1a1a2e;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid #333;
+    flex-wrap: wrap;
+  }
+  .toolbar label { color: #888; font-size: 11px; text-transform: uppercase; }
+  .toolbar input, .toolbar select {
+    background: #0d0d1a;
+    border: 1px solid #444;
+    color: #e0e0e0;
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 13px;
+    border-radius: 2px;
+  }
+  .toolbar input:focus, .toolbar select:focus { border-color: #4a9eff; outline: none; }
+  .toolbar input[type="date"] { color-scheme: dark; }
+  .toolbar input[type="number"] { -moz-appearance: textfield; appearance: textfield; padding-right: 18px; }
+  .toolbar input[type="number"]::-webkit-inner-spin-button,
+  .toolbar input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .toolbar-num-wrap {
+    position: relative;
+    display: inline-block;
+  }
+  .toolbar-spin {
+    position: absolute;
+    right: 1px;
+    top: 1px;
+    bottom: 1px;
+    width: 16px;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid #333;
+    border-radius: 0 2px 2px 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .toolbar-num-wrap:hover .toolbar-spin,
+  .toolbar-num-wrap:focus-within .toolbar-spin { opacity: 1; }
+  .toolbar-spin button {
+    flex: 1;
+    background: #1a1a2e;
+    border: none;
+    color: #555;
+    font-size: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: color 0.12s, background 0.12s;
+  }
+  .toolbar-spin button:hover { color: #4a9eff; background: #252550; }
+  .toolbar-spin button:first-child { border-bottom: 1px solid #333; }
+  .btn {
+    padding: 4px 14px;
+    border: 1px solid #555;
+    background: #1e1e3a;
+    color: #ccc;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    border-radius: 2px;
+    transition: background 0.15s;
+  }
+  .btn:hover { background: #2a2a50; }
+  .btn-add { border-color: #2a6; color: #3c8; }
+  .btn-add:hover { background: #1a3a2a; }
+  .btn-danger { border-color: #a33; color: #e55; }
+  .btn-danger:hover { background: #3a1a1a; }
+  .btn-refresh { border-color: #48f; color: #6af; }
+  .btn-refresh:hover { background: #1a2a4a; }
+
+  @keyframes pulse-live { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  #ws-indicator { animation: pulse-live 2s ease-in-out infinite; }
+
+  .status-bar {
+    background: #111;
+    padding: 4px 12px;
+    font-size: 11px;
+    color: #666;
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px solid #222;
+  }
+  .status-bar .live { color: #3c8; }
+  .status-bar .error { color: #e55; }
+  .status-bar .loading { color: #4a9eff; }
+
+  .summary-bar {
+    background: #0f0f1f;
+    padding: 8px 12px;
+    display: flex;
+    gap: 30px;
+    border-bottom: 1px solid #222;
+    font-size: 13px;
+    flex-wrap: wrap;
+  }
+  .summary-item { display: flex; gap: 6px; align-items: center; }
+  .summary-label { color: #777; }
+  .summary-value { font-weight: bold; }
+
+  .table-wrap { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 2650px;
+  }
+  thead th {
+    background: #16162a;
+    color: #999;
+    font-weight: normal;
+    text-transform: uppercase;
+    font-size: 10px;
+    padding: 6px 8px;
+    text-align: right;
+    border-bottom: 2px solid #333;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+  }
+  thead th:hover { color: #ccc; }
+  thead th.left { text-align: left; }
+  thead th .sort-arrow { font-size: 9px; margin-left: 3px; color: #4a9eff; }
+
+  tbody tr {
+    border-bottom: 1px solid #2a2a3a;
+    transition: background 0.1s;
+  }
+  tbody tr:hover { background: #1a1a2e; }
+  tbody td {
+    padding: 1px 8px;
+    text-align: right;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+  tbody td.left { text-align: left; }
+  tbody td.sym {
+    font-weight: bold;
+    color: #fff;
+    text-align: left;
+  }
+
+  .pos { color: #00c853; }
+  .neg { color: #ff1744; }
+  .neutral { color: #666; }
+
+  .range-bar {
+    display: inline-block;
+    width: 60px;
+    height: 4px;
+    background: #333;
+    border-radius: 2px;
+    position: relative;
+    vertical-align: middle;
+    margin: 0 3px;
+  }
+  .range-bar .marker {
+    position: absolute;
+    width: 5px;
+    height: 10px;
+    background: #4a9eff;
+    border-radius: 1px;
+    top: -3px;
+    transform: translateX(-50%);
+  }
+
+  .cell-input {
+    background: #0d0d1a;
+    border: 1px solid #222;
+    color: #e0e0e0;
+    width: 70px;
+    padding: 2px 4px;
+    font-family: inherit;
+    font-size: 11px;
+    text-align: right;
+    border-radius: 2px;
+  }
+  .cell-input:focus { border-color: #4a9eff; outline: none; }
+  .cell-input.notes {
+    text-align: left;
+    width: 100px;
+    color: #ff9;
+  }
+
+  .delete-btn {
+    background: none;
+    border: none;
+    color: #555;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0 4px;
+  }
+  .delete-btn:hover { color: #e55; }
+
+  .empty-msg {
+    text-align: center;
+    padding: 60px;
+    color: #555;
+    font-size: 15px;
+  }
+
+  .flash-green { animation: flashG 0.6s; }
+  .flash-red { animation: flashR 0.6s; }
+  @keyframes flashG { 0% { background: rgba(0,200,83,0.15); } 100% { background: transparent; } }
+  @keyframes flashR { 0% { background: rgba(255,23,68,0.15); } 100% { background: transparent; } }
+
+  .after-hours { color: #b388ff; font-size: 11px; }
+
+  .auto-refresh-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    color: #888;
+    font-size: 11px;
+  }
+  .auto-refresh-toggle input[type="checkbox"] {
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    width: 11px;
+    height: 11px;
+    padding: 0;
+    border: 1px solid #555;
+    border-radius: 2px;
+    background: #0d0d1a;
+    margin: 0;
+    position: relative;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .auto-refresh-toggle input:checked {
+    background: #2a6;
+    border-color: #3c8;
+  }
+  .auto-refresh-toggle input:checked::after {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 0px;
+    width: 3px;
+    height: 7px;
+    border: solid #fff;
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(40deg);
+  }
+  .auto-refresh-toggle input:hover { border-color: #4a9eff; }
+
+  .slide-wrap {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .slide-wrap.show {
+    grid-template-rows: 1fr;
+  }
+  .slide-wrap > .slide-inner {
+    overflow: hidden;
+  }
+  .settings-bar {
+    background: #0d0d1a;
+    border-bottom: 1px solid #222;
+    display: flex;
+    gap: 6px;
+    align-items: flex-start;
+    flex-direction: column;
+    font-size: 12px;
+    padding: 6px 12px;
+  }
+  .settings-bar input {
+    background: #0a0a15;
+    border: 1px solid #444;
+    color: #e0e0e0;
+    padding: 3px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    border-radius: 2px;
+    width: 320px;
+  }
+  .settings-bar input:focus { border-color: #4a9eff; outline: none; }
+  .save-confirm {
+    display: inline-block;
+    color: #3c8;
+    font-size: 11px;
+    margin-left: 6px;
+    opacity: 0;
+    transform: translateY(2px);
+    transition: opacity 0.2s, transform 0.2s;
+  }
+  .save-confirm.show {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Date picker contrast */
+  .cell-input[type="date"] { color-scheme: dark; }
+  /* Custom number input spinners */
+  .cell-input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+  .cell-input[type="number"]::-webkit-inner-spin-button,
+  .cell-input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .num-wrap {
+    display: inline-flex;
+    align-items: center;
+    position: relative;
+  }
+  .num-wrap .cell-input { padding-right: 16px; }
+  .num-spin {
+    display: flex;
+    flex-direction: column;
+    position: absolute;
+    right: 1px;
+    top: 1px;
+    bottom: 1px;
+    width: 14px;
+    border-left: 1px solid #222;
+    background: #0d0d1a;
+    border-radius: 0 2px 2px 0;
+    overflow: hidden;
+  }
+  .num-spin button {
+    flex: 1;
+    background: none;
+    border: none;
+    color: #666;
+    font-size: 7px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.12s, background 0.12s;
+  }
+  .num-spin button:hover { color: #4a9eff; background: #1a1a3a; }
+  .num-spin button:first-child { border-bottom: 1px solid #222; }
+
+  .source-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+  }
+  .source-badge.yf { background: #2a1a4a; color: #b388ff; }
+  .source-badge.fh { background: #1a3a2a; color: #69f0ae; }
+  .error-row td { opacity: 0.6; }
+  .error-text { color: #ff5252; font-size: 11px; font-style: italic; }
+
+  .welcome-banner {
+    background: linear-gradient(135deg, #0d1a2e 0%, #121230 100%);
+    border: 1px solid #2a3a5a;
+    border-radius: 6px;
+    margin: 20px auto;
+    max-width: 640px;
+    padding: 24px 28px;
+    color: #c0c8d8;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .welcome-banner h2 {
+    color: #4a9eff;
+    font-size: 17px;
+    margin-bottom: 14px;
+    font-weight: 600;
+  }
+  .welcome-banner .step {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .welcome-banner .step-num {
+    color: #3c8;
+    font-weight: bold;
+    min-width: 18px;
+  }
+  .welcome-banner a {
+    color: #4a9eff;
+    text-decoration: none;
+  }
+  .welcome-banner a:hover { text-decoration: underline; }
+  .welcome-banner .key-name { color: #e0e0e0; font-weight: bold; }
+  .welcome-banner .dismiss-btn {
+    margin-top: 14px;
+    padding: 5px 16px;
+    background: #1e1e3a;
+    border: 1px solid #555;
+    color: #aaa;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    border-radius: 3px;
+  }
+  .welcome-banner .dismiss-btn:hover { background: #2a2a50; color: #ddd; }
+
+  .import-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.7); z-index: 5000;
+    display: none; align-items: center; justify-content: center;
+  }
+  .import-overlay.show { display: flex; }
+  .import-modal {
+    background: #12122a; border: 1px solid #444; border-radius: 6px;
+    padding: 20px; width: 560px; max-width: 90vw; max-height: 85vh;
+    overflow-y: auto; color: #d0d0d0;
+  }
+  .import-modal h3 { margin-bottom: 12px; color: #e0e0e0; font-size: 15px; }
+  .import-modal .close-btn {
+    float: right; background: none; border: none; color: #888;
+    font-size: 18px; cursor: pointer; line-height: 1;
+  }
+  .import-modal .close-btn:hover { color: #fff; }
+  .import-modal label { display: block; color: #999; font-size: 11px; text-transform: uppercase; margin: 10px 0 4px; }
+  .import-modal textarea {
+    width: 100%; height: 140px; background: #0a0a15; border: 1px solid #444;
+    color: #e0e0e0; font-family: inherit; font-size: 12px; padding: 8px;
+    border-radius: 3px; resize: vertical;
+  }
+  .import-modal textarea:focus { border-color: #4a9eff; outline: none; }
+  .import-dropzone {
+    border: 2px dashed #444; border-radius: 4px; padding: 18px;
+    text-align: center; color: #666; font-size: 12px; cursor: pointer;
+    transition: border-color 0.2s, color 0.2s; margin-bottom: 8px;
+  }
+  .import-dropzone:hover, .import-dropzone.dragover {
+    border-color: #4a9eff; color: #4a9eff;
+  }
+  .import-dropzone input[type="file"] { display: none; }
+  .import-actions { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; }
+  .import-preview { margin-top: 10px; font-size: 11px; color: #888; max-height: 120px; overflow-y: auto; }
+  .import-preview table { min-width: auto; width: 100%; font-size: 11px; }
+  .import-preview th { background: #1a1a30; padding: 3px 6px; color: #aaa; font-size: 10px; }
+  .import-preview td { padding: 3px 6px; border-bottom: 1px solid #1a1a2a; }
+  .import-format-hint { font-size: 11px; color: #666; margin-top: 6px; line-height: 1.5; }
+
+  .ee-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85); z-index: 9999;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.4s; pointer-events: none;
+  }
+  .ee-overlay.show { opacity: 1; pointer-events: auto; }
+  .ee-ascii {
+    color: #0f0; font-size: 14px; line-height: 1.15; white-space: pre;
+    text-shadow: 0 0 10px #0f0, 0 0 30px #0a0;
+    animation: eeGlow 1.5s ease-in-out infinite alternate;
+  }
+  .ee-msg {
+    color: #4a9eff; font-size: 22px; margin-top: 20px; letter-spacing: 3px;
+    text-shadow: 0 0 15px #4a9eff;
+    animation: eePulse 2s ease-in-out infinite;
+  }
+  .ee-particles { position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: hidden; }
+  .ee-particle {
+    position: absolute; font-size: 20px;
+    animation: eeFall linear forwards;
+  }
+  @keyframes eeGlow { from { text-shadow: 0 0 10px #0f0, 0 0 30px #0a0; } to { text-shadow: 0 0 20px #0f0, 0 0 60px #0a0, 0 0 80px #0f0; } }
+  @keyframes eePulse { 0%,100% { opacity: 0.7; transform: scale(1); } 50% { opacity: 1; transform: scale(1.05); } }
+  @keyframes eeFall { to { transform: translateY(110vh) rotate(720deg); opacity: 0; } }
+
+  /* ==================== MOBILE RESPONSIVE ==================== */
+  @media (max-width: 768px) {
+    body { font-size: 14px; -webkit-text-size-adjust: 100%; }
+
+    /* Toolbar: stack vertically, larger touch targets */
+    .toolbar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      padding: 10px;
+    }
+    .toolbar > div {
+      margin-left: 0 !important;
+      justify-content: flex-start;
+    }
+    .toolbar > div:first-child {
+      display: grid !important;
+      grid-template-columns: auto 1fr auto 1fr;
+      gap: 6px;
+      align-items: center;
+    }
+    .toolbar > div:first-child .btn-add {
+      grid-column: 1 / -1;
+      width: 100%;
+      padding: 10px;
+      font-size: 14px;
+    }
+    .toolbar label { font-size: 12px; }
+    .toolbar input, .toolbar select {
+      font-size: 14px;
+      padding: 8px 10px;
+      min-height: 38px;
+      width: 100% !important;
+    }
+    .toolbar-num-wrap { width: 100%; }
+    .toolbar-num-wrap input { width: 100% !important; }
+    .toolbar-spin { opacity: 1; width: 28px; }
+    .toolbar-spin button { font-size: 12px; }
+
+    /* Toolbar right section: wrap buttons */
+    .toolbar > div:last-child {
+      display: flex !important;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .toolbar > div:last-child .btn,
+    .toolbar > div:last-child select {
+      flex: 1 1 auto;
+      min-width: 70px;
+      padding: 10px 12px;
+      font-size: 13px;
+      min-height: 38px;
+      text-align: center;
+    }
+    .auto-refresh-toggle {
+      font-size: 13px;
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      background: #1e1e3a;
+      border: 1px solid #555;
+      border-radius: 2px;
+    }
+    .auto-refresh-toggle input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+    }
+
+    /* Status bar */
+    .status-bar {
+      flex-direction: column;
+      gap: 2px;
+      font-size: 12px;
+      padding: 6px 10px;
+    }
+
+    /* Summary bar: wrap items, bigger text */
+    .summary-bar {
+      gap: 12px 20px;
+      padding: 10px;
+      font-size: 14px;
+    }
+
+    /* Table: ensure horizontal scroll works smoothly */
+    .table-wrap {
+      -webkit-overflow-scrolling: touch;
+    }
+    thead th {
+      font-size: 11px;
+      padding: 8px 10px;
+    }
+    tbody td {
+      font-size: 13px;
+      padding: 6px 10px;
+    }
+    .cell-input {
+      font-size: 13px;
+      padding: 6px 8px;
+      min-height: 32px;
+      width: 80px;
+    }
+    .cell-input.notes { width: 110px; }
+    .num-spin { width: 22px; opacity: 1; }
+    .num-spin button { font-size: 10px; }
+    .delete-btn { font-size: 18px; padding: 4px 8px; }
+
+    /* Settings bar */
+    .settings-bar {
+      padding: 10px;
+      gap: 10px;
+    }
+    .settings-bar > div {
+      flex-direction: column !important;
+      align-items: stretch !important;
+      width: 100%;
+      gap: 6px !important;
+    }
+    .settings-bar input {
+      width: 100% !important;
+      font-size: 14px;
+      padding: 8px 10px;
+      min-height: 38px;
+    }
+    .settings-bar .btn {
+      padding: 10px;
+      font-size: 13px;
+      width: 100%;
+    }
+
+    /* Import modal */
+    .import-modal {
+      width: 95vw;
+      max-width: 95vw;
+      padding: 16px;
+      max-height: 90vh;
+    }
+    .import-modal h3 { font-size: 16px; }
+    .import-modal textarea {
+      font-size: 13px;
+      height: 100px;
+    }
+    .import-dropzone {
+      padding: 24px 12px;
+      font-size: 14px;
+    }
+    .import-actions .btn {
+      padding: 12px;
+      font-size: 14px;
+      width: 100%;
+    }
+
+    /* Welcome banner */
+    .welcome-banner {
+      margin: 12px;
+      padding: 18px 16px;
+      font-size: 14px;
+    }
+    .welcome-banner h2 { font-size: 16px; }
+
+    /* Empty state */
+    .empty-msg {
+      padding: 40px 20px;
+      font-size: 14px;
+    }
+  }
+
+  /* Extra small screens (iPhone SE, etc.) */
+  @media (max-width: 380px) {
+    .toolbar { padding: 8px; }
+    .toolbar > div:first-child {
+      grid-template-columns: auto 1fr;
+    }
+    .summary-bar { gap: 8px 14px; font-size: 13px; }
+    .welcome-banner { margin: 8px; padding: 14px 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+    <label>Ticker:</label>
+    <input type="text" id="ticker-input" placeholder="AAPL" style="width:75px; text-transform:uppercase;" />
+    <label>Shares:</label>
+    <div class="toolbar-num-wrap">
+      <input type="number" id="shares-input" placeholder="100" style="width:75px;" />
+      <div class="toolbar-spin"><button tabindex="-1" onclick="stepToolbar('shares-input',1)">&#9650;</button><button tabindex="-1" onclick="stepToolbar('shares-input',-1)">&#9660;</button></div>
+    </div>
+    <label>Cost:</label>
+    <div class="toolbar-num-wrap">
+      <input type="number" id="cost-input" placeholder="150.00" step="0.01" style="width:85px;" />
+      <div class="toolbar-spin"><button tabindex="-1" onclick="stepToolbar('cost-input',0.01)">&#9650;</button><button tabindex="-1" onclick="stepToolbar('cost-input',-0.01)">&#9660;</button></div>
+    </div>
+    <label>Date:</label>
+    <input type="date" id="date-input" style="width:120px;" />
+    <button class="btn btn-add" onclick="addPosition()">+ Add</button>
+  </div>
+  <div style="margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <label class="auto-refresh-toggle">
+      <input type="checkbox" id="auto-refresh" checked /> Auto
+    </label>
+    <select id="refresh-interval" onchange="setupAutoRefresh()">
+      <option value="5">5s</option>
+      <option value="10">10s</option>
+      <option value="15">15s</option>
+      <option value="30" selected>30s</option>
+      <option value="60">60s</option>
+    </select>
+    <span id="ws-indicator" style="display:none; font-size:11px; color:#3c8; white-space:nowrap;" title="FinnHub WebSocket connected — real-time trade updates active">&#9679; Live</span>
+    <button class="btn btn-refresh" onclick="refreshAll()">&#8635; Refresh</button>
+    <button class="btn" onclick="openImportModal()">Import</button>
+    <button class="btn" onclick="toggleSettings()">Settings</button>
+    <button class="btn btn-danger" onclick="clearAll()">Clear All</button>
+  </div>
+</div>
+
+<div class="import-overlay" id="import-overlay" onclick="if(event.target===this)closeImportModal()">
+  <div class="import-modal">
+    <button class="close-btn" onclick="closeImportModal()">&times;</button>
+    <h3>Import Positions</h3>
+    <div class="import-dropzone" id="import-dropzone" onclick="document.getElementById('import-file').click()">
+      Drop a CSV file here or click to browse
+      <input type="file" id="import-file" accept=".csv,.txt,.tsv" onchange="handleImportFile(this.files[0])" />
+    </div>
+    <label>Or paste CSV data below</label>
+    <textarea id="import-text" placeholder="Symbol,Shares,Cost Basis,Date&#10;AAPL,100,150.00,2024-06-15&#10;TSLA,-50,240.00,2024-08-01" oninput="previewImport()"></textarea>
+    <div class="import-format-hint">
+      Auto-detects exports from <strong>Robinhood</strong>, <strong>E*Trade</strong>, <strong>Fidelity</strong>,
+      <strong>Schwab</strong>, <strong>Webull</strong>, and <strong>Vanguard</strong>.<br/>
+      Simple CSV: <code>Symbol, Shares, Cost, Date</code> &mdash; use negative shares for short positions.
+    </div>
+    <div class="import-preview" id="import-preview"></div>
+    <div class="import-actions">
+      <button class="btn btn-add" onclick="executeImport()">Import Positions</button>
+    </div>
+  </div>
+</div>
+
+<div class="slide-wrap" id="settings-wrap">
+  <div class="slide-inner">
+    <div class="settings-bar">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <label style="color:#888;">FinnHub API Key:</label>
+        <input type="password" id="finnhub-key" placeholder="Free key from finnhub.io" style="width:280px;" />
+        <button class="btn" onclick="saveApiKey()">Save</button>
+        <span class="save-confirm" id="confirm-finnhub">&#10003; Saved</span>
+        <span style="color:#666; font-size:11px;">60 calls/min &mdash; finnhub.io</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <label style="color:#888;">Alpaca Keys:</label>
+        <input type="password" id="alpaca-key-id" placeholder="API Key ID" style="width:180px;" />
+        <input type="password" id="alpaca-secret" placeholder="Secret Key" style="width:180px;" />
+        <button class="btn" onclick="saveAlpacaKeys()">Save</button>
+        <span class="save-confirm" id="confirm-alpaca">&#10003; Saved</span>
+        <span style="color:#666; font-size:11px;">200 req/min &mdash; alpaca.markets</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <label style="color:#888;">FMP API Key:</label>
+        <input type="password" id="fmp-key" placeholder="Free key from financialmodelingprep.com" style="width:280px;" />
+        <button class="btn" onclick="saveFmpKey()">Save</button>
+        <span class="save-confirm" id="confirm-fmp">&#10003; Saved</span>
+        <span style="color:#666; font-size:11px;">250 req/day &mdash; financialmodelingprep.com</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+        <button class="btn" onclick="showWelcomeBanner(true)" style="font-size:11px; padding:2px 10px;">Show Welcome Guide</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="slide-wrap" id="welcome-wrap">
+  <div class="slide-inner">
+    <div class="welcome-banner">
+      <h2>Welcome to Stock Portfolio Tracker</h2>
+
+      <p style="margin-bottom:6px; color:#aab;"><strong style="color:#e0e0e0;">Getting Started</strong></p>
+      <div class="step">
+        <span class="step-num">&bull;</span>
+        <span><strong>Add a ticker</strong> &mdash; Type a symbol (e.g. AAPL, BTC) into the ticker box in the toolbar and click <strong>Add</strong>.</span>
+      </div>
+      <div class="step">
+        <span class="step-num">&bull;</span>
+        <span><strong>Import positions</strong> &mdash; Click the <strong>Import</strong> button to bulk-import from a CSV file or paste data directly. Auto-detects exports from <strong>Robinhood</strong>, <strong>E*Trade</strong>, <strong>Fidelity</strong>, <strong>Schwab</strong>, <strong>Webull</strong>, and <strong>Vanguard</strong>. You can also use a simple format: <code style="background:#1a1a30; padding:1px 5px; border-radius:2px;">Symbol, Shares, Cost, Date</code></span>
+      </div>
+
+      <p style="margin-top:16px; margin-bottom:6px; color:#aab;"><strong style="color:#e0e0e0;">API Keys</strong> <span style="color:#f4c542;">(highly recommended)</span></p>
+      <p style="margin-bottom:10px; color:#888;">For full data coverage, add one or more free API keys in <strong>Settings</strong>. Without them, many columns (market cap, P/E, EPS, dividends, etc.) will show dashes:</p>
+      <div class="step">
+        <span class="step-num">1.</span>
+        <span><span class="key-name">FinnHub</span> &mdash; Sign up at <a href="https://finnhub.io/register" target="_blank">finnhub.io</a> for a free key. Provides market cap, P/E, EPS, beta, dividends, earnings dates, and performance data.</span>
+      </div>
+      <div class="step">
+        <span class="step-num">2.</span>
+        <span><span class="key-name">Alpaca</span> &mdash; Sign up at <a href="https://app.alpaca.markets/signup" target="_blank">alpaca.markets</a> for free API keys. Provides real-time IEX quotes with bid/ask spreads and average volume.</span>
+      </div>
+      <div class="step">
+        <span class="step-num">3.</span>
+        <span><span class="key-name">FMP</span> (optional) &mdash; Sign up at <a href="https://site.financialmodelingprep.com/register" target="_blank">financialmodelingprep.com</a> for an extra data source fallback.</span>
+      </div>
+      <p style="margin-top:14px; color:#888;">Without API keys, basic price data is still available via Yahoo Finance and FinnHub demo mode.</p>
+
+      <p style="margin-top:16px; margin-bottom:6px; color:#aab;"><strong style="color:#e0e0e0;">Tips</strong></p>
+      <div class="step">
+        <span class="step-num">&bull;</span>
+        <span><strong>Undo / Redo</strong> &mdash; Press <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Z</kbd> to undo and <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Y</kbd> or <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Shift+Z</kbd> to redo any change (add, remove, edit shares/cost/date/notes, import, clear).</span>
+      </div>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:16px;">
+        <button class="dismiss-btn" onclick="dismissWelcome()">Got it</button>
+        <span style="color:#555; font-size:11px;">Made by <a href="https://github.com/gdy" target="_blank" style="color:#6a8ccc;">Grant</a></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="status-bar">
+  <span id="status-text">Ready</span>
+  <span id="last-update"></span>
+</div>
+
+<div class="summary-bar">
+  <div class="summary-item">
+    <span class="summary-label">Market Value:</span>
+    <span class="summary-value" id="total-value">$0.00</span>
+  </div>
+  <div class="summary-item">
+    <span class="summary-label">Day P&L:</span>
+    <span class="summary-value" id="total-day-pl">$0.00</span>
+  </div>
+  <div class="summary-item">
+    <span class="summary-label">Total P&L:</span>
+    <span class="summary-value" id="total-pl">$0.00</span>
+  </div>
+  <div class="summary-item">
+    <span class="summary-label">Total P&L %:</span>
+    <span class="summary-value" id="total-pl-pct">0.00%</span>
+  </div>
+  <div class="summary-item">
+    <span class="summary-label">Positions:</span>
+    <span class="summary-value" id="total-positions">0</span>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr id="header-row"></tr>
+    </thead>
+    <tbody id="portfolio-body"></tbody>
+  </table>
+  <div class="empty-msg" id="empty-msg">
+    No positions. Add a ticker above to get started.
+  </div>
+</div>
+
+<div class="ee-overlay" id="ee-overlay">
+  <div class="ee-particles" id="ee-particles"></div>
+  <pre class="ee-ascii">
+    ██████╗ ██████╗  █████╗ ███╗   ██╗████████╗
+   ██╔════╝ ██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝
+   ██║  ███╗██████╔╝███████║██╔██╗ ██║   ██║
+   ██║   ██║██╔══██╗██╔══██║██║╚██╗██║   ██║
+   ╚██████╔╝██║  ██║██║  ██║██║ ╚████║   ██║
+    ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝
+
+         ██╗███████╗    ███╗   ██╗██╗ ██████╗███████╗
+         ██║██╔════╝    ████╗  ██║██║██╔════╝██╔════╝
+         ██║███████╗    ██╔██╗ ██║██║██║     █████╗
+         ██║╚════██║    ██║╚██╗██║██║██║     ██╔══╝
+         ██║███████║    ██║ ╚████║██║╚██████╗███████╗
+         ╚═╝╚══════╝    ╚═╝  ╚═══╝╚═╝ ╚═════╝╚══════╝
+
+      ██╗    ██╗██╗████████╗██╗  ██╗    ██╗████████╗
+      ██║    ██║██║╚══██╔══╝██║  ██║    ██║╚══██╔══╝
+      ██║ █╗ ██║██║   ██║   ███████║    ██║   ██║
+      ██║███╗██║██║   ██║   ██╔══██║    ██║   ██║
+      ╚███╔███╔╝██║   ██║   ██║  ██║    ██║   ██║
+       ╚══╝╚══╝ ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚═╝   ╚═╝
+  </pre>
+  <div class="ee-msg">$ stonks only go up $</div>
+</div>
+
+<script>
+// ==================== EASTER EGG ====================
+(function() {
+  const phrase = 'grant is nice with it';
+  let buf = '';
+  const emojis = ['🚀','💰','📈','💎','🔥','⭐','💸','🏆','👑','💪'];
+  document.addEventListener('keypress', function(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    buf += e.key.toLowerCase();
+    if (buf.length > phrase.length) buf = buf.slice(-phrase.length);
+    if (buf === phrase) {
+      buf = '';
+      const overlay = document.getElementById('ee-overlay');
+      const particles = document.getElementById('ee-particles');
+      particles.innerHTML = '';
+      for (let i = 0; i < 40; i++) {
+        const p = document.createElement('span');
+        p.className = 'ee-particle';
+        p.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+        p.style.left = Math.random() * 100 + '%';
+        p.style.top = -20 + 'px';
+        p.style.animationDuration = (2 + Math.random() * 3) + 's';
+        p.style.animationDelay = Math.random() * 2 + 's';
+        particles.appendChild(p);
+      }
+      overlay.classList.add('show');
+      setTimeout(() => overlay.classList.remove('show'), 5000);
+    }
+  });
+})();
+
+// ==================== COLUMN DEFINITIONS ====================
+const COLUMNS = [
+  { key: 'symbol',    label: 'Symbol',       align: 'left',  sortable: true },
+  { key: 'name',      label: 'Name',         align: 'left',  sortable: true },
+  { key: 'last',      label: 'Last',         align: 'right', sortable: true },
+  { key: 'change',    label: '$ Chg',        align: 'right', sortable: true },
+  { key: 'changePct', label: '% Chg',        align: 'right', sortable: true },
+  { key: 'afterHours',label: 'After Hrs',    align: 'right', sortable: true },
+  { key: 'shares',    label: 'Quantity',      align: 'right', sortable: true },
+  { key: 'costBasis', label: 'Cost Basis',    align: 'right', sortable: true },
+  { key: 'date',      label: 'Purchase Date', align: 'right', sortable: true },
+  { key: 'mktValue',  label: 'Mkt Value',     align: 'right', sortable: true },
+  { key: 'dayPL',     label: 'P&L Today',     align: 'right', sortable: true },
+  { key: 'divYield',  label: 'Div / Yield',   align: 'right', sortable: true },
+  { key: 'exDiv',     label: 'Ex-Div Date',   align: 'right', sortable: true },
+  { key: 'earnings',  label: 'Next Earnings', align: 'right', sortable: true },
+  { key: 'perfYTD',   label: 'YTD Perf',      align: 'right', sortable: true },
+  { key: 'perf6M',    label: '6M Perf',       align: 'right', sortable: true },
+  { key: 'perf1Y',    label: '1Y Perf',       align: 'right', sortable: true },
+  { key: 'totalPL',   label: 'Total P&L',     align: 'right', sortable: true },
+  { key: 'totalPLPct',label: 'P&L %',         align: 'right', sortable: true },
+  { key: 'prevClose', label: 'Prev Close',    align: 'right', sortable: true },
+  { key: 'open',      label: 'Open',          align: 'right', sortable: true },
+  { key: 'bid',       label: 'Bid',           align: 'right', sortable: true },
+  { key: 'ask',       label: 'Ask',           align: 'right', sortable: true },
+  { key: 'dayRange',  label: 'Day Range',     align: 'right', sortable: false },
+  { key: 'wk52Range', label: '52-Wk Range',   align: 'right', sortable: false },
+  { key: 'volume',    label: 'Volume',        align: 'right', sortable: true },
+  { key: 'avgVol',    label: 'Avg Vol 10D',   align: 'right', sortable: true },
+  { key: 'mktCap',    label: 'Mkt Cap',       align: 'right', sortable: true },
+  { key: 'pe',        label: 'P/E',           align: 'right', sortable: true },
+  { key: 'eps',       label: 'EPS',           align: 'right', sortable: true },
+  { key: 'beta',      label: 'Beta',          align: 'right', sortable: true },
+  { key: 'notes',     label: 'Notes',         align: 'left',  sortable: false },
+  { key: 'delete',    label: '',              align: 'right', sortable: false },
+];
+
+// ==================== STATE ====================
+let portfolio = JSON.parse(localStorage.getItem('stonks_portfolio') || '[]');
+let notes = JSON.parse(localStorage.getItem('stonks_notes') || '{}');
+let quoteData = {};
+let errorSymbols = new Set(); // track symbols that failed to resolve
+let prevPrices = {};
+let sortCol = null;
+let sortAsc = true;
+let refreshTimer = null;
+let finnhubWs = null; // FinnHub WebSocket connection
+let wsSubscribedSymbols = new Set(); // symbols currently subscribed via WebSocket
+let wsConnected = false;
+let wsReconnectTimer = null;
+let wsLastTradeTime = {}; // track last trade time per symbol for freshness
+let wsRenderPending = false; // debounce WebSocket-triggered renders
+let fetchedSummary = new Set(); // track symbols we already fetched quoteSummary for
+let fetchedAfterHours = new Set(); // track symbols we already tried after-hours fetch for
+let fetchedFundamentals = new Set(); // track symbols with cached FinnHub fundamentals
+let fundamentalsCache = {}; // cache profile, metrics, earnings, dividends from FinnHub
+let alpacaWorkingFeed = null; // cache which Alpaca feed works ('', 'iex', or null=unknown)
+
+// ==================== UNDO / REDO ====================
+const undoStack = [];
+const redoStack = [];
+const MAX_UNDO = 50;
+function pushUndo() {
+  undoStack.push({
+    portfolio: JSON.parse(JSON.stringify(portfolio)),
+    notes: JSON.parse(JSON.stringify(notes)),
+  });
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  redoStack.length = 0; // new action clears redo history
+}
+function undo() {
+  if (undoStack.length === 0) return;
+  redoStack.push({
+    portfolio: JSON.parse(JSON.stringify(portfolio)),
+    notes: JSON.parse(JSON.stringify(notes)),
+  });
+  const state = undoStack.pop();
+  portfolio = state.portfolio;
+  notes = state.notes;
+  savePortfolio();
+  saveNotes();
+  renderTable();
+  updateSummary();
+  syncWsSubscriptions();
+}
+function redo() {
+  if (redoStack.length === 0) return;
+  undoStack.push({
+    portfolio: JSON.parse(JSON.stringify(portfolio)),
+    notes: JSON.parse(JSON.stringify(notes)),
+  });
+  const state = redoStack.pop();
+  portfolio = state.portfolio;
+  notes = state.notes;
+  savePortfolio();
+  saveNotes();
+  renderTable();
+  updateSummary();
+  syncWsSubscriptions();
+}
+document.addEventListener('keydown', e => {
+  const tag = document.activeElement && document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && k === 'z' && !e.shiftKey) {
+    e.preventDefault();
+    undo();
+  } else if ((e.ctrlKey || e.metaKey) && (k === 'y' || (k === 'z' && e.shiftKey))) {
+    e.preventDefault();
+    redo();
+  }
+});
+
+// ==================== PERSISTENCE ====================
+function savePortfolio() { localStorage.setItem('stonks_portfolio', JSON.stringify(portfolio)); }
+function saveNotes() { localStorage.setItem('stonks_notes', JSON.stringify(notes)); }
+function flashConfirm(id) {
+  const el = document.getElementById(id);
+  el.classList.add('show');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+function saveApiKey() {
+  const key = document.getElementById('finnhub-key').value.trim();
+  if (key) localStorage.setItem('stonks_finnhub_key', key);
+  else localStorage.removeItem('stonks_finnhub_key');
+  document.getElementById('welcome-wrap').classList.remove('show');
+  flashConfirm('confirm-finnhub');
+  // Reconnect WebSocket with new key
+  if (finnhubWs) { try { finnhubWs.close(); } catch(_){} finnhubWs = null; }
+  wsSubscribedSymbols.clear();
+  refreshAll().then(() => connectFinnhubWebSocket());
+}
+function getApiKey() { return localStorage.getItem('stonks_finnhub_key') || ''; }
+
+function saveAlpacaKeys() {
+  const keyId = document.getElementById('alpaca-key-id').value.trim();
+  const secret = document.getElementById('alpaca-secret').value.trim();
+  if (keyId) localStorage.setItem('stonks_alpaca_key_id', keyId);
+  else localStorage.removeItem('stonks_alpaca_key_id');
+  if (secret) localStorage.setItem('stonks_alpaca_secret', secret);
+  else localStorage.removeItem('stonks_alpaca_secret');
+  document.getElementById('welcome-wrap').classList.remove('show');
+  flashConfirm('confirm-alpaca');
+  refreshAll();
+}
+function getAlpacaKeys() {
+  return { keyId: localStorage.getItem('stonks_alpaca_key_id') || '', secret: localStorage.getItem('stonks_alpaca_secret') || '' };
+}
+function saveFmpKey() {
+  const key = document.getElementById('fmp-key').value.trim();
+  if (key) localStorage.setItem('stonks_fmp_key', key);
+  else localStorage.removeItem('stonks_fmp_key');
+  document.getElementById('welcome-wrap').classList.remove('show');
+  flashConfirm('confirm-fmp');
+  refreshAll();
+}
+function getFmpKey() { return localStorage.getItem('stonks_fmp_key') || ''; }
+
+// ==================== CRYPTO SYMBOL MAPPING ====================
+// Maps common crypto shorthand to Yahoo Finance format (XXX-USD)
+const CRYPTO_MAP = {
+  'BTC': 'BTC-USD', 'ETH': 'ETH-USD', 'SOL': 'SOL-USD', 'DOGE': 'DOGE-USD',
+  'XRP': 'XRP-USD', 'ADA': 'ADA-USD', 'DOT': 'DOT-USD', 'AVAX': 'AVAX-USD',
+  'MATIC': 'MATIC-USD', 'LINK': 'LINK-USD', 'LTC': 'LTC-USD', 'UNI': 'UNI-USD',
+  'SHIB': 'SHIB-USD', 'ATOM': 'ATOM-USD', 'XLM': 'XLM-USD',
+};
+// Commodity shorthand -> Yahoo Finance futures symbol
+const COMMODITY_MAP = {
+  'GOLD': 'GC=F', 'SILVER': 'SI=F', 'PLATINUM': 'PL=F', 'PALLADIUM': 'PA=F',
+  'OIL': 'CL=F', 'CRUDE': 'CL=F', 'BRENT': 'BZ=F',
+  'NATGAS': 'NG=F', 'NATURALGAS': 'NG=F',
+  'COPPER': 'HG=F', 'CORN': 'ZC=F', 'WHEAT': 'ZW=F', 'SOYBEANS': 'ZS=F',
+  'SUGAR': 'SB=F', 'COFFEE': 'KC=F', 'COTTON': 'CT=F',
+};
+// Also accept the Yahoo symbol directly
+const COMMODITY_SYMBOLS = new Set(Object.values(COMMODITY_MAP));
+const CRYPTO_VALUES = new Set(Object.values(CRYPTO_MAP));
+function isCryptoSymbol(sym) { return sym.endsWith('-USD') || CRYPTO_VALUES.has(sym); }
+function isCommoditySymbol(sym) { return COMMODITY_SYMBOLS.has(sym); }
+
+// ==================== POSITION MANAGEMENT ====================
+function stepToolbar(id, delta) {
+  const input = document.getElementById(id);
+  const cur = parseFloat(input.value) || 0;
+  input.value = +(cur + delta).toFixed(4);
+}
+function stepInput(btn, delta, symbol, field) {
+  const input = btn.closest('.num-wrap').querySelector('input');
+  const cur = parseFloat(input.value) || 0;
+  const val = +(cur + delta).toFixed(4);
+  input.value = val;
+  if (field === 'shares') updateShares(symbol, val);
+  else updateCost(symbol, val);
+}
+function addPosition() {
+  pushUndo();
+  const tickerEl = document.getElementById('ticker-input');
+  const sharesEl = document.getElementById('shares-input');
+  const costEl = document.getElementById('cost-input');
+  const dateEl = document.getElementById('date-input');
+  let symbol = tickerEl.value.trim().toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+  // Auto-map crypto shorthand (BTC -> BTC-USD)
+  if (CRYPTO_MAP[symbol]) symbol = CRYPTO_MAP[symbol];
+  // Auto-map commodity shorthand (GOLD -> GC=F)
+  if (COMMODITY_MAP[symbol]) symbol = COMMODITY_MAP[symbol];
+  const shares = parseFloat(sharesEl.value) || 0;
+  const costBasis = parseFloat(costEl.value) || 0;
+  const purchaseDate = dateEl.value || '';
+  if (!symbol) return;
+  if (shares === 0) { alert('Enter a valid number of shares (negative for short).'); return; }
+
+  const existing = portfolio.find(p => p.symbol === symbol);
+  if (existing) {
+    const totalShares = existing.shares + shares;
+    if (totalShares !== 0) {
+      existing.costBasis = ((existing.costBasis * existing.shares) + (costBasis * shares)) / totalShares;
+    }
+    existing.shares = totalShares;
+    if (purchaseDate && !existing.purchaseDate) existing.purchaseDate = purchaseDate;
+  } else {
+    portfolio.push({ symbol, shares, costBasis, purchaseDate });
+  }
+  errorSymbols.delete(symbol);
+  fetchedSummary.delete(symbol);
+  fetchedFundamentals.delete(symbol);
+  fetchedPerformance.delete(symbol);
+  fetchedAfterHours.delete(symbol);
+  delete fundamentalsCache[symbol];
+  savePortfolio();
+  renderTable();
+  updateSummary();
+  tickerEl.value = ''; sharesEl.value = ''; costEl.value = ''; dateEl.value = '';
+  tickerEl.focus();
+  setStatus('Fetching data for ' + symbol + '...', 'loading');
+  // If a refresh is already in progress (e.g. page just loaded), queue another
+  // one so the new symbol gets fetched right after
+  if (refreshInProgress) {
+    pendingRefreshAfter = true;
+  }
+  refreshAll().then(() => syncWsSubscriptions());
+}
+
+function removePosition(symbol) {
+  pushUndo();
+  portfolio = portfolio.filter(p => p.symbol !== symbol);
+  delete quoteData[symbol];
+  delete fundamentalsCache[symbol];
+  delete prevPrices[symbol];
+  delete wsLastTradeTime[symbol];
+  errorSymbols.delete(symbol);
+  fetchedSummary.delete(symbol);
+  fetchedFundamentals.delete(symbol);
+  fetchedPerformance.delete(symbol);
+  fetchedAfterHours.delete(symbol);
+  savePortfolio();
+  renderTable();
+  updateSummary();
+  syncWsSubscriptions();
+}
+
+function clearAll() {
+  if (!confirm('Clear all positions?')) return;
+  pushUndo();
+  portfolio = []; quoteData = {}; fundamentalsCache = {};
+  prevPrices = {}; wsLastTradeTime = {};
+  errorSymbols.clear();
+  fetchedSummary.clear();
+  fetchedFundamentals.clear();
+  fetchedPerformance.clear();
+  fetchedAfterHours.clear();
+  savePortfolio();
+  renderTable();
+  updateSummary();
+  syncWsSubscriptions();
+}
+
+function updateShares(symbol, val) {
+  const p = portfolio.find(p => p.symbol === symbol);
+  if (p) { pushUndo(); p.shares = parseFloat(val) || 0; savePortfolio(); renderTable(); updateSummary(); }
+}
+function updateCost(symbol, val) {
+  const p = portfolio.find(p => p.symbol === symbol);
+  if (p) { pushUndo(); p.costBasis = parseFloat(val) || 0; savePortfolio(); renderTable(); updateSummary(); }
+}
+function updateDate(symbol, val) {
+  const p = portfolio.find(p => p.symbol === symbol);
+  if (p) { pushUndo(); p.purchaseDate = val || ''; savePortfolio(); renderTable(); }
+}
+function updateNotes(symbol, val) {
+  pushUndo();
+  notes[symbol] = val;
+  saveNotes();
+}
+function toggleSettings() {
+  const wrap = document.getElementById('settings-wrap');
+  wrap.classList.toggle('show');
+  if (wrap.classList.contains('show')) {
+    document.getElementById('finnhub-key').value = getApiKey();
+    const alpaca = getAlpacaKeys();
+    document.getElementById('alpaca-key-id').value = alpaca.keyId;
+    document.getElementById('alpaca-secret').value = alpaca.secret;
+    document.getElementById('fmp-key').value = getFmpKey();
+  }
+}
+
+// ==================== IMPORT ====================
+let pendingImport = [];
+
+function openImportModal() {
+  document.getElementById('import-overlay').classList.add('show');
+  document.getElementById('import-text').value = '';
+  document.getElementById('import-preview').innerHTML = '';
+  document.getElementById('import-file').value = '';
+  pendingImport = [];
+}
+function closeImportModal() {
+  document.getElementById('import-overlay').classList.remove('show');
+  pendingImport = [];
+}
+
+// Drag-and-drop support
+const dropzone = document.getElementById('import-dropzone');
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) handleImportFile(e.dataTransfer.files[0]);
+});
+
+function handleImportFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('import-text').value = e.target.result;
+    previewImport();
+  };
+  reader.readAsText(file);
+}
+
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"' && line[i + 1] === '"') { current += '"'; i++; }
+      else if (ch === '"') inQuotes = false;
+      else current += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',' || ch === '\t') { result.push(current.trim()); current = ''; }
+      else current += ch;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function parseNumber(val) {
+  if (typeof val !== 'string') return NaN;
+  return parseFloat(val.replace(/[$,%]/g, '').replace(/\((.+)\)/, '-$1'));
+}
+
+// Column name mappings for auto-detection
+// Each entry is an exact match or prefix — longer/more-specific entries come first
+
+function detectColumns(headers) {
+  // Normalize: lowercase, collapse all whitespace types (incl. non-breaking space) to single space, strip non-alphanum
+  const lower = headers.map(h => h.toLowerCase().replace(/[\u00a0\u2000-\u200b\u202f\u205f\u3000]/g, ' ')
+    .replace(/[^a-z0-9 /]/g, '').replace(/\s+/g, ' ').trim());
+  let symIdx = -1, sharesIdx = -1, costIdx = -1, totalCostIdx = -1, dateIdx = -1, typeIdx = -1, priceIdx = -1;
+  const assigned = new Set(); // prevent two detectors from claiming the same column
+
+  function tryMatch(names) {
+    // Pass 1: exact match
+    for (let i = 0; i < lower.length; i++) {
+      if (assigned.has(i)) continue;
+      if (names.some(n => lower[i] === n)) return i;
+    }
+    // Pass 2: header starts with name (prefix match)
+    for (let i = 0; i < lower.length; i++) {
+      if (assigned.has(i)) continue;
+      const h = lower[i];
+      if (names.some(n => h.startsWith(n + ' ') || h.startsWith(n + '/'))) return i;
+    }
+    // Pass 3: header contains name as a substring (fallback for odd formatting)
+    for (let i = 0; i < lower.length; i++) {
+      if (assigned.has(i)) continue;
+      const h = lower[i];
+      if (names.some(n => n.length >= 3 && h.includes(n))) return i;
+    }
+    return -1;
+  }
+
+  function claim(idx) { if (idx >= 0) assigned.add(idx); return idx; }
+
+  // 1. Symbol (unambiguous, match first)
+  symIdx = claim(tryMatch(['symbol', 'ticker', 'sym', 'stock', 'instrument', 'security', 'code']));
+
+  // 2. Shares/quantity
+  sharesIdx = claim(tryMatch(['shares', 'quantity', 'qty', 'units', 'current qty', 'current quantity', 'total qty', 'filled qty']));
+
+  // 3. Per-share cost (specific names that unambiguously mean per-share)
+  costIdx = claim(tryMatch([
+    'cost basis per share', 'cost/share', 'cost per share',
+    'average cost', 'avg cost', 'avg price', 'average price',
+    'price paid', 'unit cost', 'purchase price', 'cost per'
+  ]));
+
+  // 4. Total cost basis
+  totalCostIdx = claim(tryMatch([
+    'total cost basis', 'cost basis total', 'total cost', 'book value',
+    'cost basis', 'costbasis', 'current value'
+  ]));
+
+  // 5. Last/current price — must NOT match "Price Paid" (already claimed above)
+  priceIdx = claim(tryMatch(['last price', 'current price', 'market price', 'close', 'last', 'price']));
+
+  // 6. Date
+  dateIdx = claim(tryMatch([
+    'purchase date', 'date purchased', 'date acquired', 'acquired date', 'trade date',
+    'open date', 'buy date', 'transaction date', 'execution date',
+    'settlement date', 'placed time', 'filled time', 'process date', 'date'
+  ]));
+
+  // 7. Type/side
+  typeIdx = claim(tryMatch(['side', 'action', 'transaction type', 'order type', 'position type', 'transaction description', 'type']));
+
+  // Fallback: if neither per-share nor total cost was found, try bare "cost"
+  if (costIdx < 0 && totalCostIdx < 0) {
+    costIdx = claim(tryMatch(['cost']));
+  }
+
+  return { symIdx, sharesIdx, costIdx, totalCostIdx, dateIdx, typeIdx, priceIdx };
+}
+
+function parseDate(val) {
+  if (!val || typeof val !== 'string') return '';
+  val = val.trim();
+  // ISO format: 2024-01-15
+  if (/^\d{4}-\d{2}-\d{2}/.test(val)) return val.slice(0, 10);
+  // US format: 01/15/2024 or 1/15/2024
+  const us = val.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (us) return `${us[3]}-${us[1].padStart(2,'0')}-${us[2].padStart(2,'0')}`;
+  // Try native parse as fallback
+  const d = new Date(val);
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return '';
+}
+
+function parseImportData(text) {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  if (lines.length === 0) return [];
+
+  // Scan first several lines for the header row (some brokers have metadata rows before headers)
+  let symIdx = -1, sharesIdx = -1, costIdx = -1, totalCostIdx = -1, dateIdx = -1, typeIdx = -1, priceIdx = -1;
+  let startLine = 0;
+  let headerFound = false;
+  let _debugHeader = null; // for preview diagnostics
+
+  for (let h = 0; h < Math.min(lines.length, 20); h++) {
+    const row = parseCSVLine(lines[h]);
+    const detected = detectColumns(row);
+    if (detected.symIdx >= 0 && detected.sharesIdx >= 0) {
+      ({ symIdx, sharesIdx, costIdx, totalCostIdx, dateIdx, typeIdx, priceIdx } = detected);
+      startLine = h + 1;
+      headerFound = true;
+      _debugHeader = { line: h, raw: lines[h], cols: row, symIdx, sharesIdx, costIdx, totalCostIdx, dateIdx, typeIdx, priceIdx };
+      break;
+    }
+  }
+
+  if (!headerFound) {
+    // No headers found — assume simple format: Symbol, Shares, Cost, Date
+    const firstRow = parseCSVLine(lines[0]);
+    symIdx = 0; sharesIdx = 1; costIdx = 2; dateIdx = firstRow.length >= 4 ? 3 : -1;
+    // Check if first row looks like data (second field is a number)
+    if (firstRow.length >= 2 && !isNaN(parseNumber(firstRow[1]))) {
+      startLine = 0;
+    } else {
+      startLine = 1; // skip unknown header
+    }
+  }
+
+  const positions = [];
+  for (let i = startLine; i < lines.length; i++) {
+    const line = lines[i];
+    // Skip footer/disclaimer rows (Fidelity, Schwab, Vanguard append these)
+    if (/^(disclaimer|the data|brokerage|end of|total|cash|account total)/i.test(line)) continue;
+    // Skip lines that look like section separators or empty-ish
+    if (/^[-=,\s]+$/.test(line)) continue;
+    const cols = parseCSVLine(line);
+    if (cols.length <= Math.max(symIdx, sharesIdx)) continue;
+
+    let symbol = (cols[symIdx] || '').toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+    if (!symbol || symbol.length > 10) continue;
+    // Skip rows where the symbol looks like a word/sentence (footer text that slipped through)
+    if (/^[A-Z]{11,}$/.test(symbol)) continue;
+
+    let shares = parseNumber(cols[sharesIdx]);
+    if (isNaN(shares) || shares === 0) continue;
+
+    // Detect short positions from type/side column
+    if (typeIdx >= 0 && cols[typeIdx]) {
+      const type = cols[typeIdx].toLowerCase().trim();
+      if ((type === 'short' || type === 'sell' || type === 'sell short') && shares > 0) {
+        shares = -shares;
+      }
+    }
+
+    let costBasis = 0;
+    if (costIdx >= 0 && cols[costIdx]) {
+      // Per-share cost column found (e.g., "Price Paid", "Avg Cost", "Cost Per Share")
+      costBasis = parseNumber(cols[costIdx]);
+    } else if (totalCostIdx >= 0 && cols[totalCostIdx]) {
+      // Only total cost basis available — derive per-share cost
+      const total = parseNumber(cols[totalCostIdx]);
+      if (!isNaN(total) && shares !== 0) costBasis = Math.abs(total / shares);
+    }
+    if (isNaN(costBasis)) costBasis = 0;
+
+    // Capture last/current price from CSV (useful when APIs are unavailable)
+    let lastPrice = null;
+    if (priceIdx >= 0 && cols[priceIdx]) {
+      const p = parseNumber(cols[priceIdx]);
+      if (!isNaN(p) && p > 0) lastPrice = p;
+    }
+
+    let purchaseDate = '';
+    if (dateIdx >= 0 && cols[dateIdx]) {
+      purchaseDate = parseDate(cols[dateIdx]);
+    }
+
+    // Map crypto/commodity shorthand
+    if (CRYPTO_MAP[symbol]) symbol = CRYPTO_MAP[symbol];
+    if (COMMODITY_MAP[symbol]) symbol = COMMODITY_MAP[symbol];
+
+    positions.push({ symbol, shares, costBasis, purchaseDate, lastPrice });
+  }
+  positions._debug = _debugHeader;
+  return positions;
+}
+
+function previewImport() {
+  const text = document.getElementById('import-text').value.trim();
+  const previewEl = document.getElementById('import-preview');
+  if (!text) { previewEl.innerHTML = '<em>No data to preview.</em>'; return; }
+
+  pendingImport = parseImportData(text);
+  if (pendingImport.length === 0) {
+    previewEl.innerHTML = '<em>Could not parse any positions. Check format.</em>';
+    return;
+  }
+
+  const hasPrice = pendingImport.some(p => p.lastPrice != null);
+  const hasDate = pendingImport.some(p => p.purchaseDate);
+  let html = '<table><thead><tr><th style="text-align:left">Symbol</th><th style="text-align:right">Shares</th><th style="text-align:right">Cost Basis</th>';
+  if (hasPrice) html += '<th style="text-align:right">Last Price</th>';
+  if (hasDate) html += '<th style="text-align:right">Date</th>';
+  html += '</tr></thead><tbody>';
+  for (const p of pendingImport) {
+    const shortTag = p.shares < 0 ? ' <span style="color:#e55;font-size:10px;">SHORT</span>' : '';
+    html += `<tr><td style="text-align:left">${p.symbol}${shortTag}</td><td style="text-align:right">${p.shares}</td><td style="text-align:right">${p.costBasis ? '$' + p.costBasis.toFixed(2) : '—'}</td>`;
+    if (hasPrice) html += `<td style="text-align:right">${p.lastPrice ? '$' + p.lastPrice.toFixed(2) : '—'}</td>`;
+    if (hasDate) html += `<td style="text-align:right">${p.purchaseDate || '—'}</td>`;
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  html += `<div style="margin-top:6px;color:#3c8;">${pendingImport.length} position(s) ready to import</div>`;
+  // Debug info: show detected column mappings
+  if (pendingImport._debug) {
+    const d = pendingImport._debug;
+    const colName = (idx) => idx >= 0 ? `${idx} ("${d.cols[idx]}")` : 'not found';
+    html += `<details open style="margin-top:8px;color:#888;font-size:11px;"><summary style="cursor:pointer;color:#666;">Column mapping</summary>`
+      + `<div style="margin-top:4px;line-height:1.6;">Header found on line ${d.line + 1}: <code>${d.raw.substring(0, 120)}</code><br>`
+      + `Symbol → col ${colName(d.symIdx)}<br>`
+      + `Shares → col ${colName(d.sharesIdx)}<br>`
+      + `Per-share cost → col ${colName(d.costIdx)}<br>`
+      + `Total cost → col ${colName(d.totalCostIdx)}<br>`
+      + `Date → col ${colName(d.dateIdx)}<br>`
+      + `Last Price → col ${colName(d.priceIdx)}<br>`
+      + `Type/Side → col ${colName(d.typeIdx)}</div></details>`;
+  }
+  previewEl.innerHTML = html;
+}
+
+function executeImport() {
+  if (pendingImport.length === 0) { previewImport(); }
+  if (pendingImport.length === 0) return;
+  pushUndo();
+
+  for (const pos of pendingImport) {
+    const existing = portfolio.find(p => p.symbol === pos.symbol);
+    if (existing) {
+      const totalShares = existing.shares + pos.shares;
+      if (totalShares !== 0) {
+        existing.costBasis = ((existing.costBasis * existing.shares) + (pos.costBasis * pos.shares)) / totalShares;
+      }
+      existing.shares = totalShares;
+      if (pos.purchaseDate && !existing.purchaseDate) existing.purchaseDate = pos.purchaseDate;
+    } else {
+      portfolio.push({ symbol: pos.symbol, shares: pos.shares, costBasis: pos.costBasis, purchaseDate: pos.purchaseDate });
+    }
+    errorSymbols.delete(pos.symbol);
+    fetchedSummary.delete(pos.symbol);
+    fetchedFundamentals.delete(pos.symbol);
+    fetchedPerformance.delete(pos.symbol);
+    fetchedAfterHours.delete(pos.symbol);
+    delete fundamentalsCache[pos.symbol];
+
+    // Seed quoteData with CSV last price as fallback (visible immediately even if APIs are down)
+    if (pos.lastPrice && !quoteData[pos.symbol]) {
+      quoteData[pos.symbol] = {
+        symbol: pos.symbol, name: pos.symbol, price: pos.lastPrice,
+        change: null, changePct: null, prevClose: null, open: null,
+        dayHigh: null, dayLow: null, wk52High: null, wk52Low: null,
+        volume: null, avgVolume: null, marketCap: null,
+        pe: null, eps: null, beta: null,
+        dividend: null, dividendYield: null, exDivDate: null, earningsDate: null,
+        bid: null, ask: null,
+        postMarketPrice: null, postMarketChange: null,
+        preMarketPrice: null, preMarketChange: null, marketState: null,
+        perfYTD: null, perf6M: null, perf1Y: null,
+      };
+    }
+  }
+
+  savePortfolio();
+  closeImportModal();
+  renderTable();
+  updateSummary();
+  setStatus(`Imported ${pendingImport.length} position(s). Fetching live data...`, 'loading');
+  refreshAll().then(() => syncWsSubscriptions());
+}
+
+// ==================== DATA FETCHING ====================
+const PROXIES = [
+  url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+  url => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
+  url => 'https://corsproxy.org/?' + encodeURIComponent(url),
+  url => 'https://corsproxy.io/?' + encodeURIComponent(url),
+  url => 'https://thingproxy.freeboard.io/fetch/' + url,
+  url => 'https://proxy.cors.sh/' + url,
+  url => 'https://crossorigin.me/' + url,
+];
+
+let lastWorkingProxy = 0; // remember which proxy worked last
+async function fetchWithProxy(url, proxyIndex = -1, timeout = 10000) {
+  // Try direct fetch first (works when served from a web server or extensions with relaxed CORS)
+  try {
+    const directResp = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    if (directResp.ok) {
+      const text = await directResp.text();
+      if (text && (text.trimStart()[0] === '{' || text.trimStart()[0] === '[')) return text;
+    }
+  } catch (_) { /* expected to fail from file:// — fall through to proxies */ }
+
+  // Fall through to CORS proxies
+  if (proxyIndex === -1) proxyIndex = lastWorkingProxy;
+  const tried = new Set();
+  async function attempt(idx) {
+    if (tried.has(idx) || tried.size >= PROXIES.length) throw new Error('All proxies failed');
+    tried.add(idx);
+    const proxiedUrl = PROXIES[idx](url);
+    try {
+      const resp = await fetch(proxiedUrl, { signal: AbortSignal.timeout(timeout) });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const text = await resp.text();
+      // Validate response is actual data, not an error page from the proxy
+      if (text && text.trimStart().startsWith('<')) throw new Error('Proxy returned HTML error page');
+      if (text && text.startsWith('Edge:')) throw new Error('Proxy rate limited');
+      // Reject proxy's own JSON error messages (e.g. corsproxy.io paywall)
+      if (text && text.length < 300) {
+        try { const j = JSON.parse(text); if (j.error && !j.chart && !j.quoteResponse) throw new Error('Proxy error: ' + j.error); } catch (pe) { if (pe.message.startsWith('Proxy error')) throw pe; }
+      }
+      lastWorkingProxy = idx;
+      return text;
+    } catch (err) {
+      console.warn(`Proxy ${idx} failed for ${url}:`, err.message);
+      return attempt((idx + 1) % PROXIES.length);
+    }
+  }
+  return attempt(proxyIndex);
+}
+
+// --- Yahoo Finance: Get crumb ---
+let yfCrumb = null;
+let yfCrumbTime = 0;
+const YF_CRUMB_TTL = 30 * 60 * 1000; // crumbs expire ~30 minutes
+async function getYahooCrumb() {
+  if (yfCrumb && Date.now() - yfCrumbTime < YF_CRUMB_TTL) return yfCrumb;
+  yfCrumb = null; // force re-fetch if expired
+  try {
+    const text = await fetchWithProxy('https://query2.finance.yahoo.com/v1/test/getcrumb');
+    if (text && text.length < 50 && !text.includes('<')) {
+      yfCrumb = text.trim();
+      yfCrumbTime = Date.now();
+      return yfCrumb;
+    }
+  } catch (e) {
+    console.warn('Could not get Yahoo crumb:', e.message);
+  }
+  return null;
+}
+
+// Encode symbol for query string parameters — handles futures (GC=F → GC%3DF)
+// Only use for ?key=value query params. For URL path segments, use yfPath() instead.
+function yfEnc(sym) { return encodeURIComponent(sym); }
+// Encode symbol for URL path segments — = is valid in paths so only encode truly unsafe chars
+function yfPath(sym) { return sym.replace(/ /g, '%20'); }
+
+// --- Yahoo v7 batch quote ---
+let yahooV7Failed = false;       // skip v7 if it failed this refresh cycle
+let yahooV7FailedTime = 0;       // timestamp of last failure
+const YF_V7_RETRY_MS = 3 * 60 * 1000; // retry v7 after 3 minutes
+async function fetchYahooQuotes(symbols) {
+  // Reset v7 failure flag after cooldown so transient proxy errors don't
+  // permanently degrade all future refreshes to the slower per-symbol v8 path
+  if (yahooV7Failed && Date.now() - yahooV7FailedTime > YF_V7_RETRY_MS) {
+    yahooV7Failed = false;
+  }
+  let v7Results = {};
+  if (!yahooV7Failed) {
+    const crumb = await getYahooCrumb();
+    let url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + symbols.map(yfEnc).join(',');
+    if (crumb) url += '&crumb=' + encodeURIComponent(crumb);
+    try {
+      const text = await fetchWithProxy(url);
+      const data = JSON.parse(text);
+      if (data.quoteResponse && data.quoteResponse.result && data.quoteResponse.result.length > 0) {
+        for (const q of data.quoteResponse.result) {
+          const norm = normalizeYahoo(q);
+          v7Results[q.symbol] = norm;
+          // Mark AH as fetched if v7 already has after-hours data
+          if (norm.postMarketPrice != null || norm.preMarketPrice != null || norm.marketState != null) {
+            fetchedAfterHours.add(q.symbol);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Yahoo v7 quote failed:', e.message);
+      yahooV7Failed = true;
+      yahooV7FailedTime = Date.now();
+    }
+  }
+
+  // v8 chart calls for any symbols v7 missed (e.g. futures like GC=F whose = breaks v7 query parsing)
+  // Process sequentially to avoid proxy rate limits from concurrent requests
+  const missing = symbols.filter(s => !v7Results[s]);
+  for (let mi = 0; mi < missing.length; mi++) {
+    if (mi > 0) await new Promise(r => setTimeout(r, 3000));
+    const sym = missing[mi];
+    try {
+      const text = await fetchWithProxy('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true');
+      const data = JSON.parse(text);
+      if (data.chart && data.chart.result && data.chart.result[0]) {
+        const chart = normalizeYahooChart(sym, data.chart.result[0]);
+        v7Results[sym] = chart;
+        // If v8 already has after-hours data, mark it so the later AH pass skips this symbol
+        if (chart && (chart.postMarketPrice != null || chart.preMarketPrice != null || chart.marketState != null)) {
+          fetchedAfterHours.add(sym);
+        }
+      }
+    } catch (e) {
+      console.warn('v8 chart failed for', sym, e.message);
+    }
+  }
+
+  if (Object.keys(v7Results).length > 0) {
+    const hasV7 = symbols.some(s => v7Results[s] && !missing.includes(s));
+    return { source: hasV7 ? 'Yahoo Finance (v7)' : 'Yahoo Finance', data: v7Results };
+  }
+  return null;
+}
+
+// --- Yahoo quoteSummary per symbol (gets fundamentals) ---
+async function fetchYahooSummary(sym) {
+  const modules = 'price,summaryDetail,defaultKeyStatistics,calendarEvents';
+  const crumb = await getYahooCrumb();
+
+  // Try multiple Yahoo URL variants (with and without crumb, both domains)
+  const base1 = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/' + yfPath(sym) + '?modules=' + modules;
+  const base2 = 'https://query2.finance.yahoo.com/v10/finance/quoteSummary/' + yfPath(sym) + '?modules=' + modules;
+  const urls = [base1, base2];
+  if (crumb) {
+    // Also try with crumb appended
+    urls.push(base1 + '&crumb=' + encodeURIComponent(crumb));
+    urls.push(base2 + '&crumb=' + encodeURIComponent(crumb));
+  }
+
+  const getVal = (obj) => {
+    if (!obj) return null;
+    if (typeof obj === 'number') return obj;
+    if (obj.raw != null) return obj.raw;
+    if (obj.fmt != null) return parseFloat(obj.fmt.replace(/,/g, ''));
+    return null;
+  };
+  const getFmt = (obj) => {
+    if (!obj) return null;
+    if (obj.fmt) return obj.fmt;
+    return null;
+  };
+
+  // Try URL variants sequentially — firing them in parallel hammers all proxies simultaneously.
+  // fetchWithProxy already rotates through all 7 proxies internally, so one call is sufficient.
+  function parseResult(text) {
+    const data = JSON.parse(text);
+    const r = data.quoteSummary && data.quoteSummary.result && data.quoteSummary.result[0];
+    if (!r) return null;
+    const price = r.price || {};
+    const sd = r.summaryDetail || {};
+    const ks = r.defaultKeyStatistics || {};
+    const cal = r.calendarEvents || {};
+    return {
+      pe: getVal(sd.trailingPE) || getVal(ks.trailingPE),
+      eps: getVal(ks.trailingEps),
+      beta: getVal(ks.beta) || getVal(sd.beta),
+      dividend: getVal(sd.dividendRate),
+      dividendYield: getVal(sd.dividendYield) != null ? getVal(sd.dividendYield) * 100 : null,
+      exDivDate: getFmt(cal.exDividendDate) || getFmt(ks.lastDividendDate),
+      earningsDate: cal.earnings && cal.earnings.earningsDate && cal.earnings.earningsDate[0]
+        ? getFmt(cal.earnings.earningsDate[0]) || new Date(getVal(cal.earnings.earningsDate[0]) * 1000).toLocaleDateString()
+        : null,
+      bid: getVal(sd.bid),
+      ask: getVal(sd.ask),
+      avgVolume: getVal(sd.averageDailyVolume10Day) || getVal(sd.averageVolume10days),
+      marketCap: getVal(price.marketCap) || getVal(sd.marketCap),
+      open: getVal(price.regularMarketOpen),
+      postMarketPrice: getVal(price.postMarketPrice),
+      postMarketChange: getVal(price.postMarketChange),
+      preMarketPrice: getVal(price.preMarketPrice),
+      preMarketChange: getVal(price.preMarketChange),
+      marketState: price.marketState,
+    };
+  }
+
+  for (const url of urls) {
+    try {
+      const text = await fetchWithProxy(url, -1, 8000);
+      const result = parseResult(text);
+      if (result) return result;
+    } catch (e) { /* try next URL variant */ }
+  }
+  console.warn('quoteSummary failed for', sym, '— all URL variants exhausted');
+  return null;
+}
+
+function normalizeYahoo(q) {
+  return {
+    symbol: q.symbol,
+    name: q.shortName || q.longName || '',
+    price: q.regularMarketPrice,
+    change: q.regularMarketChange,
+    changePct: q.regularMarketChangePercent,
+    prevClose: q.regularMarketPreviousClose,
+    open: q.regularMarketOpen,
+    dayHigh: q.regularMarketDayHigh,
+    dayLow: q.regularMarketDayLow,
+    wk52High: q.fiftyTwoWeekHigh,
+    wk52Low: q.fiftyTwoWeekLow,
+    volume: q.regularMarketVolume,
+    avgVolume: q.averageDailyVolume10Day,
+    marketCap: q.marketCap,
+    pe: q.trailingPE,
+    eps: q.epsTrailingTwelveMonths,
+    beta: q.beta || null,
+    dividend: q.trailingAnnualDividendRate,
+    dividendYield: q.trailingAnnualDividendYield != null ? q.trailingAnnualDividendYield * 100 : null,
+    exDivDate: q.dividendDate ? new Date(q.dividendDate * 1000).toLocaleDateString() : null,
+    earningsDate: q.earningsTimestamp ? new Date(q.earningsTimestamp * 1000).toLocaleDateString() :
+                  q.earningsTimestampStart ? new Date(q.earningsTimestampStart * 1000).toLocaleDateString() : null,
+    bid: q.bid,
+    ask: q.ask,
+    postMarketPrice: q.postMarketPrice,
+    postMarketChange: q.postMarketChange,
+    preMarketPrice: q.preMarketPrice,
+    preMarketChange: q.preMarketChange,
+    marketState: q.marketState,
+    perfYTD: null, perf6M: null, perf1Y: null,
+  };
+}
+
+function normalizeYahooChart(sym, chart) {
+  const meta = chart.meta || {};
+  const price = meta.regularMarketPrice;
+  const prevClose = meta.chartPreviousClose || meta.previousClose;
+
+  // Extract after-hours pricing: check meta fields first, then fall back to candle data
+  let postMarketPrice = meta.postMarketPrice ?? null;
+  let postMarketChange = meta.postMarketChange ?? null;
+  let preMarketPrice = meta.preMarketPrice ?? null;
+  let preMarketChange = meta.preMarketChange ?? null;
+  let marketState = null;
+  const ctp = meta.currentTradingPeriod;
+  if (ctp) {
+    const regEnd = ctp.regular && ctp.regular.end;
+    const regStart = ctp.regular && ctp.regular.start;
+    const now = Math.floor(Date.now() / 1000);
+    if (regStart && regEnd && now >= regStart && now <= regEnd) {
+      marketState = 'REGULAR';
+    } else if (regEnd && now > regEnd && now < regEnd + 14400) {
+      // Within 4 hours of market close = after-hours window
+      marketState = 'POST';
+    } else if (regStart && now < regStart && now >= regStart - 19800) {
+      // Within 5.5 hours before market open = pre-market window
+      marketState = 'PRE';
+    } else {
+      marketState = 'CLOSED';
+    }
+  }
+  // Fall back to candle data if meta didn't have after-hours prices
+  if (postMarketPrice == null && preMarketPrice == null &&
+      chart.timestamp && chart.timestamp.length > 0) {
+    const quotes = chart.indicators && chart.indicators.quote && chart.indicators.quote[0];
+    const closes = quotes && quotes.close;
+    if (closes && closes.length > 0) {
+      const lastCandleTs = chart.timestamp[chart.timestamp.length - 1];
+      // Use ctp.regular.end only if it falls within the chart data's time range
+      // At 2 AM, ctp points to the next session — its regEnd is beyond the chart data
+      const ctpRegEnd = ctp && ctp.regular && ctp.regular.end;
+      let regEnd = (ctpRegEnd && ctpRegEnd <= lastCandleTs) ? ctpRegEnd : null;
+      if (!regEnd) {
+        // Estimate regular session end: regular session is ~6.5h (9:30-16:00).
+        // Chart with includePrePost starts at ~4 AM. Find the transition point by
+        // looking for a gap >10min after at least 5 hours of data (skips pre→regular gap)
+        for (let i = chart.timestamp.length - 1; i >= 1; i--) {
+          const gap = chart.timestamp[i] - chart.timestamp[i - 1];
+          if (gap > 600 && chart.timestamp[i - 1] > chart.timestamp[0] + 18000) {
+            regEnd = chart.timestamp[i - 1]; // last regular candle
+            break;
+          }
+        }
+      }
+      if (regEnd) {
+        for (let i = chart.timestamp.length - 1; i >= 0; i--) {
+          if (chart.timestamp[i] > regEnd && closes[i] != null) {
+            postMarketPrice = closes[i];
+            postMarketChange = price ? postMarketPrice - price : null;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    symbol: sym,
+    name: meta.shortName || meta.longName || sym,
+    price,
+    change: price && prevClose ? price - prevClose : null,
+    changePct: price && prevClose ? ((price - prevClose) / prevClose) * 100 : null,
+    prevClose,
+    open: meta.regularMarketOpen || null,
+    dayHigh: meta.regularMarketDayHigh,
+    dayLow: meta.regularMarketDayLow,
+    wk52High: meta.fiftyTwoWeekHigh,
+    wk52Low: meta.fiftyTwoWeekLow,
+    volume: meta.regularMarketVolume,
+    avgVolume: null, marketCap: null, pe: null, eps: null, beta: null,
+    dividend: null, dividendYield: null, exDivDate: null, earningsDate: null,
+    bid: null, ask: null,
+    postMarketPrice, postMarketChange,
+    preMarketPrice, preMarketChange,
+    marketState,
+    perfYTD: null, perf6M: null, perf1Y: null,
+  };
+}
+
+// --- FinnHub API (reliable, free key required) ---
+// Fetches only /quote each refresh (1 call/symbol). Fundamentals (profile, metrics,
+// earnings, dividends) are cached and only fetched once per session per symbol.
+// This keeps usage well under the 60 calls/min free tier limit.
+async function fetchFinnhubQuotes(symbols) {
+  const key = getApiKey();
+  if (!key) return null;
+  const results = {};
+  const now = new Date();
+  // FinnHub stock endpoints don't handle crypto or commodity futures (GC=F etc.)
+  const stockSymbols = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
+
+  // Fetch fundamentals only for new symbols (not yet cached)
+  // Rate-limit: FinnHub free = 60 calls/min. Each symbol needs 4 calls.
+  // Process in batches of 5 symbols (20 calls) with 1.5s delay between batches.
+  const needFundamentals = stockSymbols.filter(s => !fetchedFundamentals.has(s) && !errorSymbols.has(s));
+  if (needFundamentals.length > 0) {
+    const fromDate = new Date(now.getTime() - 7 * 86400000).toISOString().split('T')[0];
+    const toDate = new Date(now.getTime() + 90 * 86400000).toISOString().split('T')[0];
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < needFundamentals.length; i += BATCH_SIZE) {
+      if (i > 0) await new Promise(r => setTimeout(r, 1500)); // rate limit pause
+      const batch = needFundamentals.slice(i, i + BATCH_SIZE);
+      // process batch
+      const fundPromises = batch.map(async sym => {
+        try {
+          const [profileResp, metricsResp, earningsResp, dividendResp] = await Promise.all([
+            fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${key}`),
+            fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${key}`),
+            fetch(`https://finnhub.io/api/v1/calendar/earnings?symbol=${yfEnc(sym)}&from=${fromDate}&to=${toDate}&token=${key}`),
+            fetch(`https://finnhub.io/api/v1/stock/dividend?symbol=${yfEnc(sym)}&from=2024-01-01&to=${toDate}&token=${key}`),
+          ]);
+          if (metricsResp.status === 429 || profileResp.status === 429) {
+            console.warn('FinnHub rate limited for', sym, '- will retry next refresh');
+            return;
+          }
+          const profile = profileResp.ok ? await profileResp.json() : {};
+          const metrics = metricsResp.ok ? await metricsResp.json() : {};
+          const earnings = earningsResp.ok ? await earningsResp.json() : {};
+          const dividends = dividendResp.ok ? await dividendResp.json() : [];
+          const m = metrics.metric || {};
+
+          let earningsDate = null;
+          if (earnings.earningsCalendar && earnings.earningsCalendar.length > 0) {
+            const upcoming = earnings.earningsCalendar.find(e => new Date(e.date) >= now);
+            if (upcoming) earningsDate = upcoming.date;
+          }
+          let exDivDate = null;
+          if (Array.isArray(dividends) && dividends.length > 0) {
+            const sorted = dividends.sort((a, b) => new Date(b.exDate) - new Date(a.exDate));
+            exDivDate = sorted[0].exDate || null;
+          }
+
+          fundamentalsCache[sym] = {
+            name: profile.name || sym,
+            wk52High: m['52WeekHigh'] || null, wk52Low: m['52WeekLow'] || null,
+            avgVolume: m['10DayAverageTradingVolume'] != null ? m['10DayAverageTradingVolume'] * 1e6 : null,
+            marketCap: profile.marketCapitalization ? profile.marketCapitalization * 1e6 : null,
+            pe: m.peBasicExclExtraTTM || m.peTTM || m.peNormalizedAnnual || null,
+            eps: m.epsBasicExclExtraItemsTTM || m.epsNormalizedAnnual || null,
+            beta: m.beta || null,
+            dividend: m.dividendPerShareAnnual || null,
+            dividendYield: m.dividendYieldIndicatedAnnual || null,
+            exDivDate: exDivDate || m.exDividendDate || null,
+            earningsDate,
+            perfYTD: m.yearToDatePriceReturnDaily || null,
+            perf6M: m['6MonthPriceReturnDaily'] || m['26WeekPriceReturnDaily'] || null,
+            perf1Y: m['52WeekPriceReturnDaily'] || null,
+          };
+          fetchedFundamentals.add(sym);
+          // Mark as summary-fetched too so fillFundamentals skips this symbol
+          // (avoids redundant Yahoo quoteSummary + FinnHub metrics calls)
+          if (fundamentalsCache[sym].marketCap != null && fundamentalsCache[sym].pe != null &&
+              fundamentalsCache[sym].beta != null && fundamentalsCache[sym].eps != null) {
+            fetchedSummary.add(sym);
+          }
+        } catch (e) {
+          console.warn('FinnHub fundamentals failed for', sym, e.message);
+        }
+      });
+      await Promise.all(fundPromises);
+    }
+  }
+
+  // Fetch /quote in batches of 10 (10 calls per batch, 1s delay between)
+  // Skip symbols that have fresh WebSocket data (<10s old) — WS already provides real-time prices
+  const WS_FRESH_MS = 10000;
+  const now_ws = Date.now();
+  const quoteSymbols = stockSymbols.filter(s => {
+    const lastWs = wsLastTradeTime[s];
+    return !lastWs || (now_ws - lastWs) >= WS_FRESH_MS;
+  });
+  for (let i = 0; i < quoteSymbols.length; i += 10) {
+    if (i > 0) await new Promise(r => setTimeout(r, 1000));
+    const batch = quoteSymbols.slice(i, i + 10);
+    const quotePromises = batch.map(async sym => {
+      try {
+        const resp = await fetch(`https://finnhub.io/api/v1/quote?symbol=${yfEnc(sym)}&token=${key}`);
+        if (resp.status === 429) { console.warn('FinnHub quote rate limited for', sym); return; }
+        const quote = await resp.json();
+        if (quote.c && quote.c > 0) {
+          const cached = fundamentalsCache[sym] || {};
+          results[sym] = {
+            symbol: sym, name: cached.name || sym,
+            price: quote.c, change: quote.d, changePct: quote.dp,
+            prevClose: quote.pc, open: quote.o, dayHigh: quote.h, dayLow: quote.l,
+            wk52High: cached.wk52High, wk52Low: cached.wk52Low,
+            volume: quote.v || null,
+            avgVolume: cached.avgVolume, marketCap: cached.marketCap,
+            pe: cached.pe, eps: cached.eps, beta: cached.beta,
+            dividend: cached.dividend, dividendYield: cached.dividendYield,
+            exDivDate: cached.exDivDate, earningsDate: cached.earningsDate,
+            bid: null, ask: null,
+            postMarketPrice: null, postMarketChange: null,
+            preMarketPrice: null, preMarketChange: null, marketState: null,
+            perfYTD: cached.perfYTD, perf6M: cached.perf6M, perf1Y: cached.perf1Y,
+          };
+        }
+      } catch (e) {
+        console.warn('FinnHub quote failed for', sym, e.message);
+      }
+    });
+    await Promise.all(quotePromises);
+  }
+  return Object.keys(results).length > 0 ? { source: 'FinnHub', data: results } : null;
+}
+
+// --- Alpaca Markets API (free, 200 req/min, real-time IEX quotes with bid/ask) ---
+async function fetchAlpacaQuotes(symbols) {
+  const { keyId, secret } = getAlpacaKeys();
+  if (!keyId || !secret) return null;
+  // Filter out crypto and commodities - Alpaca stock endpoint doesn't handle them
+  const stockSyms = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
+  if (stockSyms.length === 0) return null;
+  // Use cached feed if known, otherwise try IEX first (free tier), then default (paid SIP)
+  const base = 'https://data.alpaca.markets/v2/stocks/snapshots?symbols=' + stockSyms.join(',');
+  const feedsToTry = alpacaWorkingFeed != null ? [alpacaWorkingFeed] :  ['iex', ''];
+  let data = null;
+  for (const feed of feedsToTry) {
+    const snapUrl = feed ? base + '&feed=' + feed : base;
+    try {
+      const resp = await fetch(snapUrl, {
+        headers: { 'APCA-API-KEY-ID': keyId, 'APCA-API-SECRET-KEY': secret },
+        signal: AbortSignal.timeout(8000)
+      });
+      if (resp.ok) {
+        data = await resp.json();
+        if (Object.keys(data).length > 0) alpacaWorkingFeed = feed;
+        break;
+      }
+      if (resp.status === 401 || resp.status === 403) {
+        console.warn('Alpaca auth failed (' + resp.status + ') for feed:', feed || 'default');
+        continue; // try next feed
+      }
+    } catch (e) { console.warn('Alpaca attempt failed:', e.message); }
+  }
+  if (!data) { console.warn('Alpaca: all endpoints failed'); return null; }
+  try {
+    const results = {};
+    for (const sym of stockSyms) {
+      const snap = data[sym];
+      if (!snap) continue;
+      const trade = snap.latestTrade || snap.trade || {};
+      const quote = snap.latestQuote || snap.quote || {};
+      const bar = snap.dailyBar || snap.bar || {};
+      const prevBar = snap.prevDailyBar || {};
+      const price = trade.p || bar.c;
+      const prevClose = prevBar.c || null;
+      if (!price) continue;
+      results[sym] = {
+        symbol: sym, name: sym,
+        price, change: prevClose ? price - prevClose : null,
+        changePct: prevClose ? ((price - prevClose) / prevClose) * 100 : null,
+        prevClose, open: bar.o || null, dayHigh: bar.h || null, dayLow: bar.l || null,
+        wk52High: null, wk52Low: null,
+        volume: bar.v || null, avgVolume: null, marketCap: null,
+        pe: null, eps: null, beta: null,
+        dividend: null, dividendYield: null, exDivDate: null, earningsDate: null,
+        bid: quote.bp || null, ask: quote.ap || null,
+        postMarketPrice: null, postMarketChange: null,
+        preMarketPrice: null, preMarketChange: null, marketState: null,
+        perfYTD: null, perf6M: null, perf1Y: null,
+      };
+    }
+    if (Object.keys(results).length > 0) {
+      // Alpaca data loaded
+      return { source: 'Alpaca Markets', data: results };
+    }
+  } catch (e) {
+    console.warn('Alpaca fetch failed:', e.message);
+  }
+  return null;
+}
+
+// --- Financial Modeling Prep API (free, 250 req/day, quotes + after-hours) ---
+async function fetchFmpQuotes(symbols) {
+  const key = getFmpKey();
+  if (!key) return null;
+  // FMP stock quote doesn't handle crypto or commodity futures
+  const stockSyms = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
+  if (stockSyms.length === 0) return null;
+  try {
+    const resp = await fetch('https://financialmodelingprep.com/api/v3/quote/' + stockSyms.join(',') + '?apikey=' + key, {
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+    const results = {};
+    for (const q of data) {
+      const sym = q.symbol;
+      results[sym] = {
+        symbol: sym, name: q.name || sym,
+        price: q.price, change: q.change, changePct: q.changesPercentage,
+        prevClose: q.previousClose, open: q.open, dayHigh: q.dayHigh, dayLow: q.dayLow,
+        wk52High: q.yearHigh || null, wk52Low: q.yearLow || null,
+        volume: q.volume || null, avgVolume: q.avgVolume || null,
+        marketCap: q.marketCap || null,
+        pe: q.pe || null, eps: q.eps || null, beta: null,
+        dividend: null, dividendYield: null, exDivDate: null, earningsDate: q.earningsAnnouncement || null,
+        bid: null, ask: null,
+        postMarketPrice: q.afterHoursPrice || null,
+        postMarketChange: q.afterHoursChange || null,
+        preMarketPrice: q.preMarketPrice || null,
+        preMarketChange: q.preMarketChange || null,
+        marketState: null,
+        perfYTD: null, // FMP doesn't provide true YTD — filled by FinnHub or Yahoo later
+        perf6M: null, perf1Y: null,
+      };
+    }
+    if (Object.keys(results).length > 0) {
+      // FMP data loaded
+      return { source: 'Financial Modeling Prep', data: results };
+    }
+  } catch (e) {
+    console.warn('FMP fetch failed:', e.message);
+  }
+  return null;
+}
+
+// --- Yahoo v6 finance quote (alternative endpoint, sometimes works when v7/v8 are blocked) ---
+async function fetchYahooV6Quotes(symbols) {
+  if (symbols.length === 0) return null;
+  try {
+    const url = 'https://query1.finance.yahoo.com/v6/finance/quote?symbols=' + symbols.map(yfEnc).join(',');
+    const text = await fetchWithProxy(url, -1, 10000);
+    const data = JSON.parse(text);
+    const quotes = data.quoteResponse && data.quoteResponse.result;
+    if (quotes && quotes.length > 0) {
+      const results = {};
+      for (const q of quotes) {
+        results[q.symbol] = normalizeYahoo(q);
+      }
+      return { source: 'Yahoo Finance (v6)', data: results };
+    }
+  } catch (e) {
+    console.warn('Yahoo v6 fallback failed:', e.message);
+  }
+  return null;
+}
+
+// --- FinnHub free (no key needed for basic quote, CORS-enabled, 1 call per symbol) ---
+async function fetchFinnhubFreeQuotes(symbols) {
+  const stockSyms = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
+  if (stockSyms.length === 0) return null;
+  const results = {};
+  // FinnHub free tier: process sequentially to avoid hitting the demo token rate limit
+  for (let i = 0; i < stockSyms.length; i++) {
+    if (i > 0) await new Promise(r => setTimeout(r, 200)); // 200ms between calls (~5/s, well under limit)
+    const sym = stockSyms[i];
+    try {
+      const resp = await fetch(`https://finnhub.io/api/v1/quote?symbol=${yfEnc(sym)}&token=demo`, {
+        signal: AbortSignal.timeout(6000)
+      });
+      if (resp.status === 429) break; // rate limited — stop trying remaining symbols
+      if (!resp.ok) continue;
+      const q = await resp.json();
+      if (q.c && q.c > 0) {
+        results[sym] = {
+          symbol: sym, name: sym,
+          price: q.c, change: q.d, changePct: q.dp,
+          prevClose: q.pc, open: q.o, dayHigh: q.h, dayLow: q.l,
+          wk52High: null, wk52Low: null,
+          volume: null, avgVolume: null, marketCap: null,
+          pe: null, eps: null, beta: null,
+          dividend: null, dividendYield: null, exDivDate: null, earningsDate: null,
+          bid: null, ask: null,
+          postMarketPrice: null, postMarketChange: null,
+          preMarketPrice: null, preMarketChange: null, marketState: null,
+          perfYTD: null, perf6M: null, perf1Y: null,
+        };
+      }
+    } catch (e) { /* rate limited or failed, skip */ }
+  }
+  if (Object.keys(results).length > 0) {
+    // FinnHub free data loaded
+    return { source: 'FinnHub (free)', data: results };
+  }
+  return null;
+}
+
+// --- CoinGecko (free, no key, CORS-enabled) for crypto market cap ---
+const COINGECKO_IDS = {
+  'BTC-USD': 'bitcoin', 'ETH-USD': 'ethereum', 'SOL-USD': 'solana', 'DOGE-USD': 'dogecoin',
+  'XRP-USD': 'ripple', 'ADA-USD': 'cardano', 'DOT-USD': 'polkadot', 'AVAX-USD': 'avalanche-2',
+  'MATIC-USD': 'matic-network', 'LINK-USD': 'chainlink', 'LTC-USD': 'litecoin', 'UNI-USD': 'uniswap',
+  'SHIB-USD': 'shiba-inu', 'ATOM-USD': 'cosmos', 'XLM-USD': 'stellar',
+};
+const CRYPTO_NAMES = {
+  'BTC-USD': 'Bitcoin', 'ETH-USD': 'Ethereum', 'SOL-USD': 'Solana', 'DOGE-USD': 'Dogecoin',
+  'XRP-USD': 'XRP', 'ADA-USD': 'Cardano', 'DOT-USD': 'Polkadot', 'AVAX-USD': 'Avalanche',
+  'MATIC-USD': 'Polygon', 'LINK-USD': 'Chainlink', 'LTC-USD': 'Litecoin', 'UNI-USD': 'Uniswap',
+  'SHIB-USD': 'Shiba Inu', 'ATOM-USD': 'Cosmos', 'XLM-USD': 'Stellar',
+};
+let _cgCache = { data: null, time: 0 };
+const CG_MIN_INTERVAL = 30000; // 30s minimum between CoinGecko calls
+async function fetchCryptoQuotes(symbols) {
+  const cryptoSyms = symbols.filter(s => COINGECKO_IDS[s]);
+  if (cryptoSyms.length === 0) return null;
+
+  // Rate-limit: return cached data if last fetch was < 30s ago
+  const now = Date.now();
+  if (_cgCache.data && now - _cgCache.time < CG_MIN_INTERVAL) {
+    return _cgCache.data;
+  }
+
+  const ids = cryptoSyms.map(s => COINGECKO_IDS[s]).join(',');
+  try {
+    // Use /coins/markets for reliable high_24h/low_24h (simple/price doesn't support these on free tier)
+    const resp = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=' + ids +
+      '&order=market_cap_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h', {
+      signal: AbortSignal.timeout(8000)
+    });
+    if (resp.status === 429) {
+      console.warn('CoinGecko rate limited — using cached data');
+      return _cgCache.data;
+    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    // Build id→coin lookup
+    const byCgId = {};
+    for (const coin of data) byCgId[coin.id] = coin;
+    const results = {};
+    for (const sym of cryptoSyms) {
+      const cgId = COINGECKO_IDS[sym];
+      const d = byCgId[cgId];
+      if (!d || d.current_price == null) continue;
+      const price = d.current_price;
+      const changePct = d.price_change_percentage_24h || null;
+      const prevClose = changePct != null ? price / (1 + changePct / 100) : null;
+      const change = prevClose ? price - prevClose : null;
+      results[sym] = {
+        symbol: sym, name: d.name || CRYPTO_NAMES[sym] || sym,
+        price, change, changePct, prevClose,
+        open: null, dayHigh: d.high_24h || null, dayLow: d.low_24h || null,
+        wk52High: null, wk52Low: null, // filled by fetchCryptoSupplemental from 1-year chart
+        volume: d.total_volume || null, avgVolume: null,
+        marketCap: d.market_cap || null,
+        pe: null, eps: null, beta: null,
+        dividend: null, dividendYield: null, exDivDate: null, earningsDate: null,
+        bid: null, ask: null,
+        postMarketPrice: null, postMarketChange: null,
+        preMarketPrice: null, preMarketChange: null, marketState: null,
+        perfYTD: null, perf6M: null, perf1Y: null,
+      };
+    }
+    if (Object.keys(results).length > 0) {
+      const out = { source: 'CoinGecko', data: results };
+      _cgCache = { data: out, time: now };
+      return out;
+    }
+  } catch (e) {
+    console.warn('CoinGecko fetch failed:', e.message);
+    if (_cgCache.data) return _cgCache.data;
+  }
+  return null;
+}
+
+// --- Historical performance via Yahoo v8 chart ---
+async function fetchPerformanceData(symbols) {
+  const now = new Date();
+  const nowUnix = Math.floor(now.getTime() / 1000);
+  const oneYearAgo = nowUnix - 366 * 86400;
+  const yearStart = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0];
+  const sixMAgoDate = new Date(now.getTime() - 183 * 86400000).toISOString().split('T')[0];
+  const oneYAgoDate = new Date(now.getTime() - 366 * 86400000).toISOString().split('T')[0];
+
+  function applyPerf(sym, closes, timestamps) {
+    if (closes.length < 2) return;
+    const currentPrice = closes[closes.length - 1];
+    if (!currentPrice) return;
+    const yearStartUnix = new Date(now.getFullYear(), 0, 1).getTime() / 1000;
+    const sixMAgoUnix = nowUnix - 183 * 86400;
+    let ytdPrice = null, sixMPrice = null, oneYPrice = closes[0];
+    for (let i = 0; i < timestamps.length; i++) {
+      if (ytdPrice == null && timestamps[i] >= yearStartUnix && closes[i]) ytdPrice = closes[i];
+      if (sixMPrice == null && timestamps[i] >= sixMAgoUnix && closes[i]) sixMPrice = closes[i];
+    }
+    if (quoteData[sym]) {
+      if (ytdPrice) quoteData[sym].perfYTD = ((currentPrice - ytdPrice) / ytdPrice) * 100;
+      if (sixMPrice) quoteData[sym].perf6M = ((currentPrice - sixMPrice) / sixMPrice) * 100;
+      if (oneYPrice) quoteData[sym].perf1Y = ((currentPrice - oneYPrice) / oneYPrice) * 100;
+    }
+  }
+
+  // Process sequentially with delays — concurrent proxy calls (N×2 per parallel symbol)
+  // saturate all proxies simultaneously and cause most requests to fail or rate-limit.
+  for (let i = 0; i < symbols.length; i++) {
+    const sym = symbols[i];
+    if (i > 0) await new Promise(r => setTimeout(r, 800)); // let proxy recover between symbols
+
+    // Try Yahoo first (single domain per call — sequential is more proxy-friendly than racing)
+    let gotPerf = false;
+    for (const domain of ['query2', 'query1']) {
+      try {
+        const text = await fetchWithProxy('https://' + domain + '.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) +
+          '?period1=' + oneYearAgo + '&period2=' + nowUnix + '&interval=1d');
+        const data = JSON.parse(text);
+        const result = data.chart && data.chart.result && data.chart.result[0];
+        if (result && result.timestamp && result.timestamp.length > 1) {
+          const closes = (result.indicators && result.indicators.adjclose &&
+            result.indicators.adjclose[0] && result.indicators.adjclose[0].adjclose) ||
+            (result.indicators && result.indicators.quote &&
+            result.indicators.quote[0] && result.indicators.quote[0].close) || [];
+          applyPerf(sym, closes, result.timestamp);
+          gotPerf = true;
+          break;
+        }
+      } catch (e) {
+        console.warn('Yahoo perf failed for', sym, e.message);
+      }
+    }
+    if (gotPerf) continue;
+
+    // Fallback: Alpaca historical bars
+    const { keyId, secret } = getAlpacaKeys();
+    if (keyId && secret && !isCryptoSymbol(sym) && !isCommoditySymbol(sym)) {
+      for (const feed of ['iex', '']) {
+        try {
+          const feedParam = feed ? `&feed=${feed}` : '';
+          const resp = await fetch(
+            `https://data.alpaca.markets/v2/stocks/${sym}/bars?timeframe=1Day&start=${oneYAgoDate}&limit=400${feedParam}`, {
+            headers: { 'APCA-API-KEY-ID': keyId, 'APCA-API-SECRET-KEY': secret },
+            signal: AbortSignal.timeout(8000)
+          });
+          if (resp.status === 401 || resp.status === 403) break;
+          if (!resp.ok) continue;
+          const data = await resp.json();
+          if (data.bars && data.bars.length > 1) {
+            const closes = data.bars.map(b => b.c);
+            const timestamps = data.bars.map(b => new Date(b.t).getTime() / 1000);
+            applyPerf(sym, closes, timestamps);
+          }
+          break;
+        } catch (e) {
+          console.warn('Alpaca perf failed for', sym, e.message);
+        }
+      }
+    }
+  }
+}
+
+// --- CoinGecko supplemental: 52-week range + YTD/6M/1Y performance for crypto ---
+async function fetchCryptoSupplemental(symbols) {
+  const cryptoSyms = symbols.filter(s => COINGECKO_IDS[s] && quoteData[s] &&
+    (quoteData[s].wk52High == null || quoteData[s].perfYTD == null));
+  if (cryptoSyms.length === 0) return;
+
+  for (const sym of cryptoSyms) {
+    const cgId = COINGECKO_IDS[sym];
+    const q = quoteData[sym];
+    if (!q) continue;
+
+    // Fetch 1-year market chart for performance + range data
+    try {
+      const resp = await fetch(
+        `https://api.coingecko.com/api/v3/coins/${cgId}/market_chart?vs_currency=usd&days=365&interval=daily`, {
+        signal: AbortSignal.timeout(8000)
+      });
+      if (resp.status === 429) continue; // rate limited, skip
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      if (data.prices && data.prices.length > 1) {
+        const prices = data.prices; // [[timestamp_ms, price], ...]
+        const currentPrice = q.price || prices[prices.length - 1][1];
+
+        // 52-week high/low from 1-year data
+        let high = -Infinity, low = Infinity;
+        for (const [, p] of prices) {
+          if (p > high) high = p;
+          if (p < low) low = p;
+        }
+        if (q.wk52High == null) q.wk52High = high;
+        if (q.wk52Low == null) q.wk52Low = low;
+
+        // YTD: find first price on or after Jan 1
+        const yearStartMs = new Date(new Date().getFullYear(), 0, 1).getTime();
+        const sixMAgoMs = Date.now() - 183 * 86400000;
+        let ytdPrice = null, sixMPrice = null;
+        const oneYPrice = prices[0][1];
+        for (const [ts, p] of prices) {
+          if (ytdPrice == null && ts >= yearStartMs) ytdPrice = p;
+          if (sixMPrice == null && ts >= sixMAgoMs) sixMPrice = p;
+        }
+        if (q.perfYTD == null && ytdPrice) q.perfYTD = ((currentPrice - ytdPrice) / ytdPrice) * 100;
+        if (q.perf6M == null && sixMPrice) q.perf6M = ((currentPrice - sixMPrice) / sixMPrice) * 100;
+        if (q.perf1Y == null && oneYPrice) q.perf1Y = ((currentPrice - oneYPrice) / oneYPrice) * 100;
+      }
+    } catch (e) {
+      console.warn('CoinGecko supplemental failed for', sym, e.message);
+    }
+    // Small delay between requests to stay under CoinGecko rate limit
+    await new Promise(r => setTimeout(r, 1500));
+  }
+}
+
+// --- Alpaca supplemental data (avg volume from recent bars) ---
+async function fetchAlpacaSupplemental(symbols) {
+  const { keyId, secret } = getAlpacaKeys();
+  if (!keyId || !secret) return;
+  const stockSyms = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s) &&
+    quoteData[s] && quoteData[s].avgVolume == null);
+  if (stockSyms.length === 0) return;
+
+  // Use multi-symbol bars endpoint — use cached feed if known, otherwise try default then IEX
+  const startDate = new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0];
+  let barsMap = null;
+  const feedsToTry = alpacaWorkingFeed != null ? [alpacaWorkingFeed] : ['', 'iex'];
+  for (const feed of feedsToTry) {
+    try {
+      const feedParam = feed ? `&feed=${feed}` : '';
+      const resp = await fetch(
+        `https://data.alpaca.markets/v2/stocks/bars?symbols=${stockSyms.join(',')}&timeframe=1Day&start=${startDate}&limit=10${feedParam}`, {
+        headers: { 'APCA-API-KEY-ID': keyId, 'APCA-API-SECRET-KEY': secret },
+        signal: AbortSignal.timeout(10000)
+      });
+      if (resp.status === 401 || resp.status === 403) {
+        console.warn('Alpaca bars auth failed for feed:', feed || 'default');
+        continue; // try next feed instead of giving up entirely
+      }
+      if (resp.ok) {
+        const data = await resp.json();
+        const map = data.bars || data;
+        const hitCount = Object.keys(map).length;
+        // Cache which feed worked to skip the failing one on future calls
+        if (hitCount > 0) alpacaWorkingFeed = feed;
+        // Use whichever feed returns more symbols
+        if (!barsMap || hitCount > Object.keys(barsMap).length) barsMap = map;
+        if (hitCount >= stockSyms.length) break; // got all, no need to try other feed
+      }
+    } catch (e) { console.warn('Alpaca bars attempt failed:', e.message); }
+  }
+
+  // Fill from bars data
+  let filled = 0;
+  if (barsMap) {
+    for (const sym of stockSyms) {
+      const bars = Array.isArray(barsMap[sym]) ? barsMap[sym] : null;
+      if (!bars || bars.length === 0) continue;
+      const q = quoteData[sym];
+      if (!q) continue;
+      if (q.avgVolume == null) {
+        const totalVol = bars.reduce((sum, b) => sum + (b.v || 0), 0);
+        q.avgVolume = Math.round(totalVol / bars.length);
+        filled++;
+      }
+      if (q.wk52High == null) q.wk52High = Math.max(...bars.map(b => b.h));
+      if (q.wk52Low == null) q.wk52Low = Math.min(...bars.map(b => b.l));
+    }
+  }
+
+  // Fallback: use daily volume from snapshot as approximate avg volume for remaining
+  for (const sym of stockSyms) {
+    const q = quoteData[sym];
+    if (q && q.avgVolume == null && q.volume != null && q.volume > 0) {
+      q.avgVolume = q.volume; // use today's volume as fallback
+      filled++;
+    }
+  }
+  // supplemental done
+}
+
+// --- Fill missing fundamentals from quoteSummary or FinnHub metrics ---
+async function fillFundamentals(symbols) {
+  const toFetch = symbols.filter(s => {
+    if (!quoteData[s] || fetchedSummary.has(s) || errorSymbols.has(s)) return false;
+    if (isCryptoSymbol(s) || isCommoditySymbol(s)) return false;
+    // Skip if FinnHub already gave us a complete fundamentals cache for this symbol
+    const fc = fundamentalsCache[s];
+    if (fc && fc.pe != null && fc.beta != null && fc.marketCap != null) return false;
+    return true;
+  });
+  if (toFetch.length === 0) return;
+
+  const finnhubKey = getApiKey() || 'demo';
+
+  // Process in batches to avoid FinnHub rate limiting (60 calls/min free tier)
+  const BATCH = 8;
+  for (let i = 0; i < toFetch.length; i += BATCH) {
+    if (i > 0) await new Promise(r => setTimeout(r, 1200));
+    const batch = toFetch.slice(i, i + BATCH);
+    const promises = batch.map(async sym => {
+      const q = quoteData[sym];
+      if (!q) return;
+
+      // Try Yahoo quoteSummary first
+      const summary = await fetchYahooSummary(sym);
+      if (summary) {
+        fetchedSummary.add(sym);
+        if (q.pe == null && summary.pe != null) q.pe = summary.pe;
+        if (q.eps == null && summary.eps != null) q.eps = summary.eps;
+        if (q.beta == null && summary.beta != null) q.beta = summary.beta;
+        if (q.dividend == null && summary.dividend != null) q.dividend = summary.dividend;
+        if (q.dividendYield == null && summary.dividendYield != null) q.dividendYield = summary.dividendYield;
+        if (q.exDivDate == null && summary.exDivDate != null) q.exDivDate = summary.exDivDate;
+        if (q.earningsDate == null && summary.earningsDate != null) q.earningsDate = summary.earningsDate;
+        if (q.bid == null && summary.bid != null) q.bid = summary.bid;
+        if (q.ask == null && summary.ask != null) q.ask = summary.ask;
+        if (q.avgVolume == null && summary.avgVolume != null) q.avgVolume = summary.avgVolume;
+        if (q.marketCap == null && summary.marketCap != null) q.marketCap = summary.marketCap;
+        if (q.open == null && summary.open != null) q.open = summary.open;
+        if (q.postMarketPrice == null && summary.postMarketPrice != null) {
+          q.postMarketPrice = summary.postMarketPrice;
+          q.postMarketChange = summary.postMarketChange;
+        }
+        if (q.preMarketPrice == null && summary.preMarketPrice != null) {
+          q.preMarketPrice = summary.preMarketPrice;
+          q.preMarketChange = summary.preMarketChange;
+        }
+        if (q.marketState == null && summary.marketState != null) q.marketState = summary.marketState;
+        // Mark after-hours as fetched if we got data, so the later AH pass skips this symbol
+        if (summary.postMarketPrice != null || summary.preMarketPrice != null || summary.marketState != null) {
+          fetchedAfterHours.add(sym);
+        }
+        return;
+      }
+
+      // Fallback: FinnHub metrics (CORS-enabled, works with demo or free key)
+      if (!isCryptoSymbol(sym) && !fundamentalsCache[sym]) {
+        try {
+          const [metricsResp, profileResp] = await Promise.all([
+            fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${finnhubKey}`, { signal: AbortSignal.timeout(6000) }),
+            fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${finnhubKey}`, { signal: AbortSignal.timeout(6000) }),
+          ]);
+          if (metricsResp.status === 429) { console.warn('FinnHub rate limited in fillFundamentals for', sym); return; }
+          if (metricsResp.ok) {
+            const metrics = await metricsResp.json();
+            const m = metrics.metric || {};
+            const keyCount = Object.keys(m).length;
+            // metrics loaded
+            if (keyCount > 0) {
+              if (q.avgVolume == null && m['10DayAverageTradingVolume'] != null) q.avgVolume = m['10DayAverageTradingVolume'] * 1e6;
+              if (q.pe == null) q.pe = m.peBasicExclExtraTTM || m.peTTM || null;
+              if (q.eps == null) q.eps = m.epsBasicExclExtraItemsTTM || null;
+              if (q.beta == null && m.beta != null) q.beta = m.beta;
+              if (q.wk52High == null && m['52WeekHigh'] != null) q.wk52High = m['52WeekHigh'];
+              if (q.wk52Low == null && m['52WeekLow'] != null) q.wk52Low = m['52WeekLow'];
+              if (q.dividend == null && m.dividendPerShareAnnual != null) q.dividend = m.dividendPerShareAnnual;
+              if (q.dividendYield == null && m.dividendYieldIndicatedAnnual != null) q.dividendYield = m.dividendYieldIndicatedAnnual;
+              if (q.perfYTD == null && m.yearToDatePriceReturnDaily != null) q.perfYTD = m.yearToDatePriceReturnDaily;
+              if (q.perf6M == null) q.perf6M = m['6MonthPriceReturnDaily'] || m['26WeekPriceReturnDaily'] || null;
+              if (q.perf1Y == null && m['52WeekPriceReturnDaily'] != null) q.perf1Y = m['52WeekPriceReturnDaily'];
+              if (profileResp.ok) {
+                const profile = await profileResp.json();
+                if (q.name === sym && profile.name) q.name = profile.name;
+                if (q.marketCap == null && profile.marketCapitalization) q.marketCap = profile.marketCapitalization * 1e6;
+              }
+              fetchedSummary.add(sym);
+            }
+          } else {
+            console.warn('FinnHub metrics HTTP', metricsResp.status, 'for', sym);
+          }
+        } catch (e) {
+          console.warn('FinnHub metrics fallback failed for', sym, e.message);
+        }
+      }
+    });
+    await Promise.all(promises);
+  }
+}
+
+// ==================== MAIN REFRESH ====================
+let refreshInProgress = false;
+let pendingRefreshAfter = false; // queued refresh (e.g. symbol added during refresh)
+let fetchedPerformance = new Set(); // cache perf data per session
+async function refreshAll() {
+  if (refreshInProgress) return Promise.resolve(); // prevent overlapping refreshes
+  refreshInProgress = true;
+  try { await _refreshAll(); } finally {
+    refreshInProgress = false;
+    // If a symbol was added while refresh was running, run again to pick it up
+    if (pendingRefreshAfter) {
+      pendingRefreshAfter = false;
+      refreshAll().then(() => syncWsSubscriptions());
+    }
+  }
+}
+async function _refreshAll() {
+  const symbols = portfolio.map(p => p.symbol);
+  if (symbols.length === 0) { renderTable(); updateSummary(); return; }
+
+  for (const s of symbols) {
+    if (quoteData[s]) prevPrices[s] = quoteData[s].price;
+  }
+
+  setStatus('Fetching quotes...', 'loading');
+
+  // Run all API sources in parallel for speed + fallback resilience
+  const hasFinnHub = !!getApiKey();
+  const alpacaKeys = getAlpacaKeys();
+  const hasAlpaca = !!(alpacaKeys.keyId && alpacaKeys.secret);
+  const hasFmp = !!getFmpKey();
+  const hasCrypto = symbols.some(s => COINGECKO_IDS[s]);
+  const [finnhubResult, yahooResult, alpacaResult, fmpResult, cryptoResult, freeResult] = await Promise.all([
+    hasFinnHub ? fetchFinnhubQuotes(symbols) : Promise.resolve(null),
+    fetchYahooQuotes(symbols),
+    hasAlpaca ? fetchAlpacaQuotes(symbols) : Promise.resolve(null),
+    hasFmp ? fetchFmpQuotes(symbols) : Promise.resolve(null),
+    hasCrypto ? fetchCryptoQuotes(symbols) : Promise.resolve(null),
+    !hasFinnHub ? fetchFinnhubFreeQuotes(symbols) : Promise.resolve(null),
+  ]);
+
+  // If Yahoo failed, try v6 endpoint as last resort
+  let yahooFinal = yahooResult;
+  if (!yahooFinal) {
+    yahooFinal = await fetchYahooV6Quotes(symbols);
+  }
+
+  // Pick primary source: prefer the one with the most matching symbols
+  const allResults = [
+    finnhubResult, yahooFinal, freeResult, fmpResult, alpacaResult, cryptoResult
+  ].filter(Boolean);
+  function countHits(r) { return r ? symbols.filter(s => r.data[s]).length : 0; }
+  // Priority order for tie-breaking: FinnHub > Yahoo > FinnHub free > FMP > Alpaca > CoinGecko
+  let result = null;
+  for (const r of allResults) {
+    if (!result || countHits(r) > countHits(result)) result = r;
+  }
+  // Additional sources to merge missing fields from
+  const mergeSources = [alpacaResult, fmpResult, cryptoResult, freeResult, yahooFinal].filter(r => r && r !== result);
+
+  // Retry commodity symbols that didn't get data — FinnHub/Alpaca/FMP don't support futures,
+  // so commodities depend on Yahoo proxies which can fail under concurrent load.
+  // This runs BEFORE source selection so commodity data is available for all code paths.
+  const missingCommodities = symbols.filter(s => isCommoditySymbol(s) && !allResults.some(r => r && r.data[s]));
+  if (missingCommodities.length > 0) {
+    for (const sym of missingCommodities) {
+      if (missingCommodities.indexOf(sym) > 0) await new Promise(r => setTimeout(r, 3000));
+      try {
+        // Single fetchWithProxy call — it internally rotates through all proxies
+        // Use query2 (less rate-limited than query1) with range=2d for overnight coverage
+        const chartUrl = 'https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true';
+        const text = await fetchWithProxy(chartUrl, -1, 15000);
+        const data = JSON.parse(text);
+        if (data.chart && data.chart.result && data.chart.result[0]) {
+          const q = normalizeYahooChart(sym, data.chart.result[0]);
+          if (q && q.price) {
+            quoteData[sym] = q;
+            errorSymbols.delete(sym);
+          }
+        }
+      } catch (e) {
+        console.warn('Commodity retry failed for', sym, e.message);
+        // Don't mark known commodities as errors — they're valid symbols, proxy just failed
+        // They'll show "loading..." until a proxy succeeds
+      }
+    }
+  }
+
+  if (result) {
+    // Preserve existing bid/ask (including estimates) before overwriting
+    const preserved = {};
+    for (const sym of symbols) {
+      if (quoteData[sym]) {
+        preserved[sym] = {
+          bid: quoteData[sym].bid, ask: quoteData[sym].ask,
+          bidEstimated: quoteData[sym].bidEstimated, askEstimated: quoteData[sym].askEstimated,
+          postMarketPrice: quoteData[sym].postMarketPrice, postMarketChange: quoteData[sym].postMarketChange,
+          preMarketPrice: quoteData[sym].preMarketPrice, preMarketChange: quoteData[sym].preMarketChange,
+          marketState: quoteData[sym].marketState,
+        };
+      }
+    }
+    Object.assign(quoteData, result.data);
+    // Apply crypto data directly — primary stock sources never include crypto
+    if (cryptoResult) {
+      for (const [sym, cData] of Object.entries(cryptoResult.data)) {
+        quoteData[sym] = cData;
+      }
+    }
+    // Restore preserved fields if new data doesn't have them
+    for (const sym of symbols) {
+      if (quoteData[sym] && preserved[sym]) {
+        const q = quoteData[sym], p = preserved[sym];
+        if (q.bid == null && p.bid != null) { q.bid = p.bid; q.bidEstimated = p.bidEstimated; }
+        if (q.ask == null && p.ask != null) { q.ask = p.ask; q.askEstimated = p.askEstimated; }
+        if (q.postMarketPrice == null && p.postMarketPrice != null) { q.postMarketPrice = p.postMarketPrice; q.postMarketChange = p.postMarketChange; }
+        if (q.preMarketPrice == null && p.preMarketPrice != null) { q.preMarketPrice = p.preMarketPrice; q.preMarketChange = p.preMarketChange; }
+        if (q.marketState == null && p.marketState != null) q.marketState = p.marketState;
+      }
+    }
+    // Only mark tickers as unknown if at least one source returned data for OTHER symbols
+    // (meaning the source works but this ticker genuinely doesn't exist)
+    // Never mark known commodity/crypto symbols as errors — they're valid but proxy-dependent
+    const totalHits = allResults.reduce((n, r) => n + (r ? Object.keys(r.data).length : 0), 0);
+    if (totalHits > 0) {
+      for (const sym of symbols) {
+        const found = allResults.some(r => r && r.data[sym]);
+        if (!found && !quoteData[sym] && !isCommoditySymbol(sym) && !isCryptoSymbol(sym)) {
+          errorSymbols.add(sym);
+        } else if (found) {
+          errorSymbols.delete(sym);
+        }
+      }
+    }
+    // Build accurate source attribution from what actually provided data
+    const sourceNames = new Set();
+    if (result) sourceNames.add(result.source.split('(')[0].trim());
+    for (const src of mergeSources) {
+      if (!src) continue;
+      for (const sym of symbols) {
+        if (src.data[sym] && quoteData[sym]) {
+          sourceNames.add(src.source.split('(')[0].trim());
+          break; // only need one match to credit this source
+        }
+      }
+    }
+    // Always credit CoinGecko if it provided crypto data (applied directly, not via merge)
+    if (cryptoResult && symbols.some(s => cryptoResult.data[s])) {
+      sourceNames.add('CoinGecko');
+    }
+    // Credit Yahoo if commodity retry provided data
+    if (missingCommodities.some(s => quoteData[s])) {
+      sourceNames.add('Yahoo Finance');
+    }
+    setStatus('Data via ' + [...sourceNames].join(' + '), 'live');
+    updateWsIndicator();
+    document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+  } else {
+    // No primary source returned data — check if commodity retry got anything
+    const hasCommodityData = missingCommodities.some(s => quoteData[s]);
+    if (hasCommodityData) {
+      setStatus('Data via Yahoo Finance', 'live');
+      updateWsIndicator();
+      document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+    } else {
+      setStatus('All data sources unavailable. Check your API keys or internet connection.', 'error');
+    }
+    // Mark symbols with no data as errors so they don't stay in "loading..." forever
+    // Don't mark known commodity/crypto — they're valid symbols, just proxy failures
+    for (const sym of symbols) {
+      if (!quoteData[sym] && !isCommoditySymbol(sym) && !isCryptoSymbol(sym)) errorSymbols.add(sym);
+    }
+    renderTable();
+    updateSummary();
+  }
+
+  // Merge all secondary sources to fill missing fields
+  for (const src of mergeSources) {
+    if (!src) continue;
+    for (const [sym, sData] of Object.entries(src.data)) {
+      const inPrimary = result && !!result.data[sym];
+      if (quoteData[sym]) {
+        const q = quoteData[sym];
+        // For crypto: CoinGecko is direct CORS (no proxy caching), always use its fresh price
+        if (isCryptoSymbol(sym) && sData.price != null && src === cryptoResult) {
+          q.price = sData.price;
+          q.change = sData.change;
+          q.changePct = sData.changePct;
+          if (sData.prevClose != null) q.prevClose = sData.prevClose;
+          if (sData.marketCap != null) q.marketCap = sData.marketCap;
+          if (sData.volume != null) q.volume = sData.volume;
+        } else if (!inPrimary && sData.price != null && q.price == null) {
+          q.price = sData.price;
+          q.change = sData.change;
+          q.changePct = sData.changePct;
+          if (sData.prevClose != null) q.prevClose = sData.prevClose;
+          if (sData.name && sData.name !== sym) q.name = sData.name;
+        }
+        // Fill missing fields from any source
+        if (q.name === sym && sData.name && sData.name !== sym) q.name = sData.name;
+        if (q.postMarketPrice == null && sData.postMarketPrice != null) { q.postMarketPrice = sData.postMarketPrice; q.postMarketChange = sData.postMarketChange; }
+        if (q.preMarketPrice == null && sData.preMarketPrice != null) { q.preMarketPrice = sData.preMarketPrice; q.preMarketChange = sData.preMarketChange; }
+        if (q.marketState == null && sData.marketState != null) q.marketState = sData.marketState;
+        // Alpaca has real bid/ask - prefer over estimates
+        if ((q.bid == null || q.bidEstimated) && sData.bid != null) { q.bid = sData.bid; q.bidEstimated = false; }
+        if ((q.ask == null || q.askEstimated) && sData.ask != null) { q.ask = sData.ask; q.askEstimated = false; }
+        if (q.pe == null && sData.pe != null) q.pe = sData.pe;
+        if (q.eps == null && sData.eps != null) q.eps = sData.eps;
+        if (q.beta == null && sData.beta != null) q.beta = sData.beta;
+        if (q.marketCap == null && sData.marketCap != null) q.marketCap = sData.marketCap;
+        if (q.avgVolume == null && sData.avgVolume != null) q.avgVolume = sData.avgVolume;
+        if (q.volume == null && sData.volume != null) q.volume = sData.volume;
+        if (q.open == null && sData.open != null) q.open = sData.open;
+        if (q.wk52High == null && sData.wk52High != null) q.wk52High = sData.wk52High;
+        if (q.wk52Low == null && sData.wk52Low != null) q.wk52Low = sData.wk52Low;
+        if (q.dividend == null && sData.dividend != null) q.dividend = sData.dividend;
+        if (q.dividendYield == null && sData.dividendYield != null) q.dividendYield = sData.dividendYield;
+        if (q.exDivDate == null && sData.exDivDate != null) q.exDivDate = sData.exDivDate;
+        if (q.earningsDate == null && sData.earningsDate != null) q.earningsDate = sData.earningsDate;
+        if (q.perfYTD == null && sData.perfYTD != null) q.perfYTD = sData.perfYTD;
+        if (q.perf6M == null && sData.perf6M != null) q.perf6M = sData.perf6M;
+        if (q.perf1Y == null && sData.perf1Y != null) q.perf1Y = sData.perf1Y;
+      } else if (!errorSymbols.has(sym)) {
+        quoteData[sym] = sData;
+      }
+    }
+  }
+
+  // Apply FinnHub fundamentalsCache to fill gaps (in case FinnHub wasn't primary source)
+  for (const sym of symbols) {
+    const q = quoteData[sym];
+    const fc = fundamentalsCache[sym];
+    if (!q || !fc) continue;
+    if (q.name === sym && fc.name && fc.name !== sym) q.name = fc.name;
+    if (q.avgVolume == null && fc.avgVolume != null) q.avgVolume = fc.avgVolume;
+    if (q.marketCap == null && fc.marketCap != null) q.marketCap = fc.marketCap;
+    if (q.pe == null && fc.pe != null) q.pe = fc.pe;
+    if (q.eps == null && fc.eps != null) q.eps = fc.eps;
+    if (q.beta == null && fc.beta != null) q.beta = fc.beta;
+    if (q.dividend == null && fc.dividend != null) q.dividend = fc.dividend;
+    if (q.dividendYield == null && fc.dividendYield != null) q.dividendYield = fc.dividendYield;
+    if (q.exDivDate == null && fc.exDivDate != null) q.exDivDate = fc.exDivDate;
+    if (q.earningsDate == null && fc.earningsDate != null) q.earningsDate = fc.earningsDate;
+    if (q.wk52High == null && fc.wk52High != null) q.wk52High = fc.wk52High;
+    if (q.wk52Low == null && fc.wk52Low != null) q.wk52Low = fc.wk52Low;
+    if (q.perfYTD == null && fc.perfYTD != null) q.perfYTD = fc.perfYTD;
+    if (q.perf6M == null && fc.perf6M != null) q.perf6M = fc.perf6M;
+    if (q.perf1Y == null && fc.perf1Y != null) q.perf1Y = fc.perf1Y;
+  }
+
+  // Mark after-hours as fetched for symbols that already have data from initial sources
+  // (avoids redundant proxy calls in the after-hours pass)
+  for (const sym of symbols) {
+    const q = quoteData[sym];
+    if (q && (q.postMarketPrice != null || q.preMarketPrice != null || q.marketState != null)) {
+      fetchedAfterHours.add(sym);
+    }
+  }
+
+  // Estimate bid/ask from current price inline (avoids extra render pass)
+  for (const sym of symbols) {
+    const q = quoteData[sym];
+    if (!q || errorSymbols.has(sym) || q.price == null) continue;
+    const price = q.price;
+    if ((q.bid == null || q.bidEstimated) || (q.ask == null || q.askEstimated)) {
+      const spread = price > 100 ? 0.02 : price > 10 ? 0.01 : 0.005;
+      if (q.bid == null || q.bidEstimated) { q.bid = +(price - spread).toFixed(4); q.bidEstimated = true; }
+      if (q.ask == null || q.askEstimated) { q.ask = +(price + spread).toFixed(4); q.askEstimated = true; }
+    }
+  }
+
+  // Single render after all primary data + merges + bid/ask estimates
+  renderTable();
+  updateSummary();
+
+  // Run fundamentals + performance in parallel (deferred, re-render only if data changed)
+  const needsSummary = symbols.filter(s => {
+    const q = quoteData[s];
+    if (!q || fetchedSummary.has(s) || errorSymbols.has(s)) return false;
+    // Always fetch if core fundamentals are missing
+    if (q.marketCap == null || q.pe == null || q.beta == null || q.eps == null) return true;
+    // Also fetch if bid/ask is only estimated
+    if (q.bid == null || q.bidEstimated) return true;
+    return false;
+  });
+  const needsPerf = symbols.filter(s => quoteData[s] && !errorSymbols.has(s) &&
+    !fetchedPerformance.has(s) &&
+    (quoteData[s].perfYTD == null || quoteData[s].perf6M == null || quoteData[s].perf1Y == null));
+
+  const tasks = [];
+  if (needsSummary.length > 0) tasks.push(fillFundamentals(needsSummary));
+  if (needsPerf.length > 0) tasks.push(fetchPerformanceData(needsPerf).then(() => {
+    needsPerf.forEach(s => fetchedPerformance.add(s));
+  }));
+  // Alpaca supplemental: avg volume, 52-week range from historical bars (only if needed)
+  if (hasAlpaca && symbols.some(s => quoteData[s] && quoteData[s].avgVolume == null && !isCryptoSymbol(s) && !isCommoditySymbol(s))) {
+    tasks.push(fetchAlpacaSupplemental(symbols));
+  }
+  // CoinGecko supplemental: 52-week range, YTD/6M/1Y perf for crypto (only if needed)
+  if (hasCrypto && symbols.some(s => COINGECKO_IDS[s] && quoteData[s] && (quoteData[s].wk52High == null || quoteData[s].perfYTD == null))) {
+    tasks.push(fetchCryptoSupplemental(symbols));
+  }
+
+  if (tasks.length > 0) {
+    await Promise.all(tasks);
+    renderTable();
+    updateSummary();
+  }
+
+  // After-hours pass: for symbols that still lack after-hours data (e.g. FinnHub was primary
+  // and doesn't provide after-hours), fetch via a SINGLE Yahoo v7 batch request (1 proxy call
+  // instead of N per-symbol calls, dramatically reducing proxy rate-limiting).
+  const needsAfterHours = symbols.filter(s => {
+    const q = quoteData[s];
+    return q && !errorSymbols.has(s) && !fetchedAfterHours.has(s) &&
+      !isCryptoSymbol(s) && !isCommoditySymbol(s) &&
+      q.postMarketPrice == null && q.preMarketPrice == null;
+  });
+  if (needsAfterHours.length > 0) {
+    let ahUpdated = false;
+    // Strategy 1: Yahoo v7 batch — one proxy request for ALL symbols (race both CDN domains)
+    try {
+      const crumb = await getYahooCrumb();
+      const ahSymList = needsAfterHours.map(yfEnc).join(',');
+      const ahBase1 = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + ahSymList;
+      const ahBase2 = 'https://query2.finance.yahoo.com/v7/finance/quote?symbols=' + ahSymList;
+      const ahCrumb = crumb ? '&crumb=' + encodeURIComponent(crumb) : '';
+      const text = await Promise.any([
+        fetchWithProxy(ahBase1 + ahCrumb, -1, 12000),
+        fetchWithProxy(ahBase2 + ahCrumb, -1, 12000),
+      ]);
+      const data = JSON.parse(text);
+      if (data.quoteResponse && data.quoteResponse.result) {
+        for (const raw of data.quoteResponse.result) {
+          const sym = raw.symbol;
+          const q = quoteData[sym];
+          if (!q) continue;
+          if (q.postMarketPrice == null && raw.postMarketPrice != null) {
+            q.postMarketPrice = raw.postMarketPrice;
+            q.postMarketChange = raw.postMarketChange || (raw.postMarketPrice - (raw.regularMarketPrice || q.price || 0));
+            ahUpdated = true;
+          }
+          if (q.preMarketPrice == null && raw.preMarketPrice != null) {
+            q.preMarketPrice = raw.preMarketPrice;
+            q.preMarketChange = raw.preMarketChange || (raw.preMarketPrice - (raw.regularMarketPreviousClose || q.prevClose || 0));
+            ahUpdated = true;
+          }
+          if (q.marketState == null && raw.marketState) q.marketState = raw.marketState;
+          if (raw.postMarketPrice != null || raw.preMarketPrice != null || raw.marketState) {
+            fetchedAfterHours.add(sym);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('AH v7 batch failed:', e.message);
+    }
+    // Strategy 2: For any symbols STILL missing, try v8 chart (extracts AH from candle data)
+    const stillNeeds = needsAfterHours.filter(s => !fetchedAfterHours.has(s) &&
+      quoteData[s] && quoteData[s].postMarketPrice == null && quoteData[s].preMarketPrice == null);
+    if (stillNeeds.length > 0) {
+      // Process sequentially with delays to avoid proxy rate limits
+      for (let i = 0; i < stillNeeds.length; i++) {
+        if (i > 0) await new Promise(r => setTimeout(r, 400));
+        const sym = stillNeeds[i];
+        await (async () => {
+          const q = quoteData[sym];
+          if (!q) return;
+          try {
+            const text = await fetchWithProxy('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=1d&interval=5m&includePrePost=true', -1, 10000);
+            const cData = JSON.parse(text);
+            const cResult = cData.chart && cData.chart.result && cData.chart.result[0];
+            if (cResult) {
+              const chart = normalizeYahooChart(sym, cResult);
+              if (chart && chart.postMarketPrice != null && q.postMarketPrice == null) {
+                q.postMarketPrice = chart.postMarketPrice;
+                q.postMarketChange = chart.postMarketChange;
+                ahUpdated = true;
+              }
+              if (chart && chart.preMarketPrice != null && q.preMarketPrice == null) {
+                q.preMarketPrice = chart.preMarketPrice;
+                q.preMarketChange = chart.preMarketChange;
+                ahUpdated = true;
+              }
+              if (chart && chart.marketState && q.marketState == null) q.marketState = chart.marketState;
+              if (chart && (chart.postMarketPrice != null || chart.preMarketPrice != null || chart.marketState != null)) {
+                fetchedAfterHours.add(sym);
+              }
+            }
+          } catch (e) {
+            console.warn('AH v8 chart fallback failed for', sym, e.message);
+          }
+        })();
+      }
+    }
+    if (ahUpdated) {
+      renderTable();
+      updateSummary();
+    }
+  }
+
+  // Deferred retry: if any commodity symbols still lack data after the full refresh,
+  // schedule retries with generous delays. CORS proxies rate-limit after ~1 request,
+  // needing ~10s to recover. We try each missing symbol one at a time with 10s gaps,
+  // using direct proxy calls (bypassing fetchWithProxy to avoid burning other proxies).
+  const stillMissingCommodities = symbols.filter(s => isCommoditySymbol(s) && (!quoteData[s] || quoteData[s].price == null));
+  if (stillMissingCommodities.length > 0) {
+    (async () => {
+      for (const sym of stillMissingCommodities) {
+        // Wait 8s before first attempt, 10s between subsequent symbols
+        await new Promise(r => setTimeout(r, quoteData[sym] && quoteData[sym].price != null ? 0 : 8000));
+        if (refreshInProgress || (quoteData[sym] && quoteData[sym].price != null)) continue;
+        // Try each proxy until one works
+        for (let pi = 0; pi < PROXIES.length; pi++) {
+          try {
+            const yahooUrl = 'https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true';
+            const proxiedUrl = PROXIES[pi](yahooUrl);
+            const resp = await fetch(proxiedUrl, { signal: AbortSignal.timeout(12000) });
+            if (!resp.ok) continue;
+            const text = await resp.text();
+            if (!text || text.trimStart().startsWith('<') || text.startsWith('Edge:')) continue;
+            if (text.length < 300) {
+              try { const j = JSON.parse(text); if (j.error && !j.chart) continue; } catch(_) {}
+            }
+            const data = JSON.parse(text);
+            if (data.chart && data.chart.result && data.chart.result[0]) {
+              const q = normalizeYahooChart(sym, data.chart.result[0]);
+              if (q && q.price) {
+                quoteData[sym] = q;
+                errorSymbols.delete(sym);
+                lastWorkingProxy = pi;
+                renderTable(); updateSummary();
+                break; // got it, move to next symbol
+              }
+            }
+          } catch (e) { /* try next proxy */ }
+        }
+        // If still missing after all proxies, wait longer before next symbol
+        if (!quoteData[sym] || quoteData[sym].price == null) {
+          await new Promise(r => setTimeout(r, 10000));
+        }
+      }
+    })();
+  }
+}
+
+// ==================== FORMATTING ====================
+function esc(s) { if (!s) return s; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function escAttr(s) { return (s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmt(n, d = 2) {
+  if (n == null || isNaN(n)) return '\u2014';
+  return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function fmtDollar(n) {
+  if (n == null || isNaN(n)) return '\u2014';
+  return (n < 0 ? '-' : '') + '$' + fmt(Math.abs(n));
+}
+function fmtPct(n) {
+  if (n == null || isNaN(n)) return '\u2014';
+  return (n >= 0 ? '+' : '') + fmt(n) + '%';
+}
+function fmtBig(n) {
+  if (n == null || isNaN(n)) return '\u2014';
+  if (n >= 1e12) return '$' + (n / 1e12).toFixed(2) + 'T';
+  if (n >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return fmt(n, 0);
+}
+function fmtVol(n) {
+  if (n == null || isNaN(n)) return '\u2014';
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return fmt(n, 0);
+}
+function cc(n) {
+  if (n > 0) return 'pos';
+  if (n < 0) return 'neg';
+  return 'neutral';
+}
+function rangeBar(low, high, current) {
+  if (!low || !high || !current || high <= low) return '\u2014';
+  const pct = Math.max(0, Math.min(100, ((current - low) / (high - low)) * 100));
+  return `${fmt(low)}<span class="range-bar"><span class="marker" style="left:${pct}%"></span></span>${fmt(high)}`;
+}
+function fmtDivYield(div, yld) {
+  if (div == null && yld == null) return '\u2014';
+  let parts = [];
+  if (div != null) parts.push('$' + fmt(div));
+  if (yld != null) parts.push(fmt(yld) + '%');
+  return parts.join(' / ');
+}
+
+// ==================== RENDERING ====================
+function buildHeader() {
+  const row = document.getElementById('header-row');
+  row.innerHTML = COLUMNS.map(col => {
+    const cls = col.align === 'left' ? ' class="left"' : '';
+    const sort = col.sortable ? ` data-sort="${col.key}"` : '';
+    const arrow = col.sortable ? '<span class="sort-arrow"></span>' : '';
+    return `<th${cls}${sort}>${col.label} ${arrow}</th>`;
+  }).join('');
+
+  row.querySelectorAll('th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.sort;
+      if (sortCol === col) sortAsc = !sortAsc;
+      else { sortCol = col; sortAsc = true; }
+      row.querySelectorAll('.sort-arrow').forEach(s => s.textContent = '');
+      th.querySelector('.sort-arrow').textContent = sortAsc ? ' \u25B2' : ' \u25BC';
+      renderTable();
+    });
+  });
+}
+
+function getSortValue(pos, q) {
+  const price = q.price;
+  switch (sortCol) {
+    case 'symbol': return pos.symbol;
+    case 'name': return q.name || '';
+    case 'last': return price || 0;
+    case 'change': return q.change || 0;
+    case 'changePct': return q.changePct || 0;
+    case 'afterHours': return q.postMarketPrice || q.preMarketPrice || 0;
+    case 'shares': return pos.shares;
+    case 'costBasis': return pos.costBasis || 0;
+    case 'date': return pos.purchaseDate || '';
+    case 'mktValue': return (price || 0) * pos.shares;
+    case 'dayPL': return (q.change || 0) * pos.shares;
+    case 'totalPL': return pos.costBasis ? ((price || 0) - pos.costBasis) * pos.shares : 0;
+    case 'totalPLPct': return pos.costBasis ? (((price || 0) - pos.costBasis) * pos.shares) / (Math.abs(pos.shares) * pos.costBasis) * 100 : 0;
+    case 'prevClose': return q.prevClose || 0;
+    case 'open': return q.open || 0;
+    case 'bid': return q.bid || 0;
+    case 'ask': return q.ask || 0;
+    case 'volume': return q.volume || 0;
+    case 'avgVol': return q.avgVolume || 0;
+    case 'mktCap': return q.marketCap || 0;
+    case 'pe': return q.pe || 0;
+    case 'eps': return q.eps || 0;
+    case 'beta': return q.beta || 0;
+    case 'divYield': return q.dividendYield || 0;
+    case 'exDiv': return q.exDivDate || '';
+    case 'earnings': return q.earningsDate || '';
+    case 'perfYTD': return q.perfYTD || 0;
+    case 'perf6M': return q.perf6M || 0;
+    case 'perf1Y': return q.perf1Y || 0;
+    default: return 0;
+  }
+}
+
+function getSortedPortfolio() {
+  if (!sortCol) return [...portfolio];
+  return [...portfolio].sort((a, b) => {
+    const va = getSortValue(a, quoteData[a.symbol] || {});
+    const vb = getSortValue(b, quoteData[b.symbol] || {});
+    if (typeof va === 'string') return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+    return sortAsc ? va - vb : vb - va;
+  });
+}
+
+function renderTable() {
+  const body = document.getElementById('portfolio-body');
+  const emptyMsg = document.getElementById('empty-msg');
+  if (portfolio.length === 0) {
+    body.innerHTML = '';
+    emptyMsg.style.display = 'block';
+    return;
+  }
+  emptyMsg.style.display = 'none';
+
+  const sorted = getSortedPortfolio();
+  let html = '';
+
+  for (const pos of sorted) {
+    const isError = errorSymbols.has(pos.symbol);
+    const q = quoteData[pos.symbol] || {};
+    const price = q.price;
+    const change = q.change;
+    const changePct = q.changePct;
+    const mktValue = price != null ? price * pos.shares : null;
+    const dayPL = change != null ? change * pos.shares : null;
+    const totalPL = (price != null && pos.costBasis) ? (price - pos.costBasis) * pos.shares : null;
+    const totalPLPct = (totalPL != null && pos.costBasis) ? (totalPL / (Math.abs(pos.shares) * pos.costBasis)) * 100 : null;
+
+    let flashClass = '';
+    if (prevPrices[pos.symbol] != null && price != null) {
+      if (price > prevPrices[pos.symbol]) flashClass = 'flash-green';
+      else if (price < prevPrices[pos.symbol]) flashClass = 'flash-red';
+    }
+
+    // After hours display
+    let ahDisplay = '\u2014';
+    if (q.postMarketPrice != null) {
+      const ahChg = q.postMarketChange != null ? q.postMarketChange : (q.postMarketPrice - (price || 0));
+      ahDisplay = `<span class="after-hours">${fmt(q.postMarketPrice)} <span class="${cc(ahChg)}">${ahChg >= 0 ? '+' : ''}${fmt(ahChg)}</span></span>`;
+    } else if (q.preMarketPrice != null) {
+      const pmChg = q.preMarketChange != null ? q.preMarketChange : (q.preMarketPrice - (q.prevClose || price || 0));
+      ahDisplay = `<span class="after-hours">${fmt(q.preMarketPrice)} <span class="${cc(pmChg)}">${pmChg >= 0 ? '+' : ''}${fmt(pmChg)}</span></span>`;
+    }
+
+    const sym = escAttr(pos.symbol);
+    const noteVal = escAttr(notes[pos.symbol] || '');
+
+    // Status cell content for price column
+    let priceCell;
+    if (isError) {
+      priceCell = '<span class="error-text">Unknown ticker</span>';
+    } else if (price == null) {
+      // Known commodity/crypto that failed to fetch — show specific message
+      if (isCommoditySymbol(pos.symbol) || isCryptoSymbol(pos.symbol)) {
+        priceCell = '<span style="color:#f0ad4e">retrying...</span>';
+      } else {
+        priceCell = '<span style="color:#4a9eff">loading...</span>';
+      }
+    } else {
+      priceCell = fmt(price);
+    }
+
+    const rowClass = [flashClass, isError ? 'error-row' : ''].filter(Boolean).join(' ');
+
+    html += `<tr class="${rowClass}">
+      <td class="sym">${sym}</td>
+      <td class="left" style="color:#888; max-width:140px; overflow:hidden; text-overflow:ellipsis;" title="${escAttr(q.name || '')}">${isError ? '<span class="error-text">Not found</span>' : esc(q.name || '')}</td>
+      <td class="${cc(change)}">${priceCell}</td>
+      <td class="${cc(change)}">${change != null ? (change >= 0 ? '+' : '') + fmt(change) : '\u2014'}</td>
+      <td class="${cc(changePct)}">${changePct != null ? fmtPct(changePct) : '\u2014'}</td>
+      <td>${ahDisplay}</td>
+      <td><div class="num-wrap"><input class="cell-input" type="number" value="${pos.shares}" onchange="updateShares('${sym}', this.value)" /><div class="num-spin"><button onclick="stepInput(this,1,'${sym}','shares')">&#9650;</button><button onclick="stepInput(this,-1,'${sym}','shares')">&#9660;</button></div></div></td>
+      <td><div class="num-wrap"><input class="cell-input" type="number" step="0.01" value="${pos.costBasis || ''}" onchange="updateCost('${sym}', this.value)" placeholder="\u2014" /><div class="num-spin"><button onclick="stepInput(this,0.01,'${sym}','cost')">&#9650;</button><button onclick="stepInput(this,-0.01,'${sym}','cost')">&#9660;</button></div></div></td>
+      <td><input class="cell-input" type="date" value="${pos.purchaseDate || ''}" onchange="updateDate('${sym}', this.value)" style="width:110px;" /></td>
+      <td>${mktValue != null ? fmtDollar(mktValue) : '\u2014'}</td>
+      <td class="${cc(dayPL)}">${dayPL != null ? fmtDollar(dayPL) : '\u2014'}</td>
+      <td>${fmtDivYield(q.dividend, q.dividendYield)}</td>
+      <td style="font-size:11px;">${q.exDivDate || '\u2014'}</td>
+      <td style="font-size:11px;">${q.earningsDate || '\u2014'}</td>
+      <td class="${cc(q.perfYTD)}">${q.perfYTD != null ? fmtPct(q.perfYTD) : '\u2014'}</td>
+      <td class="${cc(q.perf6M)}">${q.perf6M != null ? fmtPct(q.perf6M) : '\u2014'}</td>
+      <td class="${cc(q.perf1Y)}">${q.perf1Y != null ? fmtPct(q.perf1Y) : '\u2014'}</td>
+      <td class="${cc(totalPL)}">${totalPL != null ? fmtDollar(totalPL) : '\u2014'}</td>
+      <td class="${cc(totalPLPct)}">${totalPLPct != null ? fmtPct(totalPLPct) : '\u2014'}</td>
+      <td>${q.prevClose != null ? fmt(q.prevClose) : '\u2014'}</td>
+      <td>${q.open != null ? fmt(q.open) : '\u2014'}</td>
+      <td${q.bidEstimated ? ' style="color:#666" title="Estimated from last trade"' : ''}>${q.bid != null ? (q.bidEstimated ? '~' : '') + fmt(q.bid) : '\u2014'}</td>
+      <td${q.askEstimated ? ' style="color:#666" title="Estimated from last trade"' : ''}>${q.ask != null ? (q.askEstimated ? '~' : '') + fmt(q.ask) : '\u2014'}</td>
+      <td style="font-size:11px;">${rangeBar(q.dayLow, q.dayHigh, price)}</td>
+      <td style="font-size:11px;">${rangeBar(q.wk52Low, q.wk52High, price)}</td>
+      <td>${fmtVol(q.volume)}</td>
+      <td>${fmtVol(q.avgVolume)}</td>
+      <td>${q.marketCap != null ? fmtBig(q.marketCap) : '\u2014'}</td>
+      <td>${q.pe != null ? fmt(q.pe, 1) : '\u2014'}</td>
+      <td>${q.eps != null ? fmt(q.eps) : '\u2014'}</td>
+      <td>${q.beta != null ? fmt(q.beta) : '\u2014'}</td>
+      <td><input class="cell-input notes" type="text" value="${noteVal}" onchange="updateNotes('${sym}', this.value)" placeholder="..." /></td>
+      <td><button class="delete-btn" onclick="removePosition('${sym}')" title="Remove">\u2715</button></td>
+    </tr>`;
+  }
+
+  body.innerHTML = html;
+}
+
+function updateSummary() {
+  let totalMktVal = 0, totalDayPL = 0, totalTotalPL = 0, totalCostBasis = 0;
+  for (const pos of portfolio) {
+    const q = quoteData[pos.symbol] || {};
+    if (q.price != null) {
+      totalMktVal += q.price * pos.shares;
+      totalDayPL += (q.change || 0) * pos.shares;
+      if (pos.costBasis) {
+        totalTotalPL += (q.price - pos.costBasis) * pos.shares;
+        totalCostBasis += pos.costBasis * Math.abs(pos.shares);
+      }
+    }
+  }
+  const totalPLPct = totalCostBasis > 0 ? (totalTotalPL / totalCostBasis) * 100 : 0;
+
+  document.getElementById('total-value').textContent = fmtDollar(totalMktVal);
+  const dayEl = document.getElementById('total-day-pl');
+  dayEl.textContent = fmtDollar(totalDayPL);
+  dayEl.className = 'summary-value ' + cc(totalDayPL);
+  const plEl = document.getElementById('total-pl');
+  plEl.textContent = fmtDollar(totalTotalPL);
+  plEl.className = 'summary-value ' + cc(totalTotalPL);
+  const pctEl = document.getElementById('total-pl-pct');
+  pctEl.textContent = fmtPct(totalPLPct);
+  pctEl.className = 'summary-value ' + cc(totalPLPct);
+  document.getElementById('total-positions').textContent = portfolio.length;
+}
+
+function setStatus(text, type = '') {
+  const el = document.getElementById('status-text');
+  el.textContent = text;
+  el.className = type;
+}
+
+function updateWsIndicator() {
+  const el = document.getElementById('ws-indicator');
+  if (wsConnected) {
+    el.style.display = '';
+    // Append WS status to current status bar if not already showing it
+    const statusEl = document.getElementById('status-text');
+    if (statusEl.textContent.includes('Data via') && !statusEl.textContent.includes('WS streaming')) {
+      statusEl.textContent += ' | WS streaming';
+    }
+  } else {
+    el.style.display = 'none';
+    // Remove WS label from status bar
+    const statusEl = document.getElementById('status-text');
+    statusEl.textContent = statusEl.textContent.replace(' | WS streaming', '');
+  }
+}
+
+// ==================== FINNHUB WEBSOCKET (real-time trades) ====================
+function connectFinnhubWebSocket() {
+  const key = getApiKey();
+  if (!key) {
+    // No FinnHub key — can't use WebSocket
+    if (finnhubWs) { finnhubWs.close(); finnhubWs = null; }
+    wsConnected = false;
+    wsSubscribedSymbols.clear();
+    return;
+  }
+  // Already connected or connecting
+  if (finnhubWs && finnhubWs.readyState === WebSocket.OPEN) {
+    syncWsSubscriptions();
+    return;
+  }
+  if (finnhubWs && finnhubWs.readyState === WebSocket.CONNECTING) {
+    return; // still connecting, wait for onopen
+  }
+  // Close stale connection
+  if (finnhubWs) { try { finnhubWs.close(); } catch(_){} finnhubWs = null; }
+  if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+
+  try {
+    finnhubWs = new WebSocket(`wss://ws.finnhub.io?token=${key}`);
+  } catch (e) {
+    console.warn('FinnHub WebSocket failed to create:', e.message);
+    return;
+  }
+
+  finnhubWs.onopen = () => {
+    wsConnected = true;
+    console.log('FinnHub WebSocket connected');
+    syncWsSubscriptions();
+    updateWsIndicator();
+  };
+
+  finnhubWs.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'trade' && Array.isArray(msg.data)) {
+        // FinnHub batches trades — process the latest price per symbol only
+        const latestBySymbol = {};
+        for (const trade of msg.data) {
+          if (trade.s && trade.p) {
+            latestBySymbol[trade.s] = trade;
+          }
+        }
+        let updated = false;
+        for (const sym of Object.keys(latestBySymbol)) {
+          const trade = latestBySymbol[sym];
+          const price = trade.p;
+          if (!quoteData[sym]) continue;
+
+          const q = quoteData[sym];
+          const oldPrice = q.price;
+
+          // Only set prevPrices if not already set this render cycle,
+          // so flash animations compare against the pre-WebSocket price
+          if (prevPrices[sym] == null || !wsRenderPending) {
+            prevPrices[sym] = oldPrice;
+          }
+          q.price = price;
+
+          // Recalculate change from prevClose
+          if (q.prevClose != null) {
+            q.change = price - q.prevClose;
+            q.changePct = (q.change / q.prevClose) * 100;
+          }
+
+          // Update day high/low
+          if (q.dayHigh == null || price > q.dayHigh) q.dayHigh = price;
+          if (q.dayLow == null || price < q.dayLow) q.dayLow = price;
+
+          // Don't accumulate volume — REST provides accurate cumulative day volume
+
+          // Re-estimate bid/ask from new price
+          const spread = price > 100 ? 0.02 : price > 10 ? 0.01 : 0.005;
+          if (q.bidEstimated) q.bid = +(price - spread).toFixed(4);
+          if (q.askEstimated) q.ask = +(price + spread).toFixed(4);
+
+          wsLastTradeTime[sym] = Date.now();
+          updated = true;
+        }
+        // Debounce renders — batch all trades within one animation frame
+        // Skip rendering if a full REST refresh is in progress (it will render when done)
+        if (updated && !wsRenderPending && !refreshInProgress) {
+          wsRenderPending = true;
+          requestAnimationFrame(() => {
+            wsRenderPending = false;
+            if (!refreshInProgress) {
+              renderTable();
+              updateSummary();
+              document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString() + ' (live)';
+            }
+          });
+        }
+      }
+    } catch (e) {
+      // Ignore parse errors from ping/pong frames
+    }
+  };
+
+  finnhubWs.onerror = (e) => {
+    console.warn('FinnHub WebSocket error:', e);
+  };
+
+  finnhubWs.onclose = () => {
+    wsConnected = false;
+    wsSubscribedSymbols.clear();
+    console.log('FinnHub WebSocket closed');
+    updateWsIndicator();
+    // Reconnect after 5 seconds if we have a key
+    if (getApiKey()) {
+      if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = setTimeout(() => connectFinnhubWebSocket(), 5000);
+    }
+  };
+}
+
+function syncWsSubscriptions() {
+  if (!finnhubWs || finnhubWs.readyState !== WebSocket.OPEN) return;
+  const stockSymbols = portfolio
+    .map(p => p.symbol)
+    .filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
+  const stockSet = new Set(stockSymbols);
+
+  // Collect symbols to unsubscribe (don't modify Set while iterating)
+  const toRemove = [];
+  for (const sym of wsSubscribedSymbols) {
+    if (!stockSet.has(sym)) toRemove.push(sym);
+  }
+  for (const sym of toRemove) {
+    try { finnhubWs.send(JSON.stringify({ type: 'unsubscribe', symbol: sym })); } catch(_){}
+    wsSubscribedSymbols.delete(sym);
+  }
+  // Subscribe new symbols (FinnHub free tier: up to 50)
+  for (const sym of stockSymbols) {
+    if (!wsSubscribedSymbols.has(sym) && wsSubscribedSymbols.size < 50) {
+      try { finnhubWs.send(JSON.stringify({ type: 'subscribe', symbol: sym })); } catch(_){}
+      wsSubscribedSymbols.add(sym);
+    }
+  }
+}
+
+// ==================== AUTO REFRESH ====================
+function getMarketPhase() {
+  // Returns 'active' during US market + extended hours (4am-8pm ET weekdays),
+  // 'after' for weeknight off-hours (8pm-4am ET), or 'closed' for weekends.
+  const now = new Date();
+  const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day = et.getDay(); // 0=Sun, 6=Sat
+  const hour = et.getHours();
+  if (day === 0 || day === 6) return 'closed';
+  if (hour >= 4 && hour < 20) return 'active';
+  return 'after'; // weeknight off-hours (8pm-4am ET)
+}
+
+let offHoursLastFullRefresh = 0;
+
+// Lightweight refresh for crypto and commodity positions only (no stock API calls)
+async function refreshAlwaysOnOnly() {
+  const symbols = portfolio.map(p => p.symbol);
+  const hasCrypto = symbols.some(s => COINGECKO_IDS[s]);
+  const commoditySyms = symbols.filter(s => isCommoditySymbol(s));
+
+  let updated = false;
+
+  // Crypto via CoinGecko (self-throttles to 30s internally)
+  if (hasCrypto) {
+    const cryptoResult = await fetchCryptoQuotes(symbols);
+    if (cryptoResult) {
+      for (const [sym, cData] of Object.entries(cryptoResult.data)) {
+        const existing = quoteData[sym];
+        if (existing) {
+          prevPrices[sym] = existing.price;
+          // Preserve supplemental data that was fetched once (52-week, performance)
+          if (cData.wk52High == null && existing.wk52High != null) cData.wk52High = existing.wk52High;
+          if (cData.wk52Low == null && existing.wk52Low != null) cData.wk52Low = existing.wk52Low;
+          if (cData.perfYTD == null && existing.perfYTD != null) cData.perfYTD = existing.perfYTD;
+          if (cData.perf6M == null && existing.perf6M != null) cData.perf6M = existing.perf6M;
+          if (cData.perf1Y == null && existing.perf1Y != null) cData.perf1Y = existing.perf1Y;
+        }
+        quoteData[sym] = cData;
+        updated = true;
+      }
+    }
+  }
+
+  // Commodities via Yahoo v8 (only if not fetched recently via full refresh)
+  if (commoditySyms.length > 0 && Date.now() - offHoursLastFullRefresh >= 60000) {
+    for (let ci = 0; ci < commoditySyms.length; ci++) {
+      if (ci > 0) await new Promise(r => setTimeout(r, 800));
+      const sym = commoditySyms[ci];
+      try {
+        const text = await fetchWithProxy('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true', -1, 15000);
+        const data = JSON.parse(text);
+        if (data.chart && data.chart.result && data.chart.result[0]) {
+          const q = normalizeYahooChart(sym, data.chart.result[0]);
+          if (q) {
+            if (quoteData[sym]) prevPrices[sym] = quoteData[sym].price;
+            quoteData[sym] = q;
+            errorSymbols.delete(sym);
+            updated = true;
+          }
+        }
+      } catch (e) { /* commodity fetch failed, will retry next cycle */ }
+    }
+  }
+
+  if (updated) {
+    renderTable();
+    updateSummary();
+    const sources = [];
+    if (hasCrypto) sources.push('CoinGecko');
+    if (commoditySyms.length > 0) sources.push('Yahoo Finance');
+    setStatus('Data via ' + sources.join(' + ') + ' (off-hours)', 'live');
+    updateWsIndicator();
+    document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+  }
+}
+
+function setupAutoRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  const userInterval = parseInt(document.getElementById('refresh-interval').value) * 1000;
+  refreshTimer = setInterval(() => {
+    if (document.getElementById('auto-refresh').checked && portfolio.length > 0) {
+      const phase = getMarketPhase();
+      if (phase === 'active') {
+        refreshAll();
+      } else {
+        // Off-hours (weeknight or weekend)
+        const hasAlwaysOn = portfolio.some(p => isCryptoSymbol(p.symbol) || isCommoditySymbol(p.symbol));
+        if (phase === 'after') {
+          // Full refresh (all sources including stocks) throttled to once per 60s for after-hours data
+          const now = Date.now();
+          if (now - offHoursLastFullRefresh >= 60000) {
+            offHoursLastFullRefresh = now;
+            refreshAll(); // full refresh covers crypto/commodity too — skip lightweight
+          } else if (hasAlwaysOn) {
+            refreshAlwaysOnOnly(); // lightweight crypto/commodity only between full refreshes
+          }
+        } else {
+          // Weekend: only crypto/commodity, no stock API calls
+          if (hasAlwaysOn) {
+            refreshAlwaysOnOnly();
+          } else {
+            setStatus('Market closed \u2014 auto-refresh paused (weekend)', '');
+          }
+        }
+      }
+    }
+  }, userInterval);
+}
+
+// Persist auto-refresh settings to localStorage
+document.getElementById('refresh-interval').addEventListener('change', function() {
+  localStorage.setItem('stonks_refresh_interval', this.value);
+  setupAutoRefresh();
+});
+document.getElementById('auto-refresh').addEventListener('change', function() {
+  localStorage.setItem('stonks_auto_refresh', this.checked ? '1' : '0');
+});
+
+// ==================== KEYBOARD ====================
+['ticker-input', 'shares-input', 'cost-input', 'date-input'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') addPosition();
+  });
+});
+
+// ==================== INIT ====================
+// Migrate existing shorthand symbols (e.g. BTC -> BTC-USD, GOLD -> GC=F)
+let migrated = false;
+for (const pos of portfolio) {
+  if (CRYPTO_MAP[pos.symbol]) {
+    pos.symbol = CRYPTO_MAP[pos.symbol];
+    migrated = true;
+  } else if (COMMODITY_MAP[pos.symbol]) {
+    pos.symbol = COMMODITY_MAP[pos.symbol];
+    migrated = true;
+  }
+}
+if (migrated) savePortfolio();
+
+// Restore saved auto-refresh settings
+const savedInterval = localStorage.getItem('stonks_refresh_interval');
+if (savedInterval) document.getElementById('refresh-interval').value = savedInterval;
+const savedAutoRefresh = localStorage.getItem('stonks_auto_refresh');
+if (savedAutoRefresh !== null) document.getElementById('auto-refresh').checked = savedAutoRefresh === '1';
+
+// Show welcome banner for first-time users (no keys and no portfolio), or on demand
+function showWelcomeBanner(force) {
+  const wrap = document.getElementById('welcome-wrap');
+  if (force) {
+    wrap.classList.toggle('show');
+    if (wrap.classList.contains('show')) {
+      wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    return;
+  }
+  const hasKeys = !!(getApiKey() || getAlpacaKeys().keyId || getFmpKey());
+  const dismissed = localStorage.getItem('stonks_welcome_dismissed');
+  if (!dismissed && !hasKeys && portfolio.length === 0) {
+    wrap.classList.add('show');
+  }
+}
+function dismissWelcome() {
+  document.getElementById('welcome-wrap').classList.remove('show');
+  localStorage.setItem('stonks_welcome_dismissed', '1');
+}
+
+buildHeader();
+renderTable();
+updateSummary();
+showWelcomeBanner();
+if (portfolio.length > 0) refreshAll().then(() => connectFinnhubWebSocket());
+else connectFinnhubWebSocket();
+setupAutoRefresh();
+</script>
+</body>
+</html>
