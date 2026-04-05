@@ -1648,8 +1648,8 @@ async function fetchYahooQuotes(symbols) {
         for (const q of data.quoteResponse.result) {
           const norm = normalizeYahoo(q);
           v7Results[q.symbol] = norm;
-          // Mark AH as fetched if v7 already has after-hours data
-          if (norm.postMarketPrice != null || norm.preMarketPrice != null || norm.marketState != null) {
+          // Only block the AH retry pass if we actually have a price — not just a marketState
+          if (norm.postMarketPrice != null || norm.preMarketPrice != null) {
             fetchedAfterHours.add(q.symbol);
           }
         }
@@ -1673,8 +1673,8 @@ async function fetchYahooQuotes(symbols) {
       if (data.chart && data.chart.result && data.chart.result[0]) {
         const chart = normalizeYahooChart(sym, data.chart.result[0]);
         v7Results[sym] = chart;
-        // If v8 already has after-hours data, mark it so the later AH pass skips this symbol
-        if (chart && (chart.postMarketPrice != null || chart.preMarketPrice != null || chart.marketState != null)) {
+        // Only block the AH retry pass if we actually have a price
+        if (chart && (chart.postMarketPrice != null || chart.preMarketPrice != null)) {
           fetchedAfterHours.add(sym);
         }
       }
@@ -2513,8 +2513,8 @@ async function fillFundamentals(symbols) {
           q.preMarketChange = summary.preMarketChange;
         }
         if (q.marketState == null && summary.marketState != null) q.marketState = summary.marketState;
-        // Mark after-hours as fetched if we got data, so the later AH pass skips this symbol
-        if (summary.postMarketPrice != null || summary.preMarketPrice != null || summary.marketState != null) {
+        // Only block the AH retry pass if we actually have a price
+        if (summary.postMarketPrice != null || summary.preMarketPrice != null) {
           fetchedAfterHours.add(sym);
         }
         return;
@@ -2813,11 +2813,12 @@ async function _refreshAll() {
     if (q.perf1Y == null && fc.perf1Y != null) q.perf1Y = fc.perf1Y;
   }
 
-  // Mark after-hours as fetched for symbols that already have data from initial sources
+  // Mark after-hours as fetched for symbols that already have a price from initial sources
   // (avoids redundant proxy calls in the after-hours pass)
+  // Only gate on actual price data — marketState alone (e.g. "CLOSED") must not block the pass
   for (const sym of symbols) {
     const q = quoteData[sym];
-    if (q && (q.postMarketPrice != null || q.preMarketPrice != null || q.marketState != null)) {
+    if (q && (q.postMarketPrice != null || q.preMarketPrice != null)) {
       fetchedAfterHours.add(sym);
     }
   }
