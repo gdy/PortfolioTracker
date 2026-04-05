@@ -795,7 +795,7 @@
         <span class="step-num">3.</span>
         <span><span class="key-name">FMP</span> (optional) &mdash; Sign up at <a href="https://site.financialmodelingprep.com/register" target="_blank">financialmodelingprep.com</a> for an extra data source fallback.</span>
       </div>
-      <p style="margin-top:14px; color:#888;">Without API keys, basic price data is still available via Yahoo Finance and FinnHub demo mode.</p>
+      <p style="margin-top:14px; color:#888;">Without API keys, basic price data is still available via Yahoo Finance. Adding a FinnHub key unlocks real-time WebSocket streaming and full fundamentals.</p>
 
       <p style="margin-top:16px; margin-bottom:6px; color:#aab;"><strong style="color:#e0e0e0;">Tips</strong></p>
       <div class="step">
@@ -969,6 +969,7 @@ let fetchedFundamentals = new Set(); // track symbols with cached FinnHub fundam
 let fetchedPerformance = new Set(); // track symbols whose YTD/6M/1Y perf has been fetched
 let fundamentalsCache = {}; // cache profile, metrics, earnings, dividends from FinnHub
 let alpacaWorkingFeed = null; // cache which Alpaca feed works ('', 'iex', or null=unknown)
+let attemptedSymbols = new Set(); // symbols that have had at least one fetch attempt
 
 // ==================== UNDO / REDO ====================
 const undoStack = [];
@@ -1108,7 +1109,6 @@ function stepInput(btn, delta, symbol, field) {
   else updateCost(symbol, val);
 }
 function addPosition() {
-  pushUndo();
   const tickerEl = document.getElementById('ticker-input');
   const sharesEl = document.getElementById('shares-input');
   const costEl = document.getElementById('cost-input');
@@ -1123,6 +1123,7 @@ function addPosition() {
   const purchaseDate = dateEl.value || '';
   if (!symbol) return;
   if (shares === 0) { alert('Enter a valid number of shares (negative for short).'); return; }
+  pushUndo(); // after validation — don't pollute undo stack with no-ops
 
   const existing = portfolio.find(p => p.symbol === symbol);
   if (existing) {
@@ -2605,6 +2606,9 @@ async function _refreshAll() {
     !hasFinnHub ? fetchFinnhubFreeQuotes(symbols) : Promise.resolve(null),
   ]);
 
+  // Mark all symbols as attempted (for UI: show "loading..." vs "retrying...")
+  for (const s of symbols) attemptedSymbols.add(s);
+
   // If Yahoo failed, try v6 endpoint as last resort
   let yahooFinal = yahooResult;
   if (!yahooFinal) {
@@ -3176,8 +3180,8 @@ function renderTable() {
     if (isError) {
       priceCell = '<span class="error-text">Unknown ticker</span>';
     } else if (price == null) {
-      // Known commodity/crypto that failed to fetch — show specific message
-      if (isCommoditySymbol(pos.symbol) || isCryptoSymbol(pos.symbol)) {
+      // Show "retrying..." only for commodity/crypto that already had a failed fetch attempt
+      if (attemptedSymbols.has(pos.symbol) && (isCommoditySymbol(pos.symbol) || isCryptoSymbol(pos.symbol))) {
         priceCell = '<span style="color:#f0ad4e">retrying...</span>';
       } else {
         priceCell = '<span style="color:#4a9eff">loading...</span>';
@@ -3437,7 +3441,7 @@ function getMarketPhase() {
 }
 
 let offHoursLastFullRefresh = 0;
-let lastRestRefresh = 0; // throttle REST refreshes when WebSocket is active
+let lastRestRefresh = Date.now(); // throttle REST refreshes when WebSocket is active
 
 // Lightweight refresh for crypto and commodity positions only (no stock API calls)
 async function refreshAlwaysOnOnly() {
@@ -3461,6 +3465,8 @@ async function refreshAlwaysOnOnly() {
           if (cData.perfYTD == null && existing.perfYTD != null) cData.perfYTD = existing.perfYTD;
           if (cData.perf6M == null && existing.perf6M != null) cData.perf6M = existing.perf6M;
           if (cData.perf1Y == null && existing.perf1Y != null) cData.perf1Y = existing.perf1Y;
+          if (cData.dayHigh == null && existing.dayHigh != null) cData.dayHigh = existing.dayHigh;
+          if (cData.dayLow == null && existing.dayLow != null) cData.dayLow = existing.dayLow;
         }
         quoteData[sym] = cData;
         updated = true;

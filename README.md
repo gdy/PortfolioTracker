@@ -52,7 +52,7 @@ A real-time portfolio tracker for stocks, crypto, and commodities that runs enti
 | Crypto | `BTC`, `ETH`, `SOL` … (auto-maps to `BTC-USD`) | CoinGecko (direct CORS, no proxy) |
 | Commodity futures | `GOLD`, `OIL`, `SILVER` … (auto-maps to `GC=F`) | Yahoo Finance v8 chart (via CORS proxy) |
 
-Commodity futures symbols containing `=` are handled carefully: `=` is kept raw in URL path segments (`yfPath`) but percent-encoded in query string parameters (`yfEnc`) to avoid ambiguity. Commodities that fail on the initial fetch are automatically retried by the main commodity retry pass and a deferred background retry that staggers requests across proxies with generous delays (8–10 s) to let rate limits recover.
+Commodity futures symbols containing `=` are handled carefully: `=` is kept raw in URL path segments (`yfPath`) but percent-encoded in query string parameters (`yfEnc`) to avoid ambiguity. Commodities that fail on the initial fetch are automatically retried by the main commodity retry pass (using an alternate Yahoo CDN domain) and a deferred background retry that staggers requests across proxies with a 4-second initial delay to let rate limits recover.
 
 ### Sorting & UI
 - **Click any column header to sort** — ascending/descending toggle with a sort indicator arrow.
@@ -74,7 +74,7 @@ Commodity futures symbols containing `=` are handled carefully: `=` is kept raw 
 | Source | Key required | Rate limit | What it provides |
 |--------|-------------|-----------|-----------------|
 | Yahoo Finance | No | Via CORS proxies | Quotes (v7 batch → v8 chart → v6 fallback), quoteSummary fundamentals, after-hours/pre-market, historical performance (YTD/6M/1Y) |
-| FinnHub | Free key (recommended) | 60 req/min REST + WebSocket | Real-time WebSocket streaming (stocks only), REST quotes, profiles, P/E, EPS, beta, dividends, earnings dates, 52-week performance |
+| FinnHub | Free key (required for WS) | 60 req/min REST + WebSocket | Real-time WebSocket streaming (stocks only), REST quotes, profiles, P/E, EPS, beta, dividends, earnings dates, 52-week performance |
 | Alpaca Markets | Free key | 200 req/min | Real-time IEX snapshots, real bid/ask, avg volume, 52-week range from historical bars |
 | Financial Modeling Prep | Free key | 250 req/day | Quotes with after-hours data, fundamentals |
 | CoinGecko | No | ~30 req/min | Crypto prices, 24h high/low, market cap, volume; 1-year chart for 52-week range and YTD/6M/1Y performance |
@@ -83,7 +83,7 @@ Commodity futures symbols containing `=` are handled carefully: `=` is kept raw 
 
 **Proxy efficiency** — Yahoo Finance requests go through CORS proxies. The code uses a single rotating proxy list (`lastWorkingProxy` cache) with HTML-page, rate-limit-string, and proxy-error-JSON detection to skip bad responses. Sequential processing with per-symbol delays prevents proxy saturation:
 - Performance history (YTD/6M/1Y): processed one symbol at a time with 800 ms gaps
-- Commodity retry: 3 s between symbols in the main pass; 8 s initial delay then per-proxy fallback in the background retry
+- Commodity retry: 2 s between symbols in the main pass; 4 s initial delay then per-proxy fallback in the background retry
 - FinnHub free quotes: 200 ms between symbols, stops on HTTP 429
 
 **Yahoo crumb** — fetched once and cached for 30 minutes (crumbs expire ~30 min). Automatically refreshed on expiry rather than failing silently with stale auth.
@@ -115,7 +115,7 @@ No install, no `npm`, no server required.
 1. Fork or push this repo to GitHub
 2. Go to **Settings → Pages**
 3. Set Source to `main` branch, folder `/` (root)
-4. Visit `https://<your-username>.github.io/<repo-name>/index.html`
+4. Visit `https://<your-username>.github.io/<repo-name>/`
 
 The app runs entirely client-side — no backend needed.
 
