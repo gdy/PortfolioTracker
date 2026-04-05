@@ -1,8 +1,8 @@
 # STONKS — Portfolio Tracker
 
-A real-time portfolio tracker for stocks, crypto, and commodities that runs entirely in your browser as a single HTML file. No server, no build tools, no dependencies — just open `portfolio.html` and go.
+A real-time portfolio tracker for stocks, crypto, and commodities that runs entirely in your browser as a single HTML file. No server, no build tools, no dependencies — just open `index.html` and go.
 
-[![Live Demo](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://gdy.github.io/PortfolioTracker/portfolio.html)
+[![Live Demo](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://gdy.github.io/PortfolioTracker/)
 ![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
 ![Single file](https://img.shields.io/badge/single-file-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -100,7 +100,7 @@ Commodity futures symbols containing `=` are handled carefully: `=` is kept raw 
 
 ## Getting Started
 
-1. **Download** `portfolio.html` (or clone this repo)
+1. **Download** `index.html` (or clone this repo)
 2. **Open** the file in any modern browser — desktop or mobile
 3. A **Welcome Guide** walks you through setup on first launch
 4. **Add API keys** — click **Settings** to enter free API keys (strongly recommended for full data)
@@ -115,7 +115,7 @@ No install, no `npm`, no server required.
 1. Fork or push this repo to GitHub
 2. Go to **Settings → Pages**
 3. Set Source to `main` branch, folder `/` (root)
-4. Visit `https://<your-username>.github.io/<repo-name>/portfolio.html`
+4. Visit `https://<your-username>.github.io/<repo-name>/index.html`
 
 The app runs entirely client-side — no backend needed.
 
