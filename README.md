@@ -1,6 +1,6 @@
-# STONKS — Stock Portfolio Tracker
+# STONKS — Portfolio Tracker
 
-A real-time stock portfolio tracker that runs entirely in your browser as a single HTML file. No server, no build tools, no dependencies — just open `portfolio.html` and go.
+A real-time portfolio tracker for stocks, crypto, and commodities that runs entirely in your browser as a single HTML file. No server, no build tools, no dependencies — just open `portfolio.html` and go.
 
 [![Live Demo](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://gdy.github.io/STONKS/portfolio.html)
 ![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
