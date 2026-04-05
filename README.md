@@ -2,7 +2,7 @@
 
 A real-time portfolio tracker for stocks, crypto, and commodities that runs entirely in your browser as a single HTML file. No server, no build tools, no dependencies — just open `portfolio.html` and go.
 
-[![Live Demo](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://gdy.github.io/STONKS/portfolio.html)
+[![Live Demo](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://gdy.github.io/PortfolioTracker/portfolio.html)
 ![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
 ![Single file](https://img.shields.io/badge/single-file-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -15,7 +15,7 @@ A real-time portfolio tracker for stocks, crypto, and commodities that runs enti
 - **WebSocket streaming** — real-time trade-by-trade price updates for stocks via FinnHub WebSocket (up to 50 symbols on the free tier). No proxy needed — bypasses CORS entirely. Auto-reconnects on disconnect. Renders are debounced via `requestAnimationFrame` for smooth performance under high-frequency trades. A pulsing **● Live** badge appears in the toolbar when streaming is active.
 - **Multi-source price fetching** — fetches from Yahoo Finance, FinnHub, Alpaca Markets, Financial Modeling Prep, and CoinGecko simultaneously, picks the source with the most coverage, and fills individual missing fields from secondary sources.
 - **Automatic source fallback** — if one API is down or rate-limited, data is pulled from the next available source automatically, with no user action required.
-- **Auto-refresh** — configurable polling intervals (5s / 10s / 15s / 30s / 60s). Works alongside WebSocket: polling keeps fundamentals, commodities, and crypto current while WebSocket handles instant stock price updates.
+- **Auto-refresh** — configurable polling intervals (5s / 10s / 15s / 30s / 60s). Works alongside WebSocket intelligently: when WebSocket is streaming live stock prices, REST polling is automatically throttled to once per 60 seconds (since it's only needed for fundamentals, volume, and non-stock assets). Without WebSocket, polling runs at the selected interval.
 - **Three-phase refresh scheduling** — during active market hours (4 AM–8 PM ET weekdays) all sources are polled; outside those hours, only crypto and commodity positions (24/7 markets) are refreshed on a lightweight path; on weekends, auto-refresh pauses unless you hold crypto or commodities.
 - **Pre-market and after-hours pricing** — displayed inline per row with change indicators. Sourced from Yahoo Finance v7 batch (one proxy call for all symbols), with a v8 chart candle fallback for any symbols not covered. Correctly handles the 2 AM overnight case where Yahoo's `currentTradingPeriod` points to the next session.
 - **Price flash animations** — green/red flashes on price changes (from both WebSocket updates and polling).
@@ -127,6 +127,8 @@ The app runs entirely client-side — no backend needed.
 2. Click **Import** in the toolbar
 3. Drag-and-drop the file or paste the CSV text — positions preview automatically
 4. Click **Import Positions**
+
+> **Note:** Large imports (20+ positions) may take a moment to fully load as live data is fetched sequentially through CORS proxies to avoid rate limiting. Prices and fundamentals will fill in progressively.
 
 Simple format (no headers required):
 ```csv

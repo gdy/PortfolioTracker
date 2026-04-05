@@ -1546,7 +1546,7 @@ function executeImport() {
   closeImportModal();
   renderTable();
   updateSummary();
-  setStatus(`Imported ${pendingImport.length} position(s). Fetching live data...`, 'loading');
+  setStatus(`Imported ${pendingImport.length} position(s). Fetching live data \u2014 this may take a moment for large portfolios...`, 'loading');
   refreshAll().then(() => syncWsSubscriptions());
 }
 
@@ -2627,15 +2627,15 @@ async function _refreshAll() {
   // Retry commodity symbols that didn't get data — FinnHub/Alpaca/FMP don't support futures,
   // so commodities depend on Yahoo proxies which can fail under concurrent load.
   // This runs BEFORE source selection so commodity data is available for all code paths.
+  // Try the opposite Yahoo CDN domain (query1 vs query2) since query2 may be rate-limited
+  // from the initial v8 fallback attempt.
   const missingCommodities = symbols.filter(s => isCommoditySymbol(s) && !allResults.some(r => r && r.data[s]));
   if (missingCommodities.length > 0) {
     for (const sym of missingCommodities) {
-      if (missingCommodities.indexOf(sym) > 0) await new Promise(r => setTimeout(r, 3000));
+      if (missingCommodities.indexOf(sym) > 0) await new Promise(r => setTimeout(r, 2000));
       try {
-        // Single fetchWithProxy call — it internally rotates through all proxies
-        // Use query2 (less rate-limited than query1) with range=2d for overnight coverage
-        const chartUrl = 'https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true';
-        const text = await fetchWithProxy(chartUrl, -1, 15000);
+        const chartUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true';
+        const text = await fetchWithProxy(chartUrl, -1, 12000);
         const data = JSON.parse(text);
         if (data.chart && data.chart.result && data.chart.result[0]) {
           const q = normalizeYahooChart(sym, data.chart.result[0]);
@@ -2645,9 +2645,7 @@ async function _refreshAll() {
           }
         }
       } catch (e) {
-        console.warn('Commodity retry failed for', sym, e.message);
         // Don't mark known commodities as errors — they're valid symbols, proxy just failed
-        // They'll show "loading..." until a proxy succeeds
       }
     }
   }
@@ -2977,8 +2975,8 @@ async function _refreshAll() {
   if (stillMissingCommodities.length > 0) {
     (async () => {
       for (const sym of stillMissingCommodities) {
-        // Wait 8s before first attempt, 10s between subsequent symbols
-        await new Promise(r => setTimeout(r, quoteData[sym] && quoteData[sym].price != null ? 0 : 8000));
+        // Wait 4s before first attempt — enough for proxy rate limits to partially recover
+        await new Promise(r => setTimeout(r, quoteData[sym] && quoteData[sym].price != null ? 0 : 4000));
         if (refreshInProgress || (quoteData[sym] && quoteData[sym].price != null)) continue;
         // Try each proxy until one works
         for (let pi = 0; pi < PROXIES.length; pi++) {
@@ -3439,6 +3437,7 @@ function getMarketPhase() {
 }
 
 let offHoursLastFullRefresh = 0;
+let lastRestRefresh = 0; // throttle REST refreshes when WebSocket is active
 
 // Lightweight refresh for crypto and commodity positions only (no stock API calls)
 async function refreshAlwaysOnOnly() {
@@ -3509,6 +3508,10 @@ function setupAutoRefresh() {
     if (document.getElementById('auto-refresh').checked && portfolio.length > 0) {
       const phase = getMarketPhase();
       if (phase === 'active') {
+        // When WebSocket is streaming live prices, throttle full REST refreshes to 60s
+        // (WS handles prices; REST is only needed for fundamentals, volume, after-hours)
+        if (wsConnected && Date.now() - lastRestRefresh < 60000) return;
+        lastRestRefresh = Date.now();
         refreshAll();
       } else {
         // Off-hours (weeknight or weekend)
