@@ -61,11 +61,13 @@ Commodity futures symbols containing `=` are handled carefully: `=` is kept raw 
 - **Dark theme** — terminal-style monospace UI with `color-scheme: dark` applied at the root so native browser widgets (date picker, scrollbars) match the theme.
 
 ### Mobile Responsive
-- Toolbar stacks vertically on small screens with larger tap targets.
-- Smooth horizontal table scrolling with `-webkit-overflow-scrolling: touch`.
-- Spin buttons always visible on touch devices.
-- Import dialog and settings panel fill the viewport on narrow screens.
-- Extra-small breakpoint at 380px for iPhone SE.
+- **Card view** — on screens ≤768px, the data table is replaced with a tap-to-expand card layout. Each card shows symbol, name, price, change, shares, and cost at a glance. Tapping a card expands it to reveal all 30+ data fields, inline editing for quantity/cost/date/notes, and a delete button.
+- **Pull-to-refresh** — pull down on the card list to trigger a data refresh.
+- **No iOS zoom** — all inputs use ≥16px font size to prevent Safari's auto-zoom on focus.
+- **Safe areas** — padding adapts to notched devices (iPhone X+) via `env(safe-area-inset-*)`.
+- **Toolbar** — stacks into a 2-column grid with descriptive placeholders; action buttons use a 3-column grid.
+- **Full-screen import** — import modal fills the viewport on mobile for easier CSV paste and file drop.
+- **Extra-small breakpoint** at 380px for iPhone SE.
 
 ---
 
