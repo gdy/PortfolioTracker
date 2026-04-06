@@ -49,6 +49,10 @@
   }
   .toolbar input:focus, .toolbar select:focus { border-color: #4a9eff; outline: none; }
   .toolbar input[type="date"] { color-scheme: dark; }
+  .date-input-wrap { position: relative; display: inline-block; }
+  .date-input-wrap .date-label {
+    display: none; /* hidden on desktop — the regular label is visible */
+  }
   .toolbar input[type="number"] { -moz-appearance: textfield; appearance: textfield; padding-right: 18px; }
   .toolbar input[type="number"]::-webkit-inner-spin-button,
   .toolbar input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
@@ -617,9 +621,21 @@
     }
     .toolbar > div:first-child > label { display: none; }
     .toolbar > div:first-child .toolbar-num-wrap,
-    .toolbar > div:first-child > input {
+    .toolbar > div:first-child > input,
+    .toolbar > div:first-child .date-input-wrap {
       width: 100%;
     }
+    .date-input-wrap { width: 100%; }
+    .date-input-wrap input { width: 100% !important; }
+    .date-input-wrap .date-label {
+      display: block;
+      position: absolute;
+      left: 10px; top: 50%; transform: translateY(-50%);
+      color: #666; font-size: 14px;
+      pointer-events: none;
+    }
+    /* Hide label when date has a value (toggled via JS) */
+    .date-input-wrap.has-value .date-label { display: none; }
     .toolbar > div:first-child .btn-add {
       grid-column: 1 / -1;
       width: 100%;
@@ -663,8 +679,15 @@
       border-radius: 2px;
     }
     .auto-refresh-toggle input[type="checkbox"] {
-      width: 16px;
-      height: 16px;
+      width: 18px;
+      height: 18px;
+    }
+    .auto-refresh-toggle input:checked::after {
+      left: 5px;
+      top: 1px;
+      width: 5px;
+      height: 10px;
+      border-width: 0 2px 2px 0;
     }
 
     /* Status bar */
@@ -783,7 +806,10 @@
       <div class="toolbar-spin"><button tabindex="-1" onclick="stepToolbar('cost-input',0.01)">&#9650;</button><button tabindex="-1" onclick="stepToolbar('cost-input',-0.01)">&#9660;</button></div>
     </div>
     <label>Date:</label>
-    <input type="date" id="date-input" style="width:120px;" />
+    <div class="date-input-wrap">
+      <input type="date" id="date-input" style="width:120px;" />
+      <span class="date-label">Date</span>
+    </div>
     <button class="btn btn-add" onclick="addPosition()">+ Add</button>
   </div>
   <div style="margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
@@ -1246,6 +1272,7 @@ function addPosition() {
   renderTable();
   updateSummary();
   tickerEl.value = ''; sharesEl.value = ''; costEl.value = ''; dateEl.value = '';
+  updateDateLabel();
   tickerEl.focus();
   setStatus('Fetching data for ' + symbol + '...', 'loading');
   // If a refresh is already in progress (e.g. page just loaded), queue another
@@ -3807,6 +3834,16 @@ document.getElementById('auto-refresh').addEventListener('change', function() {
     if (e.key === 'Enter') addPosition();
   });
 });
+
+// Toggle date label visibility based on whether the input has a value
+const dateInput = document.getElementById('date-input');
+const dateWrap = dateInput.closest('.date-input-wrap');
+function updateDateLabel() {
+  if (dateWrap) dateWrap.classList.toggle('has-value', !!dateInput.value);
+}
+dateInput.addEventListener('input', updateDateLabel);
+dateInput.addEventListener('change', updateDateLabel);
+updateDateLabel();
 
 // ==================== INIT ====================
 // Migrate existing shorthand symbols (e.g. BTC -> BTC-USD, GOLD -> GC=F)

@@ -2,7 +2,7 @@
 
 A real-time portfolio tracker for stocks, crypto, and commodities that runs entirely in your browser as a single HTML file. No server, no build tools, no dependencies — just open `index.html` and go.
 
-[![Live Demo](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://gdy.github.io/PortfolioTracker/)
+**[Open App](https://gdy.github.io/PortfolioTracker/)** · [![Live Demo](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://gdy.github.io/PortfolioTracker/)
 ![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
 ![Single file](https://img.shields.io/badge/single-file-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
