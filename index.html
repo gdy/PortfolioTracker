@@ -143,7 +143,8 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 2650px;
+    /* min-width is set dynamically by buildHeader() based on visible columns,
+       so hiding columns actually shrinks the table instead of leaving large gaps. */
   }
   thead th {
     background: #16162a;
@@ -499,6 +500,78 @@
   @keyframes eePulse { 0%,100% { opacity: 0.7; transform: scale(1); } 50% { opacity: 1; transform: scale(1.05); } }
   @keyframes eeFall { to { transform: translateY(110vh) rotate(720deg); opacity: 0; } }
 
+  /* ==================== PORTFOLIO BAR ==================== */
+  .portfolio-bar {
+    background: #0d0d1a; padding: 6px 12px; display: flex; gap: 6px;
+    align-items: center; border-bottom: 1px solid #222;
+  }
+  .portfolio-bar select {
+    background: #1a1a2e; border: 1px solid #444; color: #e0e0e0;
+    font-family: inherit; font-size: 13px; padding: 4px 8px;
+    border-radius: 2px; min-width: 120px;
+  }
+  .portfolio-btn {
+    background: #1e1e3a; border: 1px solid #444; color: #ccc;
+    font-size: 13px; width: 28px; height: 28px; cursor: pointer;
+    border-radius: 2px; display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s;
+  }
+  .portfolio-btn:hover { background: #2a2a50; }
+  .portfolio-btn-danger { color: #e55; border-color: #533; }
+  .portfolio-btn-danger:hover { background: #3a1a1a; }
+
+  /* ==================== ALLOCATION CHART ==================== */
+  .allocation-wrap {
+    background: #0f0f1f; border-bottom: 1px solid #222; padding: 12px;
+    display: flex; align-items: center; justify-content: center; gap: 20px;
+    flex-wrap: wrap;
+  }
+  .allocation-legend {
+    display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; max-width: 500px;
+  }
+  .alloc-item { display: flex; align-items: center; gap: 4px; }
+  .alloc-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  .alloc-toggle {
+    background: #1a1a30; border: 1px solid #333; color: #8ab4ff;
+    font-family: inherit; font-size: 11px; padding: 4px 10px;
+    border-radius: 3px; cursor: pointer; margin-left: 12px;
+  }
+  .alloc-toggle:hover { background: #25254a; color: #b8d4ff; }
+
+  /* ==================== ALERT STYLES ==================== */
+  .alert-icon {
+    cursor: pointer; font-size: 11px; margin-left: 4px; opacity: 0.6;
+    transition: opacity 0.15s; vertical-align: middle;
+  }
+  .alert-icon:hover { opacity: 1; }
+  .alert-popover {
+    position: fixed; background: #12122a; border: 1px solid #444;
+    border-radius: 6px; padding: 12px; z-index: 6000; width: 220px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  @keyframes alertPulse { 0%,100% { box-shadow: none; } 50% { box-shadow: inset 0 0 12px rgba(255,200,0,0.15); } }
+  .alert-triggered {
+    background: rgba(255,200,0,0.06) !important;
+    animation: alertPulse 3s ease-in-out infinite;
+  }
+
+  /* ==================== COLUMN PICKER ==================== */
+  .col-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ccc; cursor: pointer; padding: 4px; border-radius: 2px; }
+  .col-check:hover { background: #1a1a30; }
+  .col-check input { cursor: pointer; }
+
+  /* ==================== DRAG TO REORDER ==================== */
+  tr[draggable="true"] { cursor: grab; }
+  tr[draggable="true"]:active { cursor: grabbing; }
+  tr.dragging { opacity: 0.4; }
+  tr.drag-over { border-top: 2px solid #4a9eff !important; }
+  .mobile-drag-handle {
+    color: #444; font-size: 16px; cursor: grab; padding: 0 8px 0 0;
+    display: flex; align-items: center; touch-action: none;
+    -webkit-user-select: none; user-select: none;
+  }
+  .mobile-drag-handle:active { color: #4a9eff; cursor: grabbing; }
+
   /* ==================== MOBILE CARD VIEW ==================== */
   .mobile-cards { display: none; padding: 0; }
   .mobile-card {
@@ -512,12 +585,12 @@
   }
   .mobile-card:active { background: #1a1a35; }
   .mobile-card-main {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 4px 12px;
-    align-items: start;
+    display: flex;
+    gap: 8px;
+    align-items: center;
   }
-  .mobile-card-left { min-width: 0; }
+  .mobile-card-left { flex: 1; min-width: 0; }
+  .mobile-card-right { text-align: right; flex-shrink: 0; }
   .mobile-card-sym {
     font-weight: bold; color: #fff; font-size: 15px;
     display: flex; align-items: center; gap: 8px;
@@ -527,7 +600,6 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     max-width: 140px;
   }
-  .mobile-card-right { text-align: right; }
   .mobile-card-price { font-size: 17px; font-weight: bold; }
   .mobile-card-change { font-size: 12px; }
   .mobile-card-row2 {
@@ -578,6 +650,22 @@
   .mobile-card.flash-red { animation: flashR 0.6s; }
   .mobile-card .after-hours { color: #b388ff; font-size: 11px; }
 
+  /* Mobile sort bar */
+  .mobile-sort-bar {
+    display: none; padding: 8px 14px; background: #0f0f20;
+    border-bottom: 1px solid #2a2a3a; gap: 8px; align-items: center;
+  }
+  .mobile-sort-bar select {
+    flex: 1; background: #0d0d1a; border: 1px solid #333; color: #ccc;
+    font-family: inherit; font-size: 13px; padding: 8px 10px;
+    border-radius: 3px; min-height: 36px;
+  }
+  .mobile-sort-dir {
+    background: #1e1e3a; border: 1px solid #444; color: #4a9eff;
+    font-size: 14px; width: 36px; height: 36px; cursor: pointer;
+    border-radius: 3px; display: flex; align-items: center; justify-content: center;
+  }
+
   /* Pull-to-refresh indicator */
   .pull-indicator {
     text-align: center; color: #4a9eff; font-size: 12px;
@@ -594,9 +682,18 @@
       padding-right: env(safe-area-inset-right);
     }
 
+    /* Portfolio bar */
+    .portfolio-bar select { flex: 1; font-size: 16px; min-height: 36px; }
+    .portfolio-btn { width: 36px; height: 36px; font-size: 16px; }
+
+    /* Allocation chart */
+    .allocation-wrap { flex-direction: column; }
+
     /* Hide table, show cards */
     .table-wrap { display: none; }
     .mobile-cards { display: block; padding-bottom: env(safe-area-inset-bottom); }
+    /* .mobile-sort-bar visibility is controlled by JS (renderTable) so it
+       hides when the portfolio is empty. */
 
     /* Toolbar: stack vertically, larger touch targets */
     .toolbar {
@@ -791,6 +888,13 @@
 </head>
 <body>
 
+<div class="portfolio-bar">
+  <select id="portfolio-select" onchange="switchPortfolio(this.value)"></select>
+  <button class="portfolio-btn" onclick="createPortfolioPrompt()" title="New portfolio">+</button>
+  <button class="portfolio-btn" onclick="renamePortfolioPrompt()" title="Rename">&#9998;</button>
+  <button class="portfolio-btn portfolio-btn-danger" onclick="deletePortfolioPrompt()" title="Delete">&#10005;</button>
+</div>
+
 <div class="toolbar">
   <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
     <label>Ticker:</label>
@@ -826,7 +930,10 @@
     <span id="ws-indicator" style="display:none; font-size:11px; color:#3c8; white-space:nowrap;" title="FinnHub WebSocket connected — real-time trade updates active">&#9679; Live</span>
     <button class="btn btn-refresh" onclick="refreshAll()">&#8635; Refresh</button>
     <button class="btn" onclick="openImportModal()">Import</button>
+    <button class="btn" onclick="exportCSV()">Export</button>
+    <button class="btn" onclick="toggleColumnPicker()">Columns</button>
     <button class="btn" onclick="toggleSettings()">Settings</button>
+    <button class="btn" onclick="sharePortfolio()">Share</button>
     <button class="btn btn-danger" onclick="clearAll()">Clear All</button>
   </div>
 </div>
@@ -850,6 +957,50 @@
     <div class="import-actions">
       <button class="btn btn-add" onclick="executeImport()">Import Positions</button>
     </div>
+  </div>
+</div>
+
+<!-- Column Picker -->
+<div class="import-overlay" id="column-picker-overlay" onclick="if(event.target===this)toggleColumnPicker()">
+  <div class="import-modal" style="width:400px;">
+    <button class="close-btn" onclick="toggleColumnPicker()">&times;</button>
+    <h3>Visible Columns</h3>
+    <div style="display:flex; gap:8px; margin-bottom:12px;">
+      <button class="btn" onclick="hiddenColumns=[];saveHiddenColumns();renderColumnPicker();buildHeader();renderTable();">Show All</button>
+      <button class="btn" onclick="hiddenColumns=COLUMNS.filter(c=>!['symbol','name','last','change','changePct','shares','costBasis','mktValue','totalPL','delete'].includes(c.key)).map(c=>c.key);saveHiddenColumns();renderColumnPicker();buildHeader();renderTable();">Essential Only</button>
+    </div>
+    <div id="column-picker-list" style="display:grid; grid-template-columns:1fr 1fr; gap:6px; max-height:60vh; overflow-y:auto;"></div>
+  </div>
+</div>
+
+<!-- Share Modal -->
+<div class="import-overlay" id="share-overlay" onclick="if(event.target===this)document.getElementById('share-overlay').classList.remove('show')">
+  <div class="import-modal" style="width:480px;">
+    <button class="close-btn" onclick="document.getElementById('share-overlay').classList.remove('show')">&times;</button>
+    <h3>Share Portfolio</h3>
+    <p style="color:#888; font-size:12px; margin-bottom:10px;">Anyone with this link can view your positions (symbols, shares, cost basis, dates). No API keys or notes are shared.</p>
+    <textarea id="share-url" readonly style="width:100%; height:60px; background:#0a0a15; border:1px solid #444; color:#4a9eff; font-size:12px; padding:8px; border-radius:3px; resize:none;"></textarea>
+    <div style="display:flex; gap:8px; margin-top:10px;">
+      <button class="btn btn-add" onclick="copyShareURL()">Copy Link</button>
+      <span class="save-confirm" id="confirm-share">&#10003; Copied</span>
+    </div>
+  </div>
+</div>
+
+<!-- Alert Popover -->
+<div class="alert-popover" id="alert-popover" style="display:none;" onclick="event.stopPropagation()">
+  <div style="font-size:11px; color:#888; margin-bottom:6px;">Price Alerts for <strong id="alert-popover-sym" style="color:#fff;"></strong></div>
+  <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+    <label style="color:#3c8; font-size:11px; min-width:44px;">Above $</label>
+    <input type="number" id="alert-above" step="0.01" style="flex:1; background:#0a0a15; border:1px solid #333; color:#e0e0e0; padding:4px 6px; font-size:12px; border-radius:2px; font-family:inherit;" />
+  </div>
+  <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
+    <label style="color:#e55; font-size:11px; min-width:44px;">Below $</label>
+    <input type="number" id="alert-below" step="0.01" style="flex:1; background:#0a0a15; border:1px solid #333; color:#e0e0e0; padding:4px 6px; font-size:12px; border-radius:2px; font-family:inherit;" />
+  </div>
+  <div style="display:flex; gap:6px;">
+    <button class="btn btn-add" onclick="saveAlertFromPopover()" style="flex:1; font-size:11px; padding:4px;">Set</button>
+    <button class="btn" onclick="clearAlertFromPopover()" style="flex:1; font-size:11px; padding:4px;">Clear</button>
   </div>
 </div>
 
@@ -955,6 +1106,12 @@
     <span class="summary-label">Positions:</span>
     <span class="summary-value" id="total-positions">0</span>
   </div>
+  <button class="alloc-toggle" id="alloc-toggle" onclick="toggleAllocationChart()" style="display:none;">Show Chart</button>
+</div>
+
+<div id="allocation-wrap" class="allocation-wrap" style="display:none;">
+  <div id="allocation-chart"></div>
+  <div id="allocation-legend" class="allocation-legend"></div>
 </div>
 
 <div class="table-wrap">
@@ -970,6 +1127,12 @@
 </div>
 
 <div class="mobile-cards" id="mobile-cards">
+  <div class="mobile-sort-bar" id="mobile-sort-bar" style="display:none;">
+    <select id="mobile-sort-col" onchange="setMobileSort(this.value)">
+      <option value="">Sort: Manual</option>
+    </select>
+    <button class="mobile-sort-dir" id="mobile-sort-dir" onclick="toggleMobileSortDir()">&#9650;</button>
+  </div>
   <div class="pull-indicator" id="pull-indicator">&#8635; Pull to refresh</div>
   <div class="empty-msg" id="mobile-empty-msg" style="display:none;">
     No positions. Add a ticker above to get started.
@@ -1035,40 +1198,43 @@
 })();
 
 // ==================== COLUMN DEFINITIONS ====================
+// `w` is the minimum pixel width for the column. Used by buildHeader() to size
+// the table dynamically so hiding columns actually shrinks the table instead of
+// just stretching the remaining columns.
 const COLUMNS = [
-  { key: 'symbol',    label: 'Symbol',       align: 'left',  sortable: true },
-  { key: 'name',      label: 'Name',         align: 'left',  sortable: true },
-  { key: 'last',      label: 'Last',         align: 'right', sortable: true },
-  { key: 'change',    label: '$ Chg',        align: 'right', sortable: true },
-  { key: 'changePct', label: '% Chg',        align: 'right', sortable: true },
-  { key: 'afterHours',label: 'After Hrs',    align: 'right', sortable: true },
-  { key: 'shares',    label: 'Quantity',      align: 'right', sortable: true },
-  { key: 'costBasis', label: 'Cost Basis',    align: 'right', sortable: true },
-  { key: 'date',      label: 'Purchase Date', align: 'right', sortable: true },
-  { key: 'mktValue',  label: 'Mkt Value',     align: 'right', sortable: true },
-  { key: 'dayPL',     label: 'P&L Today',     align: 'right', sortable: true },
-  { key: 'divYield',  label: 'Div / Yield',   align: 'right', sortable: true },
-  { key: 'exDiv',     label: 'Ex-Div Date',   align: 'right', sortable: true },
-  { key: 'earnings',  label: 'Next Earnings', align: 'right', sortable: true },
-  { key: 'perfYTD',   label: 'YTD Perf',      align: 'right', sortable: true },
-  { key: 'perf6M',    label: '6M Perf',       align: 'right', sortable: true },
-  { key: 'perf1Y',    label: '1Y Perf',       align: 'right', sortable: true },
-  { key: 'totalPL',   label: 'Total P&L',     align: 'right', sortable: true },
-  { key: 'totalPLPct',label: 'P&L %',         align: 'right', sortable: true },
-  { key: 'prevClose', label: 'Prev Close',    align: 'right', sortable: true },
-  { key: 'open',      label: 'Open',          align: 'right', sortable: true },
-  { key: 'bid',       label: 'Bid',           align: 'right', sortable: true },
-  { key: 'ask',       label: 'Ask',           align: 'right', sortable: true },
-  { key: 'dayRange',  label: 'Day Range',     align: 'right', sortable: false },
-  { key: 'wk52Range', label: '52-Wk Range',   align: 'right', sortable: false },
-  { key: 'volume',    label: 'Volume',        align: 'right', sortable: true },
-  { key: 'avgVol',    label: 'Avg Vol 10D',   align: 'right', sortable: true },
-  { key: 'mktCap',    label: 'Mkt Cap',       align: 'right', sortable: true },
-  { key: 'pe',        label: 'P/E',           align: 'right', sortable: true },
-  { key: 'eps',       label: 'EPS',           align: 'right', sortable: true },
-  { key: 'beta',      label: 'Beta',          align: 'right', sortable: true },
-  { key: 'notes',     label: 'Notes',         align: 'left',  sortable: false },
-  { key: 'delete',    label: '',              align: 'right', sortable: false },
+  { key: 'symbol',    label: 'Symbol',        align: 'left',  sortable: true,  w: 70  },
+  { key: 'name',      label: 'Name',          align: 'left',  sortable: true,  w: 140 },
+  { key: 'last',      label: 'Last',          align: 'right', sortable: true,  w: 80  },
+  { key: 'change',    label: '$ Chg',         align: 'right', sortable: true,  w: 75  },
+  { key: 'changePct', label: '% Chg',         align: 'right', sortable: true,  w: 75  },
+  { key: 'afterHours',label: 'After Hrs',     align: 'right', sortable: true,  w: 110 },
+  { key: 'shares',    label: 'Quantity',      align: 'right', sortable: true,  w: 110 },
+  { key: 'costBasis', label: 'Cost Basis',    align: 'right', sortable: true,  w: 115 },
+  { key: 'date',      label: 'Purchase Date', align: 'right', sortable: true,  w: 130 },
+  { key: 'mktValue',  label: 'Mkt Value',     align: 'right', sortable: true,  w: 100 },
+  { key: 'dayPL',     label: 'P&L Today',     align: 'right', sortable: true,  w: 100 },
+  { key: 'divYield',  label: 'Div / Yield',   align: 'right', sortable: true,  w: 100 },
+  { key: 'exDiv',     label: 'Ex-Div Date',   align: 'right', sortable: true,  w: 95  },
+  { key: 'earnings',  label: 'Next Earnings', align: 'right', sortable: true,  w: 105 },
+  { key: 'perfYTD',   label: 'YTD Perf',      align: 'right', sortable: true,  w: 80  },
+  { key: 'perf6M',    label: '6M Perf',       align: 'right', sortable: true,  w: 80  },
+  { key: 'perf1Y',    label: '1Y Perf',       align: 'right', sortable: true,  w: 80  },
+  { key: 'totalPL',   label: 'Total P&L',     align: 'right', sortable: true,  w: 100 },
+  { key: 'totalPLPct',label: 'P&L %',         align: 'right', sortable: true,  w: 80  },
+  { key: 'prevClose', label: 'Prev Close',    align: 'right', sortable: true,  w: 85  },
+  { key: 'open',      label: 'Open',          align: 'right', sortable: true,  w: 75  },
+  { key: 'bid',       label: 'Bid',           align: 'right', sortable: true,  w: 70  },
+  { key: 'ask',       label: 'Ask',           align: 'right', sortable: true,  w: 70  },
+  { key: 'dayRange',  label: 'Day Range',     align: 'right', sortable: false, w: 130 },
+  { key: 'wk52Range', label: '52-Wk Range',   align: 'right', sortable: false, w: 130 },
+  { key: 'volume',    label: 'Volume',        align: 'right', sortable: true,  w: 90  },
+  { key: 'avgVol',    label: 'Avg Vol 10D',   align: 'right', sortable: true,  w: 100 },
+  { key: 'mktCap',    label: 'Mkt Cap',       align: 'right', sortable: true,  w: 90  },
+  { key: 'pe',        label: 'P/E',           align: 'right', sortable: true,  w: 60  },
+  { key: 'eps',       label: 'EPS',           align: 'right', sortable: true,  w: 60  },
+  { key: 'beta',      label: 'Beta',          align: 'right', sortable: true,  w: 60  },
+  { key: 'notes',     label: 'Notes',         align: 'left',  sortable: false, w: 150 },
+  { key: 'delete',    label: '',              align: 'right', sortable: false, w: 40  },
 ];
 
 // ==================== STATE ====================
@@ -1096,6 +1262,8 @@ let fetchedPerformance = new Set(); // track symbols whose YTD/6M/1Y perf has be
 let fundamentalsCache = {}; // cache profile, metrics, earnings, dividends from FinnHub
 let alpacaWorkingFeed = null; // cache which Alpaca feed works ('', 'iex', or null=unknown)
 let attemptedSymbols = new Set(); // symbols that have had at least one fetch attempt
+let hiddenColumns = lsGet('stonks_hidden_columns', '[]'); // column keys to hide
+let alerts = lsGet('stonks_alerts', '{}'); // { symbol: { above: num|null, below: num|null } }
 
 // ==================== UNDO / REDO ====================
 const undoStack = [];
@@ -1153,8 +1321,33 @@ document.addEventListener('keydown', e => {
 });
 
 // ==================== PERSISTENCE ====================
-function savePortfolio() { localStorage.setItem('stonks_portfolio', JSON.stringify(portfolio)); }
-function saveNotes() { localStorage.setItem('stonks_notes', JSON.stringify(notes)); }
+function savePortfolio() {
+  localStorage.setItem('stonks_portfolio', JSON.stringify(portfolio));
+  // Also save into the active portfolio slot
+  const all = lsGet('stonks_portfolios', '{}');
+  const name = localStorage.getItem('stonks_active_portfolio') || 'Default';
+  if (!all[name]) all[name] = {};
+  all[name].portfolio = portfolio;
+  all[name].notes = notes;
+  localStorage.setItem('stonks_portfolios', JSON.stringify(all));
+}
+function saveNotes() {
+  localStorage.setItem('stonks_notes', JSON.stringify(notes));
+  const all = lsGet('stonks_portfolios', '{}');
+  const name = localStorage.getItem('stonks_active_portfolio') || 'Default';
+  if (!all[name]) all[name] = {};
+  all[name].notes = notes;
+  localStorage.setItem('stonks_portfolios', JSON.stringify(all));
+}
+function saveHiddenColumns() { localStorage.setItem('stonks_hidden_columns', JSON.stringify(hiddenColumns)); }
+function saveAlerts() {
+  // Strip volatile _notified flag — it's a runtime debounce, not persistent state
+  const clean = {};
+  for (const k of Object.keys(alerts)) {
+    clean[k] = { above: alerts[k].above ?? null, below: alerts[k].below ?? null };
+  }
+  localStorage.setItem('stonks_alerts', JSON.stringify(clean));
+}
 function flashConfirm(id) {
   const el = document.getElementById(id);
   el.classList.add('show');
@@ -1240,15 +1433,26 @@ function addPosition() {
   const costEl = document.getElementById('cost-input');
   const dateEl = document.getElementById('date-input');
   let symbol = tickerEl.value.trim().toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+  // Validation: missing/invalid fields focus the offending input and leave
+  // every other input — including the ticker — untouched.
+  if (!symbol) {
+    setStatus('Enter a ticker symbol', 'error');
+    tickerEl.focus();
+    return;
+  }
   // Auto-map crypto shorthand (BTC -> BTC-USD)
   if (CRYPTO_MAP[symbol]) symbol = CRYPTO_MAP[symbol];
   // Auto-map commodity shorthand (GOLD -> GC=F)
   if (COMMODITY_MAP[symbol]) symbol = COMMODITY_MAP[symbol];
-  const shares = parseFloat(sharesEl.value) || 0;
+  const sharesRaw = parseFloat(sharesEl.value);
+  if (!isFinite(sharesRaw) || sharesRaw === 0) {
+    setStatus('Enter shares for ' + symbol + ' (negative for short)', 'error');
+    sharesEl.focus();
+    return;
+  }
+  const shares = sharesRaw;
   const costBasis = parseFloat(costEl.value) || 0;
   const purchaseDate = dateEl.value || '';
-  if (!symbol) return;
-  if (shares === 0) { alert('Enter a valid number of shares (negative for short).'); return; }
   pushUndo(); // after validation — don't pollute undo stack with no-ops
 
   const existing = portfolio.find(p => p.symbol === symbol);
@@ -1267,6 +1471,7 @@ function addPosition() {
   fetchedFundamentals.delete(symbol);
   fetchedPerformance.delete(symbol);
   fetchedAfterHours.delete(symbol);
+  attemptedSymbols.delete(symbol); // reset so the row shows "loading..." not "retrying..."
   delete fundamentalsCache[symbol];
   savePortfolio();
   renderTable();
@@ -1275,8 +1480,12 @@ function addPosition() {
   updateDateLabel();
   tickerEl.focus();
   setStatus('Fetching data for ' + symbol + '...', 'loading');
-  // If a refresh is already in progress (e.g. page just loaded), queue another
-  // one so the new symbol gets fetched right after
+  // Fire a targeted single-symbol fetch immediately so the new symbol's price
+  // shows up without waiting for the in-progress refresh to complete. This is
+  // the difference between "gold appears in 2 seconds" and "gold appears in 30
+  // seconds after all 20 stocks finish their fundamentals fetch".
+  fetchOneSymbolNow(symbol);
+  // Also queue a full refresh so fundamentals/perf/etc fill in
   if (refreshInProgress) {
     pendingRefreshAfter = true;
   }
@@ -1728,6 +1937,80 @@ async function fetchWithProxy(url, proxyIndex = -1, timeout = 10000) {
   return attempt(proxyIndex);
 }
 
+// Validate a proxy response is real data, not an error page
+function _validateProxyResponse(text) {
+  if (!text) throw new Error('Empty response');
+  if (text.trimStart().startsWith('<')) throw new Error('HTML error page');
+  if (text.startsWith('Edge:')) throw new Error('Proxy rate limited');
+  if (text.length < 300) {
+    try { const j = JSON.parse(text); if (j.error && !j.chart && !j.quoteResponse) throw new Error('Proxy error: ' + j.error); } catch (pe) { if (pe.message && pe.message.startsWith('Proxy error')) throw pe; }
+  }
+  return text;
+}
+
+// Race N proxies in parallel and return the first valid response.
+// Used for slow commodity fetches where sequential proxy attempts add 30+ seconds.
+async function fetchWithProxyRace(url, n = 3, timeout = 8000) {
+  // Try direct fetch first (cheap if it works, e.g. served from a real web server)
+  try {
+    const directResp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+    if (directResp.ok) {
+      const text = await directResp.text();
+      if (text && (text.trimStart()[0] === '{' || text.trimStart()[0] === '[')) return text;
+    }
+  } catch (_) { /* expected on file:// — fall through */ }
+
+  // Pick N proxies, starting with the last-known-good one
+  const order = [];
+  for (let i = 0; i < PROXIES.length; i++) {
+    order.push((lastWorkingProxy + i) % PROXIES.length);
+  }
+  const picks = order.slice(0, Math.min(n, PROXIES.length));
+
+  const attempts = picks.map(idx => (async () => {
+    const proxiedUrl = PROXIES[idx](url);
+    const resp = await fetch(proxiedUrl, { signal: AbortSignal.timeout(timeout) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const text = _validateProxyResponse(await resp.text());
+    lastWorkingProxy = idx;
+    return text;
+  })());
+
+  return Promise.any(attempts);
+}
+
+// Maximum-aggression race: fires every proxy across multiple URL variants in parallel
+// and returns the first valid response. Used when we need a single symbol's data NOW
+// (e.g. user adds a ticker mid-import) and proxy capacity is contested.
+async function fetchAnyVariantRace(urls, timeout = 9000) {
+  const attempts = [];
+  // Try direct fetch on each URL too — cheap if it works
+  for (const url of urls) {
+    attempts.push((async () => {
+      const r = await fetch(url, { signal: AbortSignal.timeout(timeout) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const t = await r.text();
+      if (!t || (t.trimStart()[0] !== '{' && t.trimStart()[0] !== '[')) throw new Error('Not JSON');
+      return t;
+    })());
+  }
+  // Fan out every proxy across every URL
+  for (let pi = 0; pi < PROXIES.length; pi++) {
+    for (const url of urls) {
+      const idx = pi;
+      attempts.push((async () => {
+        const proxiedUrl = PROXIES[idx](url);
+        const resp = await fetch(proxiedUrl, { signal: AbortSignal.timeout(timeout) });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const text = _validateProxyResponse(await resp.text());
+        lastWorkingProxy = idx;
+        return text;
+      })());
+    }
+  }
+  return Promise.any(attempts);
+}
+
 // --- Yahoo Finance: Get crumb ---
 let yfCrumb = null;
 let yfCrumbTime = 0;
@@ -1765,9 +2048,32 @@ async function fetchYahooQuotes(symbols) {
     yahooV7Failed = false;
   }
   let v7Results = {};
-  if (!yahooV7Failed) {
+
+  // Commodities (futures like GC=F) are never returned by v7 because the = breaks parsing.
+  // Kick off their v8 chart races in parallel with the v7 batch so gold doesn't have to wait
+  // for 20 stock symbols + crumb fetch through a slow proxy.
+  const commoditySyms = symbols.filter(isCommoditySymbol);
+  const v8Promises = commoditySyms.map(async (sym, i) => {
+    // Tiny stagger so we don't fire 5 commodities all at once through the same proxy
+    if (i > 0) await new Promise(r => setTimeout(r, 200 * i));
+    try {
+      const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true', 3, 8000);
+      const data = JSON.parse(text);
+      if (data.chart && data.chart.result && data.chart.result[0]) {
+        return { sym, chart: normalizeYahooChart(sym, data.chart.result[0]) };
+      }
+    } catch (e) {
+      console.warn('v8 chart failed for', sym, e.message);
+    }
+    return { sym, chart: null };
+  });
+
+  // v7 batch for non-commodity symbols, in parallel with the commodity races above
+  const stockSyms = symbols.filter(s => !isCommoditySymbol(s));
+  const v7Promise = (async () => {
+    if (yahooV7Failed || stockSyms.length === 0) return;
     const crumb = await getYahooCrumb();
-    let url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + symbols.map(yfEnc).join(',');
+    let url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + stockSyms.map(yfEnc).join(',');
     if (crumb) url += '&crumb=' + encodeURIComponent(crumb);
     try {
       const text = await fetchWithProxy(url);
@@ -1787,21 +2093,31 @@ async function fetchYahooQuotes(symbols) {
       yahooV7Failed = true;
       yahooV7FailedTime = Date.now();
     }
+  })();
+
+  // Wait for both lanes
+  const [_, v8Results] = await Promise.all([v7Promise, Promise.all(v8Promises)]);
+  for (const r of v8Results) {
+    if (r && r.chart) {
+      v7Results[r.sym] = r.chart;
+      if (r.chart.postMarketPrice != null || r.chart.preMarketPrice != null) {
+        fetchedAfterHours.add(r.sym);
+      }
+    }
   }
 
-  // v8 chart calls for any symbols v7 missed (e.g. futures like GC=F whose = breaks v7 query parsing)
-  // Process sequentially to avoid proxy rate limits from concurrent requests
-  const missing = symbols.filter(s => !v7Results[s]);
-  for (let mi = 0; mi < missing.length; mi++) {
-    if (mi > 0) await new Promise(r => setTimeout(r, 3000));
-    const sym = missing[mi];
+  // Final fallback: any non-commodity symbol that v7 missed (e.g. delisted, bad ticker)
+  // also gets a v8 chart attempt. Sequential here since this is the rare unhappy path.
+  const stillMissing = symbols.filter(s => !v7Results[s] && !isCommoditySymbol(s));
+  for (let mi = 0; mi < stillMissing.length; mi++) {
+    if (mi > 0) await new Promise(r => setTimeout(r, 800));
+    const sym = stillMissing[mi];
     try {
-      const text = await fetchWithProxy('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true');
+      const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true', 3, 8000);
       const data = JSON.parse(text);
       if (data.chart && data.chart.result && data.chart.result[0]) {
         const chart = normalizeYahooChart(sym, data.chart.result[0]);
         v7Results[sym] = chart;
-        // Only block the AH retry pass if we actually have a price
         if (chart && (chart.postMarketPrice != null || chart.preMarketPrice != null)) {
           fetchedAfterHours.add(sym);
         }
@@ -1812,7 +2128,7 @@ async function fetchYahooQuotes(symbols) {
   }
 
   if (Object.keys(v7Results).length > 0) {
-    const hasV7 = symbols.some(s => v7Results[s] && !missing.includes(s));
+    const hasV7 = stockSyms.some(s => v7Results[s]);
     return { source: hasV7 ? 'Yahoo Finance (v7)' : 'Yahoo Finance', data: v7Results };
   }
   return null;
@@ -2693,6 +3009,69 @@ async function fillFundamentals(symbols) {
   }
 }
 
+// Targeted single-symbol fetch — fires the right path for one symbol immediately,
+// even if a global refresh is currently in progress. Used by addPosition so adding
+// gold (or any symbol) mid-refresh doesn't have to wait for the entire refresh to
+// finish before its data starts loading.
+function _applyOneSymbolQuote(sym, q) {
+  if (!q || q.price == null) return false;
+  // Don't clobber data that arrived from the in-progress refresh in the meantime
+  if (quoteData[sym] && quoteData[sym].price != null) return false;
+  quoteData[sym] = q;
+  errorSymbols.delete(sym);
+  attemptedSymbols.add(sym);
+  if (q.postMarketPrice != null || q.preMarketPrice != null) fetchedAfterHours.add(sym);
+  renderTable();
+  updateSummary();
+  return true;
+}
+
+async function fetchOneSymbolNow(sym) {
+  try {
+    if (isCryptoSymbol(sym)) {
+      const r = await fetchCryptoQuotes([sym]);
+      if (r && r.data && r.data[sym]) _applyOneSymbolQuote(sym, r.data[sym]);
+      return;
+    }
+
+    // Stocks AND commodities: race every proxy across both Yahoo CDN domains in parallel.
+    // Commodities only have v8 chart; stocks try v7 batch (one-symbol) too. Whichever
+    // request returns first wins. This is intentionally aggressive — when you add a ticker
+    // mid-import, the global refresh is hammering proxies and a small race won't cut it.
+    const isCommodity = isCommoditySymbol(sym);
+    const urls = [
+      'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true',
+      'https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true',
+    ];
+    if (!isCommodity) {
+      // v7 batch with a single symbol — Yahoo's fastest endpoint when it works.
+      // Skip the crumb to avoid an extra serial round-trip; Yahoo accepts crumbless v7 most of the time.
+      urls.push('https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + yfEnc(sym));
+      urls.push('https://query2.finance.yahoo.com/v7/finance/quote?symbols=' + yfEnc(sym));
+    }
+
+    try {
+      const text = await fetchAnyVariantRace(urls, 9000);
+      const data = JSON.parse(text);
+      let q = null;
+      // v7 quoteResponse shape
+      if (data.quoteResponse && data.quoteResponse.result && data.quoteResponse.result[0]) {
+        q = normalizeYahoo(data.quoteResponse.result[0]);
+      }
+      // v8 chart shape
+      if (!q && data.chart && data.chart.result && data.chart.result[0]) {
+        q = normalizeYahooChart(sym, data.chart.result[0]);
+      }
+      _applyOneSymbolQuote(sym, q);
+    } catch (e) {
+      console.warn('fetchOneSymbolNow race failed for', sym, e.message);
+      // The full refresh will retry — no need to escalate further here.
+    }
+  } catch (e) {
+    console.warn('fetchOneSymbolNow failed for', sym, e.message);
+  }
+}
+
 // ==================== MAIN REFRESH ====================
 let refreshInProgress = false;
 let pendingRefreshAfter = false; // queued refresh (e.g. symbol added during refresh)
@@ -2757,16 +3136,15 @@ async function _refreshAll() {
 
   // Retry commodity symbols that didn't get data — FinnHub/Alpaca/FMP don't support futures,
   // so commodities depend on Yahoo proxies which can fail under concurrent load.
-  // This runs BEFORE source selection so commodity data is available for all code paths.
-  // Try the opposite Yahoo CDN domain (query1 vs query2) since query2 may be rate-limited
-  // from the initial v8 fallback attempt.
+  // Try the opposite Yahoo CDN domain (query1 vs query2) since query2 may be rate-limited.
+  // Race proxies in parallel so this doesn't block the UI for 12+ seconds per symbol.
   const missingCommodities = symbols.filter(s => isCommoditySymbol(s) && !allResults.some(r => r && r.data[s]));
   if (missingCommodities.length > 0) {
-    for (const sym of missingCommodities) {
-      if (missingCommodities.indexOf(sym) > 0) await new Promise(r => setTimeout(r, 2000));
+    const retryPromises = missingCommodities.map(async (sym, i) => {
+      if (i > 0) await new Promise(r => setTimeout(r, 250 * i));
       try {
         const chartUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true';
-        const text = await fetchWithProxy(chartUrl, -1, 12000);
+        const text = await fetchWithProxyRace(chartUrl, 4, 8000);
         const data = JSON.parse(text);
         if (data.chart && data.chart.result && data.chart.result[0]) {
           const q = normalizeYahooChart(sym, data.chart.result[0]);
@@ -2778,7 +3156,8 @@ async function _refreshAll() {
       } catch (e) {
         // Don't mark known commodities as errors — they're valid symbols, proxy just failed
       }
-    }
+    });
+    await Promise.all(retryPromises);
   }
 
   if (result) {
@@ -3046,7 +3425,10 @@ async function _refreshAll() {
             ahUpdated = true;
           }
           if (q.marketState == null && raw.marketState) q.marketState = raw.marketState;
-          if (raw.postMarketPrice != null || raw.preMarketPrice != null || raw.marketState) {
+          // Only mark as "AH fetched" when we actually got a price. marketState alone
+          // is not enough — Yahoo v7 sometimes returns metadata without postMarketPrice
+          // even after-hours, and we still want the v8 chart fallback to try.
+          if (raw.postMarketPrice != null || raw.preMarketPrice != null) {
             fetchedAfterHours.add(sym);
           }
         }
@@ -3082,7 +3464,9 @@ async function _refreshAll() {
                 ahUpdated = true;
               }
               if (chart && chart.marketState && q.marketState == null) q.marketState = chart.marketState;
-              if (chart && (chart.postMarketPrice != null || chart.preMarketPrice != null || chart.marketState != null)) {
+              // Only mark as fetched if we actually got AH price data — marketState
+              // alone shouldn't lock the symbol out of future retries.
+              if (chart && (chart.postMarketPrice != null || chart.preMarketPrice != null)) {
                 fetchedAfterHours.add(sym);
               }
             }
@@ -3099,45 +3483,31 @@ async function _refreshAll() {
   }
 
   // Deferred retry: if any commodity symbols still lack data after the full refresh,
-  // schedule retries with generous delays. CORS proxies rate-limit after ~1 request,
-  // needing ~10s to recover. We try each missing symbol one at a time with 10s gaps,
-  // using direct proxy calls (bypassing fetchWithProxy to avoid burning other proxies).
+  // race the remaining proxies in parallel. The earlier sequential approach took
+  // 30+ seconds per symbol because each proxy got its full 10s timeout.
   const stillMissingCommodities = symbols.filter(s => isCommoditySymbol(s) && (!quoteData[s] || quoteData[s].price == null));
   if (stillMissingCommodities.length > 0) {
     (async () => {
+      // Short initial delay to let any in-flight proxy rate limits relax
+      await new Promise(r => setTimeout(r, 1500));
       for (const sym of stillMissingCommodities) {
-        // Wait 4s before first attempt — enough for proxy rate limits to partially recover
-        await new Promise(r => setTimeout(r, quoteData[sym] && quoteData[sym].price != null ? 0 : 4000));
         if (refreshInProgress || (quoteData[sym] && quoteData[sym].price != null)) continue;
-        // Try each proxy until one works
-        for (let pi = 0; pi < PROXIES.length; pi++) {
-          try {
-            const yahooUrl = 'https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true';
-            const proxiedUrl = PROXIES[pi](yahooUrl);
-            const resp = await fetch(proxiedUrl, { signal: AbortSignal.timeout(12000) });
-            if (!resp.ok) continue;
-            const text = await resp.text();
-            if (!text || text.trimStart().startsWith('<') || text.startsWith('Edge:')) continue;
-            if (text.length < 300) {
-              try { const j = JSON.parse(text); if (j.error && !j.chart) continue; } catch(_) {}
+        try {
+          const yahooUrl = 'https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true';
+          // Race up to 5 proxies for the retry — we already failed once, so widen the net
+          const text = await fetchWithProxyRace(yahooUrl, 5, 10000);
+          const data = JSON.parse(text);
+          if (data.chart && data.chart.result && data.chart.result[0]) {
+            const q = normalizeYahooChart(sym, data.chart.result[0]);
+            if (q && q.price) {
+              quoteData[sym] = q;
+              errorSymbols.delete(sym);
+              renderTable(); updateSummary();
             }
-            const data = JSON.parse(text);
-            if (data.chart && data.chart.result && data.chart.result[0]) {
-              const q = normalizeYahooChart(sym, data.chart.result[0]);
-              if (q && q.price) {
-                quoteData[sym] = q;
-                errorSymbols.delete(sym);
-                lastWorkingProxy = pi;
-                renderTable(); updateSummary();
-                break; // got it, move to next symbol
-              }
-            }
-          } catch (e) { /* try next proxy */ }
-        }
-        // If still missing after all proxies, wait longer before next symbol
-        if (!quoteData[sym] || quoteData[sym].price == null) {
-          await new Promise(r => setTimeout(r, 10000));
-        }
+          }
+        } catch (e) { /* still failing — give up for this cycle */ }
+        // Brief gap between symbols so we don't slam every proxy at once
+        await new Promise(r => setTimeout(r, 1200));
       }
     })();
   }
@@ -3192,14 +3562,70 @@ function fmtDivYield(div, yld) {
 }
 
 // ==================== RENDERING ====================
+function getVisibleColumns() {
+  return COLUMNS.filter(c => !hiddenColumns.includes(c.key));
+}
+
+function getCellHtml(col, pos, q, computed) {
+  const { price, change, changePct, mktValue, dayPL, totalPL, totalPLPct, ahDisplay, priceCell, sym, noteVal } = computed;
+  switch (col.key) {
+    case 'symbol': return `<td class="sym">${sym}${alerts[pos.symbol] && (alerts[pos.symbol].above!=null||alerts[pos.symbol].below!=null)?'<span class="alert-icon" onclick="event.stopPropagation();openAlertPopover(\''+sym+'\',this)" title="Price alert set">&#128276;</span>':''}</td>`;
+    case 'name': return `<td class="left" style="color:#888; max-width:140px; overflow:hidden; text-overflow:ellipsis;" title="${escAttr(q.name || '')}">${computed.isError ? '<span class="error-text">Not found</span>' : esc(q.name || '')}</td>`;
+    case 'last': return `<td class="${cc(change)}">${priceCell}</td>`;
+    case 'change': return `<td class="${cc(change)}">${change != null ? (change >= 0 ? '+' : '') + fmt(change) : '\u2014'}</td>`;
+    case 'changePct': return `<td class="${cc(changePct)}">${changePct != null ? fmtPct(changePct) : '\u2014'}</td>`;
+    case 'afterHours': return `<td>${ahDisplay}</td>`;
+    case 'shares': return `<td><div class="num-wrap"><input class="cell-input" type="number" value="${pos.shares}" onchange="updateShares('${sym}', this.value)" /><div class="num-spin"><button onclick="stepInput(this,1,'${sym}','shares')">&#9650;</button><button onclick="stepInput(this,-1,'${sym}','shares')">&#9660;</button></div></div></td>`;
+    case 'costBasis': return `<td><div class="num-wrap"><input class="cell-input" type="number" step="0.01" value="${pos.costBasis || ''}" onchange="updateCost('${sym}', this.value)" placeholder="\u2014" /><div class="num-spin"><button onclick="stepInput(this,0.01,'${sym}','cost')">&#9650;</button><button onclick="stepInput(this,-0.01,'${sym}','cost')">&#9660;</button></div></div></td>`;
+    case 'date': return `<td><input class="cell-input" type="date" value="${pos.purchaseDate || ''}" onchange="updateDate('${sym}', this.value)" style="width:110px;" /></td>`;
+    case 'mktValue': return `<td>${mktValue != null ? fmtDollar(mktValue) : '\u2014'}</td>`;
+    case 'dayPL': return `<td class="${cc(dayPL)}">${dayPL != null ? fmtDollar(dayPL) : '\u2014'}</td>`;
+    case 'divYield': return `<td>${fmtDivYield(q.dividend, q.dividendYield)}</td>`;
+    case 'exDiv': return `<td style="font-size:11px;">${q.exDivDate || '\u2014'}</td>`;
+    case 'earnings': return `<td style="font-size:11px;">${q.earningsDate || '\u2014'}</td>`;
+    case 'perfYTD': return `<td class="${cc(q.perfYTD)}">${q.perfYTD != null ? fmtPct(q.perfYTD) : '\u2014'}</td>`;
+    case 'perf6M': return `<td class="${cc(q.perf6M)}">${q.perf6M != null ? fmtPct(q.perf6M) : '\u2014'}</td>`;
+    case 'perf1Y': return `<td class="${cc(q.perf1Y)}">${q.perf1Y != null ? fmtPct(q.perf1Y) : '\u2014'}</td>`;
+    case 'totalPL': return `<td class="${cc(totalPL)}">${totalPL != null ? fmtDollar(totalPL) : '\u2014'}</td>`;
+    case 'totalPLPct': return `<td class="${cc(totalPLPct)}">${totalPLPct != null ? fmtPct(totalPLPct) : '\u2014'}</td>`;
+    case 'prevClose': return `<td>${q.prevClose != null ? fmt(q.prevClose) : '\u2014'}</td>`;
+    case 'open': return `<td>${q.open != null ? fmt(q.open) : '\u2014'}</td>`;
+    case 'bid': return `<td${q.bidEstimated ? ' style="color:#666" title="Estimated from last trade"' : ''}>${q.bid != null ? (q.bidEstimated ? '~' : '') + fmt(q.bid) : '\u2014'}</td>`;
+    case 'ask': return `<td${q.askEstimated ? ' style="color:#666" title="Estimated from last trade"' : ''}>${q.ask != null ? (q.askEstimated ? '~' : '') + fmt(q.ask) : '\u2014'}</td>`;
+    case 'dayRange': return `<td style="font-size:11px;">${rangeBar(q.dayLow, q.dayHigh, price)}</td>`;
+    case 'wk52Range': return `<td style="font-size:11px;">${rangeBar(q.wk52Low, q.wk52High, price)}</td>`;
+    case 'volume': return `<td>${fmtVol(q.volume)}</td>`;
+    case 'avgVol': return `<td>${fmtVol(q.avgVolume)}</td>`;
+    case 'mktCap': return `<td>${q.marketCap != null ? fmtBig(q.marketCap) : '\u2014'}</td>`;
+    case 'pe': return `<td>${q.pe != null ? fmt(q.pe, 1) : '\u2014'}</td>`;
+    case 'eps': return `<td>${q.eps != null ? fmt(q.eps) : '\u2014'}</td>`;
+    case 'beta': return `<td>${q.beta != null ? fmt(q.beta) : '\u2014'}</td>`;
+    case 'notes': return `<td><input class="cell-input notes" type="text" value="${noteVal}" onchange="updateNotes('${sym}', this.value)" placeholder="..." /></td>`;
+    case 'delete': return `<td><button class="delete-btn" onclick="removePosition('${sym}')" title="Remove">\u2715</button></td>`;
+    default: return '<td>\u2014</td>';
+  }
+}
+
 function buildHeader() {
   const row = document.getElementById('header-row');
-  row.innerHTML = COLUMNS.map(col => {
+  const visCols = getVisibleColumns();
+  row.innerHTML = visCols.map(col => {
     const cls = col.align === 'left' ? ' class="left"' : '';
     const sort = col.sortable ? ` data-sort="${col.key}"` : '';
     const arrow = col.sortable ? '<span class="sort-arrow"></span>' : '';
-    return `<th${cls}${sort}>${col.label} ${arrow}</th>`;
+    const widthStyle = col.w ? ` style="min-width:${col.w}px"` : '';
+    return `<th${cls}${sort}${widthStyle}>${col.label} ${arrow}</th>`;
   }).join('');
+
+  // Size the table to the sum of visible column widths so hiding columns
+  // actually shrinks the table. If the total fits inside the table-wrap, the
+  // CSS `width: 100%` lets the columns expand to fill it; if it doesn't, the
+  // wrap scrolls horizontally as before.
+  const table = row.closest('table');
+  if (table) {
+    const totalMin = visCols.reduce((sum, c) => sum + (c.w || 80), 0);
+    table.style.minWidth = totalMin + 'px';
+  }
 
   row.querySelectorAll('th[data-sort]').forEach(th => {
     th.addEventListener('click', () => {
@@ -3260,14 +3686,27 @@ function getSortedPortfolio() {
 }
 
 function renderTable() {
+  const mobile = isMobileView();
   const body = document.getElementById('portfolio-body');
   const emptyMsg = document.getElementById('empty-msg');
+  const mobileEmpty = document.getElementById('mobile-empty-msg');
+  const mobileSortBar = document.getElementById('mobile-sort-bar');
+  // Sync the mobile sort UI with the current sortCol/sortAsc on every render so
+  // it stays consistent across viewport changes and desktop header sorts.
+  syncMobileSortUI();
   if (portfolio.length === 0) {
     body.innerHTML = '';
-    emptyMsg.style.display = 'block';
+    emptyMsg.style.display = mobile ? 'none' : 'block';
+    if (mobileEmpty) mobileEmpty.style.display = mobile ? 'block' : 'none';
+    if (mobileSortBar) mobileSortBar.style.display = 'none';
+    if (mobile) { const mc = document.getElementById('mobile-cards'); if (mc) mc.querySelectorAll('.mobile-card').forEach(c => c.remove()); }
     return;
   }
   emptyMsg.style.display = 'none';
+  if (mobileEmpty) mobileEmpty.style.display = 'none';
+  if (mobileSortBar) mobileSortBar.style.display = mobile ? 'flex' : 'none';
+
+  if (mobile) { renderMobileCards(); return; }
 
   const sorted = getSortedPortfolio();
   let html = '';
@@ -3317,51 +3756,50 @@ function renderTable() {
       priceCell = fmt(price);
     }
 
-    const rowClass = [flashClass, isError ? 'error-row' : ''].filter(Boolean).join(' ');
+    const rowClass = [flashClass, isError ? 'error-row' : '', checkAlertTriggered(pos.symbol, price) ? 'alert-triggered' : ''].filter(Boolean).join(' ');
+    const computed = { price, change, changePct, mktValue, dayPL, totalPL, totalPLPct, ahDisplay, priceCell, sym, noteVal, isError };
+    const visCols = getVisibleColumns();
 
-    html += `<tr class="${rowClass}">
-      <td class="sym">${sym}</td>
-      <td class="left" style="color:#888; max-width:140px; overflow:hidden; text-overflow:ellipsis;" title="${escAttr(q.name || '')}">${isError ? '<span class="error-text">Not found</span>' : esc(q.name || '')}</td>
-      <td class="${cc(change)}">${priceCell}</td>
-      <td class="${cc(change)}">${change != null ? (change >= 0 ? '+' : '') + fmt(change) : '\u2014'}</td>
-      <td class="${cc(changePct)}">${changePct != null ? fmtPct(changePct) : '\u2014'}</td>
-      <td>${ahDisplay}</td>
-      <td><div class="num-wrap"><input class="cell-input" type="number" value="${pos.shares}" onchange="updateShares('${sym}', this.value)" /><div class="num-spin"><button onclick="stepInput(this,1,'${sym}','shares')">&#9650;</button><button onclick="stepInput(this,-1,'${sym}','shares')">&#9660;</button></div></div></td>
-      <td><div class="num-wrap"><input class="cell-input" type="number" step="0.01" value="${pos.costBasis || ''}" onchange="updateCost('${sym}', this.value)" placeholder="\u2014" /><div class="num-spin"><button onclick="stepInput(this,0.01,'${sym}','cost')">&#9650;</button><button onclick="stepInput(this,-0.01,'${sym}','cost')">&#9660;</button></div></div></td>
-      <td><input class="cell-input" type="date" value="${pos.purchaseDate || ''}" onchange="updateDate('${sym}', this.value)" style="width:110px;" /></td>
-      <td>${mktValue != null ? fmtDollar(mktValue) : '\u2014'}</td>
-      <td class="${cc(dayPL)}">${dayPL != null ? fmtDollar(dayPL) : '\u2014'}</td>
-      <td>${fmtDivYield(q.dividend, q.dividendYield)}</td>
-      <td style="font-size:11px;">${q.exDivDate || '\u2014'}</td>
-      <td style="font-size:11px;">${q.earningsDate || '\u2014'}</td>
-      <td class="${cc(q.perfYTD)}">${q.perfYTD != null ? fmtPct(q.perfYTD) : '\u2014'}</td>
-      <td class="${cc(q.perf6M)}">${q.perf6M != null ? fmtPct(q.perf6M) : '\u2014'}</td>
-      <td class="${cc(q.perf1Y)}">${q.perf1Y != null ? fmtPct(q.perf1Y) : '\u2014'}</td>
-      <td class="${cc(totalPL)}">${totalPL != null ? fmtDollar(totalPL) : '\u2014'}</td>
-      <td class="${cc(totalPLPct)}">${totalPLPct != null ? fmtPct(totalPLPct) : '\u2014'}</td>
-      <td>${q.prevClose != null ? fmt(q.prevClose) : '\u2014'}</td>
-      <td>${q.open != null ? fmt(q.open) : '\u2014'}</td>
-      <td${q.bidEstimated ? ' style="color:#666" title="Estimated from last trade"' : ''}>${q.bid != null ? (q.bidEstimated ? '~' : '') + fmt(q.bid) : '\u2014'}</td>
-      <td${q.askEstimated ? ' style="color:#666" title="Estimated from last trade"' : ''}>${q.ask != null ? (q.askEstimated ? '~' : '') + fmt(q.ask) : '\u2014'}</td>
-      <td style="font-size:11px;">${rangeBar(q.dayLow, q.dayHigh, price)}</td>
-      <td style="font-size:11px;">${rangeBar(q.wk52Low, q.wk52High, price)}</td>
-      <td>${fmtVol(q.volume)}</td>
-      <td>${fmtVol(q.avgVolume)}</td>
-      <td>${q.marketCap != null ? fmtBig(q.marketCap) : '\u2014'}</td>
-      <td>${q.pe != null ? fmt(q.pe, 1) : '\u2014'}</td>
-      <td>${q.eps != null ? fmt(q.eps) : '\u2014'}</td>
-      <td>${q.beta != null ? fmt(q.beta) : '\u2014'}</td>
-      <td><input class="cell-input notes" type="text" value="${noteVal}" onchange="updateNotes('${sym}', this.value)" placeholder="..." /></td>
-      <td><button class="delete-btn" onclick="removePosition('${sym}')" title="Remove">\u2715</button></td>
-    </tr>`;
+    const draggable = !sortCol;
+    html += `<tr class="${rowClass}" data-sym="${sym}" draggable="${draggable}">`;
+    for (const col of visCols) html += getCellHtml(col, pos, q, computed);
+    html += '</tr>';
   }
 
   body.innerHTML = html;
-  renderMobileCards();
 }
 
 function isMobileView() {
   return window.matchMedia('(max-width: 768px)').matches;
+}
+// Re-render when crossing the mobile breakpoint
+window.matchMedia('(max-width: 768px)').addEventListener('change', () => { renderTable(); updateSummary(); });
+
+// ---- Mobile sort UI helpers ----
+function syncMobileSortUI() {
+  const sel = document.getElementById('mobile-sort-col');
+  const dirBtn = document.getElementById('mobile-sort-dir');
+  if (!sel || !dirBtn) return;
+  sel.value = sortCol || '';
+  dirBtn.textContent = sortAsc ? '\u25B2' : '\u25BC';
+}
+function setMobileSort(key) {
+  sortCol = key || null;
+  // Also update the desktop header arrow so the two views stay consistent
+  document.querySelectorAll('#header-row .sort-arrow').forEach(s => s.textContent = '');
+  if (sortCol) {
+    const th = document.querySelector(`#header-row th[data-sort="${sortCol}"] .sort-arrow`);
+    if (th) th.textContent = sortAsc ? ' \u25B2' : ' \u25BC';
+  }
+  renderTable();
+}
+function toggleMobileSortDir() {
+  sortAsc = !sortAsc;
+  if (sortCol) {
+    const th = document.querySelector(`#header-row th[data-sort="${sortCol}"] .sort-arrow`);
+    if (th) th.textContent = sortAsc ? ' \u25B2' : ' \u25BC';
+  }
+  renderTable();
 }
 
 function renderMobileCards() {
@@ -3430,14 +3868,15 @@ function renderMobileCards() {
     }
 
     const isExpanded = expandedSymbols.has(pos.symbol);
-    const cardClass = ['mobile-card', flashClass, isError ? 'error-row' : '', isExpanded ? 'expanded' : ''].filter(Boolean).join(' ');
+    const cardClass = ['mobile-card', flashClass, isError ? 'error-row' : '', isExpanded ? 'expanded' : '', checkAlertTriggered(pos.symbol, price) ? 'alert-triggered' : ''].filter(Boolean).join(' ');
     const noteVal = escAttr(notes[pos.symbol] || '');
 
     html += `<div class="${cardClass}" data-sym="${sym}" onclick="toggleMobileCard(this, event)">
       <div class="mobile-card-main">
+        <span class="mobile-drag-handle" style="${sortCol ? 'display:none;' : ''}" title="Drag to reorder">&#9776;</span>
         <div class="mobile-card-left">
           <div class="mobile-card-sym">
-            ${sym}
+            ${sym}${alerts[pos.symbol]&&(alerts[pos.symbol].above!=null||alerts[pos.symbol].below!=null)?'<span style="font-size:11px;opacity:0.6;">&#128276;</span>':''}
             <span class="mobile-card-name">${isError ? '<span class="error-text">Not found</span>' : esc(q.name || '')}</span>
           </div>
           <div class="mobile-card-row2">
@@ -3490,6 +3929,10 @@ function renderMobileCards() {
           <div class="mobile-edit-group"><label>Date</label><input type="date" value="${pos.purchaseDate || ''}" onchange="updateDate('${sym}', this.value)" style="color-scheme:dark;" /></div>
           <div class="mobile-edit-group"><label>Note</label><input type="text" value="${noteVal}" onchange="updateNotes('${sym}', this.value)" placeholder="..." /></div>
         </div>
+        <div class="mobile-card-actions" onclick="event.stopPropagation()" style="border-top:none; padding-top:0; margin-top:4px;">
+          <div class="mobile-edit-group"><label style="color:#3c8;">Alert&gt;</label><input type="number" step="0.01" value="${(alerts[pos.symbol]&&alerts[pos.symbol].above!=null)?alerts[pos.symbol].above:''}" onchange="setMobileAlert('${sym}','above',this.value)" placeholder="Above $" /></div>
+          <div class="mobile-edit-group"><label style="color:#e55;">Alert&lt;</label><input type="number" step="0.01" value="${(alerts[pos.symbol]&&alerts[pos.symbol].below!=null)?alerts[pos.symbol].below:''}" onchange="setMobileAlert('${sym}','below',this.value)" placeholder="Below $" /></div>
+        </div>
       </div>
     </div>`;
   }
@@ -3505,6 +3948,456 @@ function toggleMobileCard(card, event) {
   // Don't toggle if clicking an input or button
   if (event.target.closest('input, button, .mobile-card-actions')) return;
   card.classList.toggle('expanded');
+}
+
+// ==================== COLUMN PICKER ====================
+function toggleColumnPicker() {
+  const overlay = document.getElementById('column-picker-overlay');
+  overlay.classList.toggle('show');
+  if (overlay.classList.contains('show')) renderColumnPicker();
+}
+function renderColumnPicker() {
+  const list = document.getElementById('column-picker-list');
+  list.innerHTML = COLUMNS.filter(c => c.key !== 'delete').map(col => {
+    const checked = !hiddenColumns.includes(col.key) ? 'checked' : '';
+    return `<label class="col-check"><input type="checkbox" ${checked} onchange="toggleColumn('${col.key}', this.checked)" />${col.label || 'Actions'}</label>`;
+  }).join('');
+}
+function toggleColumn(key, visible) {
+  if (visible) hiddenColumns = hiddenColumns.filter(k => k !== key);
+  else if (!hiddenColumns.includes(key)) hiddenColumns.push(key);
+  saveHiddenColumns();
+  buildHeader();
+  renderTable();
+}
+
+// ==================== EXPORT CSV ====================
+function exportCSV() {
+  if (portfolio.length === 0) {
+    setStatus('Nothing to export \u2014 portfolio is empty', 'error');
+    return;
+  }
+  const cols = ['Symbol','Name','Last Price','$ Change','% Change','Shares','Cost Basis','Purchase Date',
+    'Market Value','Day P&L','Total P&L','P&L %','Prev Close','Open','Volume','Market Cap','P/E','EPS','Beta',
+    'Div/Yield','Notes'];
+  const rows = [cols.join(',')];
+  for (const pos of getSortedPortfolio()) {
+    const q = quoteData[pos.symbol] || {};
+    const price = q.price; const mktVal = price != null ? price * pos.shares : '';
+    const dayPL = q.change != null ? q.change * pos.shares : '';
+    const totalPL = (price != null && pos.costBasis) ? (price - pos.costBasis) * pos.shares : '';
+    const totalPLPct = (totalPL !== '' && pos.costBasis) ? (totalPL / (Math.abs(pos.shares) * pos.costBasis) * 100) : '';
+    const csvVal = v => v == null ? '' : (typeof v === 'string' && v.includes(',') ? '"' + v.replace(/"/g,'""') + '"' : v);
+    rows.push([pos.symbol, csvVal(q.name||''), price||'', q.change||'', q.changePct||'',
+      pos.shares, pos.costBasis||'', pos.purchaseDate||'', mktVal, dayPL, totalPL,
+      totalPLPct !== '' ? totalPLPct.toFixed(2) : '', q.prevClose||'', q.open||'',
+      q.volume||'', q.marketCap||'', q.pe||'', q.eps||'', q.beta||'',
+      fmtDivYield(q.dividend, q.dividendYield).replace('\u2014',''), csvVal(notes[pos.symbol]||'')].join(','));
+  }
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  const name = (localStorage.getItem('stonks_active_portfolio') || 'Default').replace(/[^a-zA-Z0-9]/g, '_');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'Portfolio_' + name + '_' + new Date().toISOString().split('T')[0] + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ==================== ALERTS ====================
+let _alertPopoverSym = null;
+function checkAlertTriggered(symbol, price) {
+  if (price == null || !alerts[symbol]) return false;
+  const a = alerts[symbol];
+  return (a.above != null && price >= a.above) || (a.below != null && price <= a.below);
+}
+function openAlertPopover(symbol, el) {
+  const pop = document.getElementById('alert-popover');
+  _alertPopoverSym = symbol;
+  document.getElementById('alert-popover-sym').textContent = symbol;
+  const a = alerts[symbol] || {};
+  document.getElementById('alert-above').value = a.above != null ? a.above : '';
+  document.getElementById('alert-below').value = a.below != null ? a.below : '';
+  // Position near the clicked element
+  const rect = el.getBoundingClientRect();
+  pop.style.display = 'block';
+  pop.style.left = Math.min(rect.left, window.innerWidth - 240) + 'px';
+  pop.style.top = (rect.bottom + 4) + 'px';
+  // Close on outside click
+  setTimeout(() => document.addEventListener('click', _closeAlertPopover, { once: true }), 0);
+}
+function _closeAlertPopover() {
+  document.getElementById('alert-popover').style.display = 'none';
+}
+function _maybeRequestNotificationPermission() {
+  if (typeof Notification === 'undefined') return;
+  if (Notification.permission === 'default') {
+    try { Notification.requestPermission(); } catch (_) {}
+  }
+}
+function saveAlertFromPopover() {
+  const above = parseFloat(document.getElementById('alert-above').value);
+  const below = parseFloat(document.getElementById('alert-below').value);
+  const aboveOk = isFinite(above) ? above : null;
+  const belowOk = isFinite(below) ? below : null;
+  if (aboveOk != null || belowOk != null) {
+    alerts[_alertPopoverSym] = { above: aboveOk, below: belowOk };
+    _maybeRequestNotificationPermission();
+  } else {
+    delete alerts[_alertPopoverSym];
+  }
+  saveAlerts();
+  _closeAlertPopover();
+  renderTable();
+  updateSummary();
+}
+function clearAlertFromPopover() {
+  delete alerts[_alertPopoverSym];
+  saveAlerts();
+  _closeAlertPopover();
+  renderTable();
+  updateSummary();
+}
+function setMobileAlert(symbol, type, val) {
+  const v = parseFloat(val);
+  const ok = isFinite(v) ? v : null;
+  if (!alerts[symbol]) alerts[symbol] = { above: null, below: null };
+  alerts[symbol][type] = ok;
+  if (alerts[symbol].above == null && alerts[symbol].below == null) delete alerts[symbol];
+  else _maybeRequestNotificationPermission();
+  saveAlerts();
+}
+function checkAllAlerts() {
+  for (const pos of portfolio) {
+    const q = quoteData[pos.symbol];
+    if (!q || q.price == null || !alerts[pos.symbol]) continue;
+    const a = alerts[pos.symbol];
+    const triggered = (a.above != null && q.price >= a.above) || (a.below != null && q.price <= a.below);
+    if (triggered && !a._notified) {
+      a._notified = true;
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification('Price Alert: ' + pos.symbol, { body: pos.symbol + ' is now $' + fmt(q.price) });
+      }
+    } else if (!triggered) {
+      a._notified = false;
+    }
+  }
+}
+
+// ==================== ALLOCATION PIE CHART ====================
+const ALLOC_COLORS = ['#4a9eff','#00c853','#ff6d00','#e040fb','#ff1744','#00bfa5','#ffd600','#651fff','#ff3d00','#00e5ff','#76ff03','#f50057','#2979ff','#69f0ae','#ff9100'];
+let _lastAllocSig = ''; // signature of the last drawn allocation: skips re-render when nothing changed meaningfully
+let allocationVisible = localStorage.getItem('stonks_alloc_visible') === '1';
+function toggleAllocationChart() {
+  allocationVisible = !allocationVisible;
+  localStorage.setItem('stonks_alloc_visible', allocationVisible ? '1' : '0');
+  _lastAllocSig = ''; // force re-render
+  renderAllocationChart();
+}
+function renderAllocationChart() {
+  const wrap = document.getElementById('allocation-wrap');
+  const chart = document.getElementById('allocation-chart');
+  const legend = document.getElementById('allocation-legend');
+  const toggleBtn = document.getElementById('alloc-toggle');
+  if (!wrap || !chart) return;
+
+  // Decide whether the chart is even possible (need positions with prices)
+  const items = [];
+  let total = 0;
+  for (const pos of portfolio) {
+    const q = quoteData[pos.symbol];
+    if (q && q.price != null) {
+      const val = Math.abs(q.price * pos.shares);
+      items.push({ symbol: pos.symbol, value: val });
+      total += val;
+    }
+  }
+  const possible = portfolio.length > 0 && total > 0;
+
+  // Show/hide the toggle button based on possibility
+  if (toggleBtn) {
+    toggleBtn.style.display = possible ? '' : 'none';
+    toggleBtn.textContent = allocationVisible ? 'Hide Chart' : 'Show Chart';
+  }
+
+  if (!possible || !allocationVisible) {
+    wrap.style.display = 'none';
+    _lastAllocSig = '';
+    return;
+  }
+  wrap.style.display = 'flex';
+
+  // Skip re-render if percentages haven't shifted >0.1% and the symbol set is unchanged.
+  // High-frequency WebSocket trades would otherwise rebuild the SVG ~30x/sec for no
+  // visible benefit. Sort by symbol for the signature so order doesn't perturb it.
+  const sig = items
+    .slice()
+    .sort((a, b) => a.symbol.localeCompare(b.symbol))
+    .map(it => it.symbol + ':' + ((it.value / total) * 1000 | 0))
+    .join('|');
+  if (sig === _lastAllocSig) return;
+  _lastAllocSig = sig;
+
+  // Build SVG pie
+  const size = 140, cx = size/2, cy = size/2, r = size/2 - 4;
+  let angle = -Math.PI / 2;
+  let paths = '';
+  let legendHtml = '';
+  items.sort((a, b) => b.value - a.value);
+  for (let i = 0; i < items.length; i++) {
+    const pct = items[i].value / total;
+    const sweep = pct * 2 * Math.PI;
+    const color = ALLOC_COLORS[i % ALLOC_COLORS.length];
+    if (items.length === 1) {
+      paths += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" opacity="0.8"/>`;
+    } else {
+      const x1 = cx + r * Math.cos(angle), y1 = cy + r * Math.sin(angle);
+      angle += sweep;
+      const x2 = cx + r * Math.cos(angle), y2 = cy + r * Math.sin(angle);
+      const large = sweep > Math.PI ? 1 : 0;
+      paths += `<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} Z" fill="${color}" opacity="0.8"/>`;
+    }
+    legendHtml += `<span class="alloc-item"><span class="alloc-swatch" style="background:${color}"></span>${items[i].symbol} ${(pct*100).toFixed(1)}%</span>`;
+  }
+  chart.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${paths}</svg>`;
+  legend.innerHTML = legendHtml;
+}
+
+// ==================== MULTIPLE PORTFOLIOS ====================
+let portfolioName = localStorage.getItem('stonks_active_portfolio') || 'Default';
+
+function initPortfolios() {
+  let all = lsGet('stonks_portfolios', 'null');
+  let dirty = false;
+  if (!all) {
+    // Migrate: wrap current portfolio/notes into the multi-portfolio structure
+    all = { 'Default': { portfolio: JSON.parse(JSON.stringify(portfolio)), notes: JSON.parse(JSON.stringify(notes)) } };
+    dirty = true;
+  }
+  // Ensure active portfolio exists
+  if (!all[portfolioName]) portfolioName = Object.keys(all)[0] || 'Default';
+  if (!all[portfolioName]) {
+    all[portfolioName] = { portfolio: [], notes: {} };
+    dirty = true;
+  }
+  if (dirty) localStorage.setItem('stonks_portfolios', JSON.stringify(all));
+  // Load active portfolio
+  portfolio = all[portfolioName].portfolio || [];
+  notes = all[portfolioName].notes || {};
+  localStorage.setItem('stonks_active_portfolio', portfolioName);
+  renderPortfolioSelector();
+}
+function renderPortfolioSelector() {
+  const sel = document.getElementById('portfolio-select');
+  const all = lsGet('stonks_portfolios', '{}');
+  sel.innerHTML = '';
+  for (const name of Object.keys(all)) {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    if (name === portfolioName) opt.selected = true;
+    sel.appendChild(opt);
+  }
+}
+function switchPortfolio(name) {
+  // Save current
+  savePortfolio(); saveNotes();
+  // Load new
+  const all = lsGet('stonks_portfolios', '{}');
+  if (!all[name]) return;
+  portfolioName = name;
+  localStorage.setItem('stonks_active_portfolio', name);
+  portfolio = all[name].portfolio || [];
+  notes = all[name].notes || {};
+  // Also update the flat keys for backward compat
+  localStorage.setItem('stonks_portfolio', JSON.stringify(portfolio));
+  localStorage.setItem('stonks_notes', JSON.stringify(notes));
+  // Reset fetch caches
+  quoteData = {}; fundamentalsCache = {}; prevPrices = {}; wsLastTradeTime = {};
+  errorSymbols.clear(); fetchedSummary.clear(); fetchedFundamentals.clear();
+  fetchedPerformance.clear(); fetchedAfterHours.clear(); attemptedSymbols.clear();
+  undoStack.length = 0; redoStack.length = 0;
+  renderTable(); updateSummary();
+  if (portfolio.length > 0) refreshAll().then(() => syncWsSubscriptions());
+  else syncWsSubscriptions();
+}
+function createPortfolioPrompt() {
+  const name = prompt('New portfolio name:');
+  if (!name || !name.trim()) return;
+  const all = lsGet('stonks_portfolios', '{}');
+  if (all[name.trim()]) { alert('Portfolio "' + name.trim() + '" already exists.'); return; }
+  all[name.trim()] = { portfolio: [], notes: {} };
+  localStorage.setItem('stonks_portfolios', JSON.stringify(all));
+  renderPortfolioSelector();
+  switchPortfolio(name.trim());
+}
+function renamePortfolioPrompt() {
+  const newName = prompt('Rename "' + portfolioName + '" to:', portfolioName);
+  if (!newName || !newName.trim() || newName.trim() === portfolioName) return;
+  const all = lsGet('stonks_portfolios', '{}');
+  if (all[newName.trim()]) { alert('Portfolio "' + newName.trim() + '" already exists.'); return; }
+  all[newName.trim()] = all[portfolioName];
+  delete all[portfolioName];
+  portfolioName = newName.trim();
+  localStorage.setItem('stonks_portfolios', JSON.stringify(all));
+  localStorage.setItem('stonks_active_portfolio', portfolioName);
+  renderPortfolioSelector();
+}
+function deletePortfolioPrompt() {
+  const all = lsGet('stonks_portfolios', '{}');
+  if (Object.keys(all).length <= 1) { alert('Cannot delete the last portfolio.'); return; }
+  if (!confirm('Delete portfolio "' + portfolioName + '"?')) return;
+  delete all[portfolioName];
+  localStorage.setItem('stonks_portfolios', JSON.stringify(all));
+  portfolioName = Object.keys(all)[0];
+  localStorage.setItem('stonks_active_portfolio', portfolioName);
+  portfolio = all[portfolioName].portfolio || [];
+  notes = all[portfolioName].notes || {};
+  localStorage.setItem('stonks_portfolio', JSON.stringify(portfolio));
+  localStorage.setItem('stonks_notes', JSON.stringify(notes));
+  quoteData = {}; fundamentalsCache = {};
+  undoStack.length = 0; redoStack.length = 0;
+  renderPortfolioSelector();
+  renderTable(); updateSummary();
+  if (portfolio.length > 0) refreshAll().then(() => syncWsSubscriptions());
+}
+
+// ==================== DRAG TO REORDER ====================
+let _dragSrcIdx = null;
+function initDragReorder() {
+  // Desktop: delegate dragstart/dragover/drop on the table body
+  const tbody = document.getElementById('portfolio-body');
+  tbody.addEventListener('dragstart', e => {
+    const row = e.target.closest('tr[data-sym]');
+    if (!row) return;
+    _dragSrcIdx = [...tbody.children].indexOf(row);
+    row.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+  });
+  tbody.addEventListener('dragover', e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const row = e.target.closest('tr[data-sym]');
+    if (row) {
+      tbody.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
+      row.classList.add('drag-over');
+    }
+  });
+  tbody.addEventListener('drop', e => {
+    e.preventDefault();
+    tbody.querySelectorAll('.drag-over, .dragging').forEach(r => r.classList.remove('drag-over', 'dragging'));
+    const row = e.target.closest('tr[data-sym]');
+    if (!row || _dragSrcIdx == null) return;
+    // Rows are only draggable when sortCol is null, so this index already
+    // matches the underlying portfolio array order — no remapping needed.
+    const destIdx = [...tbody.children].indexOf(row);
+    if (_dragSrcIdx === destIdx) return;
+    pushUndo();
+    const [moved] = portfolio.splice(_dragSrcIdx, 1);
+    portfolio.splice(destIdx, 0, moved);
+    savePortfolio(); renderTable();
+    _dragSrcIdx = null;
+  });
+  tbody.addEventListener('dragend', () => {
+    tbody.querySelectorAll('.drag-over, .dragging').forEach(r => r.classList.remove('drag-over', 'dragging'));
+  });
+
+  // Mobile: touch-based drag on mobile cards
+  const mc = document.getElementById('mobile-cards');
+  let _touchCard = null, _touchStartY = 0, _touchIdx = 0;
+  mc.addEventListener('touchstart', e => {
+    const handle = e.target.closest('.mobile-drag-handle');
+    if (!handle) return;
+    const card = handle.closest('.mobile-card');
+    if (!card) return;
+    _touchCard = card;
+    _touchStartY = e.touches[0].clientY;
+    const cards = mc.querySelectorAll('.mobile-card');
+    _touchIdx = [...cards].indexOf(card);
+    card.style.zIndex = '100';
+    card.style.transition = 'none';
+  }, { passive: true });
+  mc.addEventListener('touchmove', e => {
+    if (!_touchCard) return;
+    const dy = e.touches[0].clientY - _touchStartY;
+    _touchCard.style.transform = 'translateY(' + dy + 'px)';
+    _touchCard.style.opacity = '0.8';
+  }, { passive: true });
+  mc.addEventListener('touchend', e => {
+    if (!_touchCard) return;
+    _touchCard.style.transform = '';
+    _touchCard.style.opacity = '';
+    _touchCard.style.zIndex = '';
+    _touchCard.style.transition = '';
+    // Determine drop target by final position
+    const rect = _touchCard.getBoundingClientRect();
+    const centerY = rect.top + rect.height / 2;
+    const cards = [...mc.querySelectorAll('.mobile-card')];
+    let destIdx = _touchIdx;
+    for (let i = 0; i < cards.length; i++) {
+      const cr = cards[i].getBoundingClientRect();
+      if (centerY > cr.top && centerY < cr.bottom && i !== _touchIdx) { destIdx = i; break; }
+    }
+    if (destIdx !== _touchIdx) {
+      pushUndo();
+      // Drag handle is hidden during sort, so portfolio[] indices align with visual order.
+      const [moved] = portfolio.splice(_touchIdx, 1);
+      portfolio.splice(destIdx, 0, moved);
+      savePortfolio(); renderTable();
+    }
+    _touchCard = null;
+  }, { passive: true });
+}
+
+// ==================== SHARE VIA URL ====================
+function sharePortfolio() {
+  if (portfolio.length === 0) {
+    setStatus('Nothing to share \u2014 portfolio is empty', 'error');
+    return;
+  }
+  const parts = portfolio.map(p => {
+    let s = p.symbol + ':' + p.shares;
+    if (p.costBasis) s += ':' + p.costBasis;
+    if (p.purchaseDate) s += ':' + p.purchaseDate;
+    return s;
+  });
+  const encoded = encodeURIComponent(parts.join(';'));
+  const url = window.location.origin + window.location.pathname + '#p=' + encoded;
+  document.getElementById('share-url').value = url;
+  document.getElementById('share-overlay').classList.add('show');
+}
+function copyShareURL() {
+  const url = document.getElementById('share-url').value;
+  navigator.clipboard.writeText(url).then(() => flashConfirm('confirm-share'));
+}
+function loadFromURL() {
+  const hash = window.location.hash;
+  if (!hash.startsWith('#p=')) return;
+  const encoded = decodeURIComponent(hash.substring(3));
+  const parts = encoded.split(';').filter(Boolean);
+  if (parts.length === 0) return;
+  const positions = [];
+  for (const part of parts) {
+    const [symbol, shares, cost, date] = part.split(':');
+    if (!symbol) continue;
+    const sh = parseFloat(shares);
+    if (!isFinite(sh) || sh === 0) continue; // skip malformed entries
+    positions.push({
+      symbol: symbol.toUpperCase(),
+      shares: sh,
+      costBasis: parseFloat(cost) || 0,
+      purchaseDate: date || '',
+    });
+  }
+  if (positions.length > 0 && confirm('Load ' + positions.length + ' shared position(s)? This will replace your current portfolio.')) {
+    pushUndo();
+    portfolio = positions;
+    savePortfolio();
+    renderTable(); updateSummary();
+    refreshAll().then(() => syncWsSubscriptions());
+  }
+  // Clear hash
+  history.replaceState(null, '', window.location.pathname);
 }
 
 function updateSummary() {
@@ -3533,6 +4426,8 @@ function updateSummary() {
   pctEl.textContent = fmtPct(totalPLPct);
   pctEl.className = 'summary-value ' + cc(totalPLPct);
   document.getElementById('total-positions').textContent = portfolio.length;
+  renderAllocationChart();
+  checkAllAlerts();
 }
 
 function setStatus(text, type = '') {
@@ -3927,9 +4822,24 @@ function dismissWelcome() {
   }, { passive: true });
 })();
 
+// Populate mobile sort dropdown from COLUMNS
+(function() {
+  const sel = document.getElementById('mobile-sort-col');
+  for (const col of COLUMNS) {
+    if (!col.sortable) continue;
+    const opt = document.createElement('option');
+    opt.value = col.key;
+    opt.textContent = 'Sort: ' + col.label;
+    sel.appendChild(opt);
+  }
+})();
+
+initPortfolios();
+loadFromURL();
 buildHeader();
 renderTable();
 updateSummary();
+initDragReorder();
 showWelcomeBanner();
 if (portfolio.length > 0) refreshAll().then(() => connectFinnhubWebSocket());
 else connectFinnhubWebSocket();

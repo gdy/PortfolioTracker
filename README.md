@@ -24,8 +24,15 @@ A real-time portfolio tracker for stocks, crypto, and commodities that runs enti
 
 ### Portfolio Management
 - **30+ data columns** — last price, $ change, % change, after-hours, quantity, cost basis, purchase date, market value, day P&L, dividend/yield, ex-div date, next earnings, YTD/6M/1Y performance, total P&L, P&L %, previous close, open, bid, ask, day range, 52-week range, volume, avg volume, market cap, P/E, EPS, beta, notes
+- **Multiple portfolios** — switch between unlimited named portfolios (e.g. "Long-term", "Trading", "Crypto") via the portfolio bar above the toolbar. Create, rename, and delete portfolios on the fly. Each portfolio has its own positions, notes, fetch caches, and undo history. The active portfolio is remembered across sessions.
 - **Inline editing** — click any quantity, cost basis, date, or notes field to edit directly in the table. Changes are saved instantly.
-- **Undo / Redo** — `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) undoes and redoes any portfolio change: add, remove, edit shares/cost/date, import, or clear all. Up to 50 levels of history.
+- **Drag-to-reorder** — grab any row in the desktop table or any mobile card (via the ☰ handle) to manually rearrange positions. Switching to a sorted column disables manual order; clearing the sort restores it.
+- **Column visibility toggle** — click **Columns** in the toolbar to hide/show any of the 30+ columns. Selection is persisted to localStorage.
+- **Allocation pie chart** — automatic SVG pie chart showing percentage allocation by symbol, sorted largest first, with color-coded legend. Updates live as prices change. Hidden until at least one position has a price.
+- **Price alerts** — set above/below price thresholds per symbol. A 🔔 icon appears next to alerted symbols; rows pulse when triggered. Browser notifications fire on threshold cross (requires notification permission). Set from the symbol bell on desktop or the Alert fields in the mobile expanded card.
+- **Export CSV** — one-click download of the current portfolio as CSV (filename includes the portfolio name and date), respecting your current sort order.
+- **Share via URL** — generate a shareable URL containing your portfolio (symbols, shares, cost basis, dates) encoded in the hash. Recipients are prompted before any positions replace their current portfolio.
+- **Undo / Redo** — `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) undoes and redoes any portfolio change: add, remove, edit shares/cost/date, import, reorder, or clear all. Up to 50 levels of history.
 - **Short selling** — negative share quantities track short positions with correct P&L math.
 - **Per-position notes** — free-text notes column for each ticker.
 - **Purchase date tracking** — records when each position was opened, sortable and editable inline.
@@ -61,11 +68,13 @@ Commodity futures symbols containing `=` are handled carefully: `=` is kept raw 
 - **Dark theme** — terminal-style monospace UI with `color-scheme: dark` applied at the root so native browser widgets (date picker, scrollbars) match the theme.
 
 ### Mobile Responsive
-- **Card view** — on screens ≤768px, the data table is replaced with a tap-to-expand card layout. Each card shows symbol, name, price, change, shares, and cost at a glance. Tapping a card expands it to reveal all 30+ data fields, inline editing for quantity/cost/date/notes, and a delete button.
+- **Card view** — on screens ≤768px, the data table is replaced with a tap-to-expand card layout. Each card shows symbol, name, price, change, shares, and cost at a glance. Tapping a card expands it to reveal all 30+ data fields, inline editing for quantity/cost/date/notes/alerts, and a delete button.
+- **Sortable cards** — a sort dropdown above the cards lets you sort by any field, with an ascending/descending toggle button.
+- **Drag-to-reorder cards** — long-press the ☰ handle on any card to drag it to a new position. The handle hides automatically when sorting is active.
 - **Pull-to-refresh** — pull down on the card list to trigger a data refresh.
 - **No iOS zoom** — all inputs use ≥16px font size to prevent Safari's auto-zoom on focus.
 - **Safe areas** — padding adapts to notched devices (iPhone X+) via `env(safe-area-inset-*)`.
-- **Toolbar** — stacks into a 2-column grid with descriptive placeholders; action buttons use a 3-column grid.
+- **Toolbar** — stacks into a 2-column grid with descriptive placeholders; action buttons wrap responsively.
 - **Full-screen import** — import modal fills the viewport on mobile for easier CSV paste and file drop.
 - **Extra-small breakpoint** at 380px for iPhone SE.
 
@@ -150,8 +159,12 @@ Everything lives in your browser's `localStorage` — nothing is sent to any ser
 
 | Key | Contents |
 |-----|----------|
-| `stonks_portfolio` | Positions array (symbol, shares, costBasis, purchaseDate) |
-| `stonks_notes` | Per-symbol notes |
+| `stonks_portfolios` | All named portfolios: `{ name: { portfolio: [...], notes: {...} } }` |
+| `stonks_active_portfolio` | Currently selected portfolio name |
+| `stonks_portfolio` | Active portfolio's positions array (mirrored for backward compat) |
+| `stonks_notes` | Active portfolio's per-symbol notes (mirrored for backward compat) |
+| `stonks_hidden_columns` | Array of column keys hidden via the Columns picker |
+| `stonks_alerts` | Per-symbol price alert thresholds: `{ symbol: { above, below } }` |
 | `stonks_finnhub_key` | FinnHub API key |
 | `stonks_alpaca_key_id` | Alpaca Key ID |
 | `stonks_alpaca_secret` | Alpaca Secret Key |
