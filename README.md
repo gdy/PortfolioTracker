@@ -28,7 +28,8 @@ A real-time portfolio tracker for stocks, crypto, and commodities that runs enti
 - **Inline editing** — click any quantity, cost basis, date, or notes field to edit directly in the table. Changes are saved instantly.
 - **Drag-to-reorder** — grab any row in the desktop table or any mobile card (via the ☰ handle) to manually rearrange positions. Switching to a sorted column disables manual order; clearing the sort restores it.
 - **Column visibility toggle** — click **Columns** in the toolbar to hide/show any of the 30+ columns. Selection is persisted to localStorage.
-- **Allocation pie chart** — automatic SVG pie chart showing percentage allocation by symbol, sorted largest first, with color-coded legend. Updates live as prices change. Hidden until at least one position has a price.
+- **Drag-to-reorder columns** — grab any column header in the desktop table to rearrange columns directly, or use the drag handles in the **Columns** picker. Order is persisted per browser; use **Reset Order** in the picker to restore the default.
+- **Allocation pie chart** — toggleable SVG pie chart showing percentage allocation by symbol, sorted largest first, with a 24-color palette tuned for dark backgrounds (mostly cool tones with warm accents interleaved for distinction at 20+ positions). Click **Show Chart** in the summary bar to show/hide; updates live as prices change.
 - **Price alerts** — set above/below price thresholds per symbol. A 🔔 icon appears next to alerted symbols; rows pulse when triggered. Browser notifications fire on threshold cross (requires notification permission). Set from the symbol bell on desktop or the Alert fields in the mobile expanded card.
 - **Export CSV** — one-click download of the current portfolio as CSV (filename includes the portfolio name and date), respecting your current sort order.
 - **Share via URL** — generate a shareable URL containing your portfolio (symbols, shares, cost basis, dates) encoded in the hash. Recipients are prompted before any positions replace their current portfolio.
@@ -164,6 +165,8 @@ Everything lives in your browser's `localStorage` — nothing is sent to any ser
 | `stonks_portfolio` | Active portfolio's positions array (mirrored for backward compat) |
 | `stonks_notes` | Active portfolio's per-symbol notes (mirrored for backward compat) |
 | `stonks_hidden_columns` | Array of column keys hidden via the Columns picker |
+| `stonks_column_order` | User-defined column order (array of column keys); empty = default order |
+| `stonks_alloc_visible` | Allocation pie chart show/hide state |
 | `stonks_alerts` | Per-symbol price alert thresholds: `{ symbol: { above, below } }` |
 | `stonks_finnhub_key` | FinnHub API key |
 | `stonks_alpaca_key_id` | Alpaca Key ID |

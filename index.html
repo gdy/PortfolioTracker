@@ -165,6 +165,10 @@
   thead th:hover { color: #ccc; }
   thead th.left { text-align: left; }
   thead th .sort-arrow { font-size: 9px; margin-left: 3px; color: #4a9eff; }
+  thead th[draggable="true"] { cursor: grab; }
+  thead th[draggable="true"]:active { cursor: grabbing; }
+  thead th.th-dragging { opacity: 0.4; }
+  thead th.th-drag-over { background: #1a2540; box-shadow: inset 3px 0 0 #4a9eff; }
 
   tbody tr {
     border-bottom: 1px solid #2a2a3a;
@@ -434,6 +438,28 @@
   }
   .welcome-banner .dismiss-btn:hover { background: #2a2a50; color: #ddd; }
 
+  .welcome-tips { margin-top: 14px; border-top: 1px solid #2a2a44; padding-top: 10px; }
+  .welcome-tips summary {
+    cursor: pointer;
+    list-style: none;
+    outline: none;
+    padding: 4px 0;
+    color: #aab;
+    user-select: none;
+    font-size: 13px;
+  }
+  .welcome-tips summary::-webkit-details-marker { display: none; }
+  .welcome-tips summary::marker { display: none; content: ''; }
+  .welcome-tips-arrow {
+    display: inline-block;
+    transition: transform 0.15s ease;
+    color: #888;
+    font-size: 10px;
+    width: 10px;
+  }
+  .welcome-tips[open] .welcome-tips-arrow { transform: rotate(90deg); }
+  .welcome-tips-body { margin-top: 8px; }
+
   .import-overlay {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background: rgba(0,0,0,0.7); z-index: 5000;
@@ -539,11 +565,32 @@
   .alloc-toggle:hover { background: #25254a; color: #b8d4ff; }
 
   /* ==================== ALERT STYLES ==================== */
+  /* Bell has three visual states:
+     1. default (no alert set):  dim + grayscale  - subtle affordance
+     2. .active (alert set):     blue tint        - matches the app's primary accent
+     3. .triggered (firing):     amber + glow + pulse - matches the row pulse */
   .alert-icon {
-    cursor: pointer; font-size: 11px; margin-left: 4px; opacity: 0.6;
-    transition: opacity 0.15s; vertical-align: middle;
+    cursor: pointer; font-size: 11px; margin-left: 4px; opacity: 0.28;
+    filter: grayscale(1);
+    transition: opacity 0.15s, filter 0.15s, text-shadow 0.15s;
+    vertical-align: middle;
   }
-  .alert-icon:hover { opacity: 1; }
+  .alert-icon:hover { opacity: 0.95; filter: grayscale(0); }
+  .alert-icon.active {
+    opacity: 1;
+    filter: grayscale(0) hue-rotate(190deg) saturate(1.4) brightness(1.05);
+    text-shadow: 0 0 4px rgba(74,158,255,0.55);
+  }
+  .alert-icon.triggered {
+    opacity: 1;
+    filter: grayscale(0) hue-rotate(-15deg) saturate(1.6) brightness(1.15);
+    text-shadow: 0 0 6px rgba(255,180,40,0.85), 0 0 12px rgba(255,180,40,0.4);
+    animation: alertBellPulse 1.4s ease-in-out infinite;
+  }
+  @keyframes alertBellPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+  }
   .alert-popover {
     position: fixed; background: #12122a; border: 1px solid #444;
     border-radius: 6px; padding: 12px; z-index: 6000; width: 220px;
@@ -556,9 +603,12 @@
   }
 
   /* ==================== COLUMN PICKER ==================== */
-  .col-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ccc; cursor: pointer; padding: 4px; border-radius: 2px; }
-  .col-check:hover { background: #1a1a30; }
+  .col-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ccc; cursor: grab; padding: 6px 8px; border-radius: 2px; border: 1px solid transparent; user-select: none; }
+  .col-check:hover { background: #1a1a30; border-color: #2a2a44; }
+  .col-check.dragging { opacity: 0.4; }
+  .col-check.drag-over { border-color: #4a9eff; background: #1a2540; }
   .col-check input { cursor: pointer; }
+  .col-drag-handle { color: #555; font-size: 14px; margin-right: 2px; }
 
   /* ==================== DRAG TO REORDER ==================== */
   tr[draggable="true"] { cursor: grab; }
@@ -764,26 +814,39 @@
       min-height: 40px;
       text-align: center;
     }
+    /* Mobile auto-toggle: full pill, the wrap itself is the visual toggle */
     .auto-refresh-toggle {
       font-size: 13px;
       min-height: 40px;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 0 8px;
+      gap: 8px;
+      padding: 0 14px;
       background: #1e1e3a;
       border: 1px solid #555;
-      border-radius: 2px;
+      border-radius: 4px;
+      color: #888;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .auto-refresh-toggle:has(input:checked) {
+      background: #1a3a2a;
+      border-color: #3c8;
+      color: #3c8;
     }
     .auto-refresh-toggle input[type="checkbox"] {
-      width: 18px;
-      height: 18px;
+      width: 16px;
+      height: 16px;
+      flex: 0 0 16px;
     }
     .auto-refresh-toggle input:checked::after {
-      left: 5px;
-      top: 1px;
-      width: 5px;
-      height: 10px;
+      left: 4px;
+      top: 0;
+      width: 4px;
+      height: 9px;
       border-width: 0 2px 2px 0;
     }
 
@@ -965,11 +1028,13 @@
   <div class="import-modal" style="width:400px;">
     <button class="close-btn" onclick="toggleColumnPicker()">&times;</button>
     <h3>Visible Columns</h3>
-    <div style="display:flex; gap:8px; margin-bottom:12px;">
+    <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
       <button class="btn" onclick="hiddenColumns=[];saveHiddenColumns();renderColumnPicker();buildHeader();renderTable();">Show All</button>
       <button class="btn" onclick="hiddenColumns=COLUMNS.filter(c=>!['symbol','name','last','change','changePct','shares','costBasis','mktValue','totalPL','delete'].includes(c.key)).map(c=>c.key);saveHiddenColumns();renderColumnPicker();buildHeader();renderTable();">Essential Only</button>
+      <button class="btn" onclick="resetColumnOrder()">Reset Order</button>
     </div>
-    <div id="column-picker-list" style="display:grid; grid-template-columns:1fr 1fr; gap:6px; max-height:60vh; overflow-y:auto;"></div>
+    <div style="font-size:11px; color:#777; margin-bottom:8px;">Drag rows to reorder columns. Use checkboxes to show/hide.</div>
+    <div id="column-picker-list" style="display:flex; flex-direction:column; gap:4px; max-height:60vh; overflow-y:auto;"></div>
   </div>
 </div>
 
@@ -992,11 +1057,11 @@
   <div style="font-size:11px; color:#888; margin-bottom:6px;">Price Alerts for <strong id="alert-popover-sym" style="color:#fff;"></strong></div>
   <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
     <label style="color:#3c8; font-size:11px; min-width:44px;">Above $</label>
-    <input type="number" id="alert-above" step="0.01" style="flex:1; background:#0a0a15; border:1px solid #333; color:#e0e0e0; padding:4px 6px; font-size:12px; border-radius:2px; font-family:inherit;" />
+    <input type="number" id="alert-above" step="0.01" onkeydown="if(event.key==='Enter'){event.preventDefault();saveAlertFromPopover();}" style="flex:1; background:#0a0a15; border:1px solid #333; color:#e0e0e0; padding:4px 6px; font-size:12px; border-radius:2px; font-family:inherit;" />
   </div>
   <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
     <label style="color:#e55; font-size:11px; min-width:44px;">Below $</label>
-    <input type="number" id="alert-below" step="0.01" style="flex:1; background:#0a0a15; border:1px solid #333; color:#e0e0e0; padding:4px 6px; font-size:12px; border-radius:2px; font-family:inherit;" />
+    <input type="number" id="alert-below" step="0.01" onkeydown="if(event.key==='Enter'){event.preventDefault();saveAlertFromPopover();}" style="flex:1; background:#0a0a15; border:1px solid #333; color:#e0e0e0; padding:4px 6px; font-size:12px; border-radius:2px; font-family:inherit;" />
   </div>
   <div style="display:flex; gap:6px;">
     <button class="btn btn-add" onclick="saveAlertFromPopover()" style="flex:1; font-size:11px; padding:4px;">Set</button>
@@ -1067,11 +1132,43 @@
       </div>
       <p style="margin-top:14px; color:#888;">Without API keys, basic price data is still available via Yahoo Finance. Adding a FinnHub key unlocks real-time WebSocket streaming and full fundamentals.</p>
 
-      <p style="margin-top:16px; margin-bottom:6px; color:#aab;"><strong style="color:#e0e0e0;">Tips</strong></p>
-      <div class="step">
-        <span class="step-num">&bull;</span>
-        <span><strong>Undo / Redo</strong> &mdash; Press <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Z</kbd> to undo and <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Y</kbd> or <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Shift+Z</kbd> to redo any change (add, remove, edit shares/cost/date/notes, import, clear).</span>
-      </div>
+      <details class="welcome-tips">
+        <summary><span class="welcome-tips-arrow">&#9656;</span> <strong style="color:#e0e0e0;">Tips</strong> <span style="color:#666; font-weight:normal; font-size:11px;">(click to expand)</span></summary>
+        <div class="welcome-tips-body">
+          <div class="step">
+            <span class="step-num">&bull;</span>
+            <span><strong>Multiple portfolios</strong> &mdash; Use the portfolio bar above the toolbar to create, switch, rename, and delete named portfolios (e.g. <em>Long-term</em>, <em>Trading</em>, <em>Crypto</em>). Each has its own positions, notes, and price alerts.</span>
+          </div>
+          <div class="step">
+            <span class="step-num">&bull;</span>
+            <span><strong>Customize columns</strong> &mdash; Click <strong>Columns</strong> in the toolbar to show/hide any of the 30+ data columns. On desktop, drag the column headers in the table to rearrange them; the order is saved per browser.</span>
+          </div>
+          <div class="step">
+            <span class="step-num">&bull;</span>
+            <span><strong>Price alerts</strong> &mdash; Each symbol shows a small bell <span style="font-size:12px;">&#128276;</span> next to it. Click it to set above/below thresholds (or use the Alert fields in expanded mobile cards). Triggered rows pulse and a browser notification fires when the price crosses the threshold.</span>
+          </div>
+          <div class="step">
+            <span class="step-num">&bull;</span>
+            <span><strong>Allocation chart</strong> &mdash; Click <strong>Show Chart</strong> in the summary bar (next to Positions) to toggle a live pie chart showing percent allocation by symbol.</span>
+          </div>
+          <div class="step">
+            <span class="step-num">&bull;</span>
+            <span><strong>Drag-to-reorder positions</strong> &mdash; Grab any row in the desktop table (or the <span style="font-size:14px;">&#9776;</span> handle on a mobile card) to manually arrange positions. Clearing the sort restores manual order.</span>
+          </div>
+          <div class="step">
+            <span class="step-num">&bull;</span>
+            <span><strong>Share via URL</strong> &mdash; Click <strong>Share</strong> in the toolbar to generate a link containing your current portfolio. Recipients are prompted before any positions replace theirs.</span>
+          </div>
+          <div class="step">
+            <span class="step-num">&bull;</span>
+            <span><strong>Mobile</strong> &mdash; On phones the table becomes tap-to-expand cards with full inline editing, sortable by any field, and pull-to-refresh.</span>
+          </div>
+          <div class="step">
+            <span class="step-num">&bull;</span>
+            <span><strong>Undo / Redo</strong> &mdash; Press <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Z</kbd> to undo and <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Y</kbd> or <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Shift+Z</kbd> to redo any change (add, remove, edit, reorder, import, clear). Up to 50 levels of history.</span>
+          </div>
+        </div>
+      </details>
       <div style="display:flex; align-items:center; justify-content:space-between; margin-top:16px;">
         <button class="dismiss-btn" onclick="dismissWelcome()">Got it</button>
         <span style="color:#555; font-size:11px;">Made by <a href="https://github.com/gdy" target="_blank" style="color:#6a8ccc;">Grant</a></span>
@@ -1263,6 +1360,7 @@ let fundamentalsCache = {}; // cache profile, metrics, earnings, dividends from 
 let alpacaWorkingFeed = null; // cache which Alpaca feed works ('', 'iex', or null=unknown)
 let attemptedSymbols = new Set(); // symbols that have had at least one fetch attempt
 let hiddenColumns = lsGet('stonks_hidden_columns', '[]'); // column keys to hide
+let columnOrder = lsGet('stonks_column_order', '[]'); // user-defined column order (keys); empty = default
 let alerts = lsGet('stonks_alerts', '{}'); // { symbol: { above: num|null, below: num|null } }
 
 // ==================== UNDO / REDO ====================
@@ -1340,6 +1438,7 @@ function saveNotes() {
   localStorage.setItem('stonks_portfolios', JSON.stringify(all));
 }
 function saveHiddenColumns() { localStorage.setItem('stonks_hidden_columns', JSON.stringify(hiddenColumns)); }
+function saveColumnOrder() { localStorage.setItem('stonks_column_order', JSON.stringify(columnOrder)); }
 function saveAlerts() {
   // Strip volatile _notified flag — it's a runtime debounce, not persistent state
   const clean = {};
@@ -1979,25 +2078,24 @@ async function fetchWithProxyRace(url, n = 3, timeout = 8000) {
   return Promise.any(attempts);
 }
 
-// Maximum-aggression race: fires every proxy across multiple URL variants in parallel
-// and returns the first valid response. Used when we need a single symbol's data NOW
-// (e.g. user adds a ticker mid-import) and proxy capacity is contested.
-async function fetchAnyVariantRace(urls, timeout = 9000) {
+// Race up to `maxAttempts` proxy×URL combinations in parallel.
+// Used when we need a single symbol's data NOW (e.g. user adds a ticker mid-import)
+// and proxy capacity is contested. Capped because browsers limit ~6 connections per
+// origin — fanning out 28+ requests just queues most of them and adds contention
+// against the in-progress refresh that's competing for the same proxies.
+async function fetchAnyVariantRace(urls, timeout = 9000, maxAttempts = 8) {
   const attempts = [];
-  // Try direct fetch on each URL too — cheap if it works
-  for (const url of urls) {
-    attempts.push((async () => {
-      const r = await fetch(url, { signal: AbortSignal.timeout(timeout) });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const t = await r.text();
-      if (!t || (t.trimStart()[0] !== '{' && t.trimStart()[0] !== '[')) throw new Error('Not JSON');
-      return t;
-    })());
+  // Pick proxies starting from last-working so we hit known-good ones first
+  const proxyOrder = [];
+  for (let i = 0; i < PROXIES.length; i++) {
+    proxyOrder.push((lastWorkingProxy + i) % PROXIES.length);
   }
-  // Fan out every proxy across every URL
-  for (let pi = 0; pi < PROXIES.length; pi++) {
-    for (const url of urls) {
-      const idx = pi;
+  // Round-robin: alternate proxies and URLs so the budget covers both axes evenly
+  outer: for (let pi = 0; pi < proxyOrder.length; pi++) {
+    for (let ui = 0; ui < urls.length; ui++) {
+      // Stagger URL/proxy pairing so the same URL doesn't hit the same proxy first
+      const idx = proxyOrder[(pi + ui) % proxyOrder.length];
+      const url = urls[ui];
       attempts.push((async () => {
         const proxiedUrl = PROXIES[idx](url);
         const resp = await fetch(proxiedUrl, { signal: AbortSignal.timeout(timeout) });
@@ -2006,6 +2104,7 @@ async function fetchAnyVariantRace(urls, timeout = 9000) {
         lastWorkingProxy = idx;
         return text;
       })());
+      if (attempts.length >= maxAttempts) break outer;
     }
   }
   return Promise.any(attempts);
@@ -2106,25 +2205,31 @@ async function fetchYahooQuotes(symbols) {
     }
   }
 
-  // Final fallback: any non-commodity symbol that v7 missed (e.g. delisted, bad ticker)
-  // also gets a v8 chart attempt. Sequential here since this is the rare unhappy path.
+  // Final fallback: any non-commodity symbol that v7 missed (e.g. delisted, bad ticker
+  // OR v7 batch failed entirely under yahooV7Failed). Batch in groups of 4 with a small
+  // stagger so a failed v7 doesn't cause 20× sequential ~5s fetches.
   const stillMissing = symbols.filter(s => !v7Results[s] && !isCommoditySymbol(s));
-  for (let mi = 0; mi < stillMissing.length; mi++) {
-    if (mi > 0) await new Promise(r => setTimeout(r, 800));
-    const sym = stillMissing[mi];
-    try {
-      const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true', 3, 8000);
-      const data = JSON.parse(text);
-      if (data.chart && data.chart.result && data.chart.result[0]) {
-        const chart = normalizeYahooChart(sym, data.chart.result[0]);
-        v7Results[sym] = chart;
-        if (chart && (chart.postMarketPrice != null || chart.preMarketPrice != null)) {
-          fetchedAfterHours.add(sym);
+  const STILL_BATCH = 4;
+  for (let bi = 0; bi < stillMissing.length; bi += STILL_BATCH) {
+    if (bi > 0) await new Promise(r => setTimeout(r, 600));
+    const batch = stillMissing.slice(bi, bi + STILL_BATCH);
+    await Promise.all(batch.map(async (sym, k) => {
+      // Tiny per-symbol stagger so they don't all hit the same proxy at the same instant
+      if (k > 0) await new Promise(r => setTimeout(r, 150 * k));
+      try {
+        const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true', 3, 8000);
+        const data = JSON.parse(text);
+        if (data.chart && data.chart.result && data.chart.result[0]) {
+          const chart = normalizeYahooChart(sym, data.chart.result[0]);
+          v7Results[sym] = chart;
+          if (chart && (chart.postMarketPrice != null || chart.preMarketPrice != null)) {
+            fetchedAfterHours.add(sym);
+          }
         }
+      } catch (e) {
+        console.warn('v8 chart failed for', sym, e.message);
       }
-    } catch (e) {
-      console.warn('v8 chart failed for', sym, e.message);
-    }
+    }));
   }
 
   if (Object.keys(v7Results).length > 0) {
@@ -2139,15 +2244,18 @@ async function fetchYahooSummary(sym) {
   const modules = 'price,summaryDetail,defaultKeyStatistics,calendarEvents';
   const crumb = await getYahooCrumb();
 
-  // Try multiple Yahoo URL variants (with and without crumb, both domains)
+  // Build URL variants. Try crumb-bearing URLs FIRST since they're more reliable —
+  // Yahoo's quoteSummary frequently 401s without a crumb. The previous order tried
+  // the crumbless URLs first and burned proxies before getting to the good URL.
   const base1 = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/' + yfPath(sym) + '?modules=' + modules;
   const base2 = 'https://query2.finance.yahoo.com/v10/finance/quoteSummary/' + yfPath(sym) + '?modules=' + modules;
-  const urls = [base1, base2];
+  const urls = [];
   if (crumb) {
-    // Also try with crumb appended
-    urls.push(base1 + '&crumb=' + encodeURIComponent(crumb));
     urls.push(base2 + '&crumb=' + encodeURIComponent(crumb));
+    urls.push(base1 + '&crumb=' + encodeURIComponent(crumb));
   }
+  urls.push(base2);
+  urls.push(base1);
 
   const getVal = (obj) => {
     if (!obj) return null;
@@ -2162,8 +2270,6 @@ async function fetchYahooSummary(sym) {
     return null;
   };
 
-  // Try URL variants sequentially — firing them in parallel hammers all proxies simultaneously.
-  // fetchWithProxy already rotates through all 7 proxies internally, so one call is sufficient.
   function parseResult(text) {
     const data = JSON.parse(text);
     const r = data.quoteSummary && data.quoteSummary.result && data.quoteSummary.result[0];
@@ -2195,14 +2301,23 @@ async function fetchYahooSummary(sym) {
     };
   }
 
-  for (const url of urls) {
+  // Race the best URL across 3 proxies first. fillFundamentals batches multiple
+  // symbols in parallel, so this caps total parallel proxy connections at
+  // BATCH_SIZE × 3 (not BATCH_SIZE × 7 × 4 like the old sequential rotation).
+  try {
+    const text = await fetchWithProxyRace(urls[0], 3, 7000);
+    const result = parseResult(text);
+    if (result) return result;
+  } catch (e) { /* fall through to second URL */ }
+  // Second-chance: try the alternate URL with a slightly smaller race
+  if (urls.length > 1) {
     try {
-      const text = await fetchWithProxy(url, -1, 8000);
+      const text = await fetchWithProxyRace(urls[1], 2, 6000);
       const result = parseResult(text);
       if (result) return result;
-    } catch (e) { /* try next URL variant */ }
+    } catch (e) { /* exhausted */ }
   }
-  console.warn('quoteSummary failed for', sym, '— all URL variants exhausted');
+  console.warn('quoteSummary failed for', sym);
   return null;
 }
 
@@ -2648,10 +2763,14 @@ async function fetchCryptoQuotes(symbols) {
   const cryptoSyms = symbols.filter(s => COINGECKO_IDS[s]);
   if (cryptoSyms.length === 0) return null;
 
-  // Rate-limit: return cached data if last fetch was < 30s ago
+  // Rate-limit: return cached data if last fetch was < 30s ago AND it covers
+  // every requested symbol. Otherwise we'd return stale data missing the new
+  // symbol when the user adds a crypto right after a refresh.
   const now = Date.now();
   if (_cgCache.data && now - _cgCache.time < CG_MIN_INTERVAL) {
-    return _cgCache.data;
+    const cached = _cgCache.data.data || {};
+    if (cryptoSyms.every(s => cached[s])) return _cgCache.data;
+    // Otherwise fall through and hit CoinGecko for the new symbol
   }
 
   const ids = cryptoSyms.map(s => COINGECKO_IDS[s]).join(',');
@@ -2733,32 +2852,31 @@ async function fetchPerformanceData(symbols) {
     }
   }
 
-  // Process sequentially with delays — concurrent proxy calls (N×2 per parallel symbol)
-  // saturate all proxies simultaneously and cause most requests to fail or rate-limit.
+  // Process sequentially with small delays — concurrent proxy calls saturate all
+  // proxies simultaneously and cause most requests to fail or rate-limit. The race
+  // helper fans out 2 proxies per call so we still get parallelism per request without
+  // burning the entire proxy pool on one symbol.
   for (let i = 0; i < symbols.length; i++) {
     const sym = symbols[i];
-    if (i > 0) await new Promise(r => setTimeout(r, 800)); // let proxy recover between symbols
+    if (i > 0) await new Promise(r => setTimeout(r, 500));
 
-    // Try Yahoo first (single domain per call — sequential is more proxy-friendly than racing)
+    // Try Yahoo first — race 2 proxies on the primary CDN domain
     let gotPerf = false;
-    for (const domain of ['query2', 'query1']) {
-      try {
-        const text = await fetchWithProxy('https://' + domain + '.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) +
-          '?period1=' + oneYearAgo + '&period2=' + nowUnix + '&interval=1d');
-        const data = JSON.parse(text);
-        const result = data.chart && data.chart.result && data.chart.result[0];
-        if (result && result.timestamp && result.timestamp.length > 1) {
-          const closes = (result.indicators && result.indicators.adjclose &&
-            result.indicators.adjclose[0] && result.indicators.adjclose[0].adjclose) ||
-            (result.indicators && result.indicators.quote &&
-            result.indicators.quote[0] && result.indicators.quote[0].close) || [];
-          applyPerf(sym, closes, result.timestamp);
-          gotPerf = true;
-          break;
-        }
-      } catch (e) {
-        console.warn('Yahoo perf failed for', sym, e.message);
+    try {
+      const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) +
+        '?period1=' + oneYearAgo + '&period2=' + nowUnix + '&interval=1d', 2, 7000);
+      const data = JSON.parse(text);
+      const result = data.chart && data.chart.result && data.chart.result[0];
+      if (result && result.timestamp && result.timestamp.length > 1) {
+        const closes = (result.indicators && result.indicators.adjclose &&
+          result.indicators.adjclose[0] && result.indicators.adjclose[0].adjclose) ||
+          (result.indicators && result.indicators.quote &&
+          result.indicators.quote[0] && result.indicators.quote[0].close) || [];
+        applyPerf(sym, closes, result.timestamp);
+        gotPerf = true;
       }
+    } catch (e) {
+      console.warn('Yahoo perf failed for', sym, e.message);
     }
     if (gotPerf) continue;
 
@@ -2894,8 +3012,9 @@ async function fetchAlpacaSupplemental(symbols) {
         q.avgVolume = Math.round(totalVol / bars.length);
         filled++;
       }
-      if (q.wk52High == null) q.wk52High = Math.max(...bars.map(b => b.h));
-      if (q.wk52Low == null) q.wk52Low = Math.min(...bars.map(b => b.l));
+      // NOTE: don't compute 52-week high/low here — we only fetch 10 days of bars,
+      // which would give a 10-day range mislabeled as 52-week. The real 52-week range
+      // comes from FinnHub fundamentals or the Yahoo perf path.
     }
   }
 
@@ -2924,10 +3043,13 @@ async function fillFundamentals(symbols) {
 
   const finnhubKey = getApiKey() || 'demo';
 
-  // Process in batches to avoid FinnHub rate limiting (60 calls/min free tier)
-  const BATCH = 8;
+  // Process in small batches. Each fetchYahooSummary now races 3 proxies in parallel,
+  // so BATCH=4 means up to 12 simultaneous proxy connections — enough to be fast
+  // without overwhelming the proxy fleet (which is already shared with the main
+  // refresh's quote calls). Smaller BATCH also keeps us under FinnHub's 60/min limit.
+  const BATCH = 4;
   for (let i = 0; i < toFetch.length; i += BATCH) {
-    if (i > 0) await new Promise(r => setTimeout(r, 1200));
+    if (i > 0) await new Promise(r => setTimeout(r, 800));
     const batch = toFetch.slice(i, i + BATCH);
     const promises = batch.map(async sym => {
       const q = quoteData[sym];
@@ -3026,50 +3148,63 @@ function _applyOneSymbolQuote(sym, q) {
   return true;
 }
 
+// Concurrency limiter for fetchOneSymbolNow. Adding 3 commodities in rapid
+// succession would otherwise fire 18 simultaneous proxy connections, which
+// exceeds the browser's per-origin connection cap and causes everything to
+// queue. Serializing to 1 at a time means each add reuses the warmed-up
+// lastWorkingProxy and finishes in ~1-2s instead of all timing out together.
+// Also deduplicates: if the user adds the same symbol twice, a second call
+// while one is in flight is a no-op.
+let _oneSymbolInFlight = new Map(); // sym -> promise
 async function fetchOneSymbolNow(sym) {
-  try {
-    if (isCryptoSymbol(sym)) {
-      const r = await fetchCryptoQuotes([sym]);
-      if (r && r.data && r.data[sym]) _applyOneSymbolQuote(sym, r.data[sym]);
-      return;
-    }
-
-    // Stocks AND commodities: race every proxy across both Yahoo CDN domains in parallel.
-    // Commodities only have v8 chart; stocks try v7 batch (one-symbol) too. Whichever
-    // request returns first wins. This is intentionally aggressive — when you add a ticker
-    // mid-import, the global refresh is hammering proxies and a small race won't cut it.
-    const isCommodity = isCommoditySymbol(sym);
-    const urls = [
-      'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true',
-      'https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true',
-    ];
-    if (!isCommodity) {
-      // v7 batch with a single symbol — Yahoo's fastest endpoint when it works.
-      // Skip the crumb to avoid an extra serial round-trip; Yahoo accepts crumbless v7 most of the time.
-      urls.push('https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + yfEnc(sym));
-      urls.push('https://query2.finance.yahoo.com/v7/finance/quote?symbols=' + yfEnc(sym));
-    }
-
+  if (_oneSymbolInFlight.has(sym)) return _oneSymbolInFlight.get(sym);
+  // Chain after any prior in-flight targeted fetch so we serialize across symbols.
+  const prev = _oneSymbolInFlight.size > 0
+    ? Promise.all([..._oneSymbolInFlight.values()]).catch(() => {})
+    : Promise.resolve();
+  const p = (async () => {
+    await prev; // wait for any previous single-symbol fetch to release its proxy slots
+    // If the global refresh already filled this in while we were queued, skip
+    if (quoteData[sym] && quoteData[sym].price != null) return;
     try {
-      const text = await fetchAnyVariantRace(urls, 9000);
-      const data = JSON.parse(text);
-      let q = null;
-      // v7 quoteResponse shape
-      if (data.quoteResponse && data.quoteResponse.result && data.quoteResponse.result[0]) {
-        q = normalizeYahoo(data.quoteResponse.result[0]);
+      if (isCryptoSymbol(sym)) {
+        const r = await fetchCryptoQuotes([sym]);
+        if (r && r.data && r.data[sym]) _applyOneSymbolQuote(sym, r.data[sym]);
+        return;
       }
-      // v8 chart shape
-      if (!q && data.chart && data.chart.result && data.chart.result[0]) {
-        q = normalizeYahooChart(sym, data.chart.result[0]);
+
+      // Stocks AND commodities: race a small set of proxies × Yahoo CDN domains.
+      // v8 chart works for both, so just use that — v7 needs a crumb to be reliable
+      // and adding crumb fetch in this hot path would defeat the purpose.
+      // Cap at 6 parallel attempts: 3 proxies × 2 CDN domains. Higher counts just
+      // queue at the browser's per-origin connection limit and add contention against
+      // the in-progress refresh that's competing for the same proxies.
+      const urls = [
+        'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true',
+        'https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true',
+      ];
+
+      try {
+        const text = await fetchAnyVariantRace(urls, 9000, 6);
+        const data = JSON.parse(text);
+        let q = null;
+        if (data.quoteResponse && data.quoteResponse.result && data.quoteResponse.result[0]) {
+          q = normalizeYahoo(data.quoteResponse.result[0]);
+        }
+        if (!q && data.chart && data.chart.result && data.chart.result[0]) {
+          q = normalizeYahooChart(sym, data.chart.result[0]);
+        }
+        _applyOneSymbolQuote(sym, q);
+      } catch (e) {
+        console.warn('fetchOneSymbolNow race failed for', sym, e.message);
       }
-      _applyOneSymbolQuote(sym, q);
     } catch (e) {
-      console.warn('fetchOneSymbolNow race failed for', sym, e.message);
-      // The full refresh will retry — no need to escalate further here.
+      console.warn('fetchOneSymbolNow failed for', sym, e.message);
     }
-  } catch (e) {
-    console.warn('fetchOneSymbolNow failed for', sym, e.message);
-  }
+  })();
+  _oneSymbolInFlight.set(sym, p);
+  p.finally(() => { _oneSymbolInFlight.delete(sym); });
+  return p;
 }
 
 // ==================== MAIN REFRESH ====================
@@ -3362,8 +3497,11 @@ async function _refreshAll() {
     if (q.bid == null || q.bidEstimated) return true;
     return false;
   });
+  // Exclude crypto from the Yahoo perf path — fetchCryptoSupplemental already fetches
+  // 1-year perf via CoinGecko's dedicated chart endpoint, so running both doubles the
+  // network load for every crypto symbol with no benefit.
   const needsPerf = symbols.filter(s => quoteData[s] && !errorSymbols.has(s) &&
-    !fetchedPerformance.has(s) &&
+    !fetchedPerformance.has(s) && !isCryptoSymbol(s) &&
     (quoteData[s].perfYTD == null || quoteData[s].perf6M == null || quoteData[s].perf1Y == null));
 
   const tasks = [];
@@ -3562,14 +3700,50 @@ function fmtDivYield(div, yld) {
 }
 
 // ==================== RENDERING ====================
+// Returns columns in user-defined order (if set), otherwise the default order.
+// `delete` is always pinned to the end so the X button stays in its expected spot.
+function getOrderedColumns() {
+  const byKey = {};
+  for (const c of COLUMNS) byKey[c.key] = c;
+  const ordered = [];
+  const seen = new Set();
+  if (columnOrder && columnOrder.length > 0) {
+    for (const k of columnOrder) {
+      if (k === 'delete') continue;
+      if (byKey[k] && !seen.has(k)) { ordered.push(byKey[k]); seen.add(k); }
+    }
+  }
+  // Append any columns not in the saved order (e.g. new columns added in an update)
+  for (const c of COLUMNS) {
+    if (c.key === 'delete') continue;
+    if (!seen.has(c.key)) ordered.push(c);
+  }
+  // delete column always last
+  if (byKey['delete']) ordered.push(byKey['delete']);
+  return ordered;
+}
 function getVisibleColumns() {
-  return COLUMNS.filter(c => !hiddenColumns.includes(c.key));
+  return getOrderedColumns().filter(c => !hiddenColumns.includes(c.key));
 }
 
 function getCellHtml(col, pos, q, computed) {
   const { price, change, changePct, mktValue, dayPL, totalPL, totalPLPct, ahDisplay, priceCell, sym, noteVal } = computed;
   switch (col.key) {
-    case 'symbol': return `<td class="sym">${sym}${alerts[pos.symbol] && (alerts[pos.symbol].above!=null||alerts[pos.symbol].below!=null)?'<span class="alert-icon" onclick="event.stopPropagation();openAlertPopover(\''+sym+'\',this)" title="Price alert set">&#128276;</span>':''}</td>`;
+    case 'symbol': {
+      const _a = alerts[pos.symbol];
+      const _hasAlert = _a && (_a.above != null || _a.below != null);
+      const _triggered = _hasAlert && checkAlertTriggered(pos.symbol, price);
+      let _cls = 'alert-icon';
+      let _ttl = 'Set price alert';
+      if (_triggered) {
+        _cls = 'alert-icon triggered';
+        _ttl = 'Price alert TRIGGERED \u2014 click to edit';
+      } else if (_hasAlert) {
+        _cls = 'alert-icon active';
+        _ttl = 'Price alert set \u2014 click to edit';
+      }
+      return `<td class="sym">${sym}<span class="${_cls}" onclick="event.stopPropagation();openAlertPopover('${sym}',this)" title="${_ttl}">&#128276;</span></td>`;
+    }
     case 'name': return `<td class="left" style="color:#888; max-width:140px; overflow:hidden; text-overflow:ellipsis;" title="${escAttr(q.name || '')}">${computed.isError ? '<span class="error-text">Not found</span>' : esc(q.name || '')}</td>`;
     case 'last': return `<td class="${cc(change)}">${priceCell}</td>`;
     case 'change': return `<td class="${cc(change)}">${change != null ? (change >= 0 ? '+' : '') + fmt(change) : '\u2014'}</td>`;
@@ -3614,7 +3788,10 @@ function buildHeader() {
     const sort = col.sortable ? ` data-sort="${col.key}"` : '';
     const arrow = col.sortable ? '<span class="sort-arrow"></span>' : '';
     const widthStyle = col.w ? ` style="min-width:${col.w}px"` : '';
-    return `<th${cls}${sort}${widthStyle}>${col.label} ${arrow}</th>`;
+    // Every column except the action column is draggable for reordering
+    const draggable = col.key !== 'delete' ? ' draggable="true"' : '';
+    const colKey = ` data-col-key="${col.key}"`;
+    return `<th${cls}${sort}${colKey}${draggable}>${col.label} ${arrow}</th>`;
   }).join('');
 
   // Size the table to the sum of visible column widths so hiding columns
@@ -3627,8 +3804,10 @@ function buildHeader() {
     table.style.minWidth = totalMin + 'px';
   }
 
+  // Sort handlers — only fire on click, not drag-end (suppressed via _thDragJustEnded)
   row.querySelectorAll('th[data-sort]').forEach(th => {
     th.addEventListener('click', () => {
+      if (_thDragJustEnded) return;
       const col = th.dataset.sort;
       if (sortCol === col) sortAsc = !sortAsc;
       else { sortCol = col; sortAsc = true; }
@@ -3637,7 +3816,40 @@ function buildHeader() {
       renderTable();
     });
   });
+
+  // Drag-and-drop column reorder directly on the table headers
+  let draggedKey = null;
+  row.querySelectorAll('th[draggable="true"]').forEach(th => {
+    th.addEventListener('dragstart', (e) => {
+      draggedKey = th.dataset.colKey;
+      th.classList.add('th-dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', draggedKey); } catch (_) {}
+    });
+    th.addEventListener('dragend', () => {
+      th.classList.remove('th-dragging');
+      row.querySelectorAll('th').forEach(t => t.classList.remove('th-drag-over'));
+      draggedKey = null;
+      // Suppress the click-to-sort that fires on drag-end in some browsers
+      _thDragJustEnded = true;
+      setTimeout(() => { _thDragJustEnded = false; }, 50);
+    });
+    th.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (th.dataset.colKey !== draggedKey) th.classList.add('th-drag-over');
+    });
+    th.addEventListener('dragleave', () => th.classList.remove('th-drag-over'));
+    th.addEventListener('drop', (e) => {
+      e.preventDefault();
+      th.classList.remove('th-drag-over');
+      const targetKey = th.dataset.colKey;
+      if (!draggedKey || draggedKey === targetKey) return;
+      reorderColumn(draggedKey, targetKey);
+    });
+  });
 }
+let _thDragJustEnded = false;
 
 function getSortValue(pos, q) {
   const price = q.price;
@@ -3876,7 +4088,15 @@ function renderMobileCards() {
         <span class="mobile-drag-handle" style="${sortCol ? 'display:none;' : ''}" title="Drag to reorder">&#9776;</span>
         <div class="mobile-card-left">
           <div class="mobile-card-sym">
-            ${sym}${alerts[pos.symbol]&&(alerts[pos.symbol].above!=null||alerts[pos.symbol].below!=null)?'<span style="font-size:11px;opacity:0.6;">&#128276;</span>':''}
+            ${sym}${(() => {
+              const _ma = alerts[pos.symbol];
+              const _mHas = _ma && (_ma.above != null || _ma.below != null);
+              if (!_mHas) return '';
+              const _mTrig = checkAlertTriggered(pos.symbol, price);
+              return _mTrig
+                ? '<span class="alert-icon triggered">&#128276;</span>'
+                : '<span class="alert-icon active">&#128276;</span>';
+            })()}
             <span class="mobile-card-name">${isError ? '<span class="error-text">Not found</span>' : esc(q.name || '')}</span>
           </div>
           <div class="mobile-card-row2">
@@ -3915,8 +4135,8 @@ function renderMobileCards() {
           <div class="mobile-detail-item"><span class="mobile-detail-label">YTD</span><span class="mobile-detail-value ${cc(q.perfYTD)}">${q.perfYTD != null ? fmtPct(q.perfYTD) : '\u2014'}</span></div>
           <div class="mobile-detail-item"><span class="mobile-detail-label">6M</span><span class="mobile-detail-value ${cc(q.perf6M)}">${q.perf6M != null ? fmtPct(q.perf6M) : '\u2014'}</span></div>
           <div class="mobile-detail-item"><span class="mobile-detail-label">1Y</span><span class="mobile-detail-value ${cc(q.perf1Y)}">${q.perf1Y != null ? fmtPct(q.perf1Y) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Bid</span><span class="mobile-detail-value${q.bidEstimated ? ' style="color:#666"' : ''}">${q.bid != null ? (q.bidEstimated ? '~' : '') + fmt(q.bid) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Ask</span><span class="mobile-detail-value${q.askEstimated ? ' style="color:#666"' : ''}">${q.ask != null ? (q.askEstimated ? '~' : '') + fmt(q.ask) : '\u2014'}</span></div>
+          <div class="mobile-detail-item"><span class="mobile-detail-label">Bid</span><span class="mobile-detail-value"${q.bidEstimated ? ' style="color:#666"' : ''}>${q.bid != null ? (q.bidEstimated ? '~' : '') + fmt(q.bid) : '\u2014'}</span></div>
+          <div class="mobile-detail-item"><span class="mobile-detail-label">Ask</span><span class="mobile-detail-value"${q.askEstimated ? ' style="color:#666"' : ''}>${q.ask != null ? (q.askEstimated ? '~' : '') + fmt(q.ask) : '\u2014'}</span></div>
           <div class="mobile-detail-item"><span class="mobile-detail-label">Purchased</span><span class="mobile-detail-value">${pos.purchaseDate || '\u2014'}</span></div>
           <div class="mobile-detail-item"><span class="mobile-detail-label">Notes</span><span class="mobile-detail-value" style="color:#ff9">${esc(notes[pos.symbol] || '') || '\u2014'}</span></div>
         </div>
@@ -3958,10 +4178,67 @@ function toggleColumnPicker() {
 }
 function renderColumnPicker() {
   const list = document.getElementById('column-picker-list');
-  list.innerHTML = COLUMNS.filter(c => c.key !== 'delete').map(col => {
+  // Render in current display order (excluding the always-pinned delete column)
+  const cols = getOrderedColumns().filter(c => c.key !== 'delete');
+  list.innerHTML = cols.map(col => {
     const checked = !hiddenColumns.includes(col.key) ? 'checked' : '';
-    return `<label class="col-check"><input type="checkbox" ${checked} onchange="toggleColumn('${col.key}', this.checked)" />${col.label || 'Actions'}</label>`;
+    return `<div class="col-check" draggable="true" data-col-key="${col.key}">
+      <span class="col-drag-handle">\u2630</span>
+      <input type="checkbox" ${checked} onchange="toggleColumn('${col.key}', this.checked)" />
+      <span>${col.label || 'Actions'}</span>
+    </div>`;
   }).join('');
+
+  // Wire up drag-and-drop reordering
+  let draggedKey = null;
+  list.querySelectorAll('.col-check').forEach(row => {
+    row.addEventListener('dragstart', (e) => {
+      draggedKey = row.dataset.colKey;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      // Required for Firefox to start the drag
+      try { e.dataTransfer.setData('text/plain', draggedKey); } catch (_) {}
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      list.querySelectorAll('.col-check').forEach(r => r.classList.remove('drag-over'));
+      draggedKey = null;
+    });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (row.dataset.colKey !== draggedKey) row.classList.add('drag-over');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      const targetKey = row.dataset.colKey;
+      if (!draggedKey || draggedKey === targetKey) return;
+      reorderColumn(draggedKey, targetKey);
+    });
+  });
+}
+function reorderColumn(fromKey, toKey) {
+  // Build the current order from getOrderedColumns so partial saved orders work
+  const current = getOrderedColumns().map(c => c.key).filter(k => k !== 'delete');
+  const fromIdx = current.indexOf(fromKey);
+  const toIdx = current.indexOf(toKey);
+  if (fromIdx === -1 || toIdx === -1) return;
+  current.splice(fromIdx, 1);
+  current.splice(toIdx, 0, fromKey);
+  columnOrder = current;
+  saveColumnOrder();
+  renderColumnPicker();
+  buildHeader();
+  renderTable();
+}
+function resetColumnOrder() {
+  columnOrder = [];
+  saveColumnOrder();
+  renderColumnPicker();
+  buildHeader();
+  renderTable();
 }
 function toggleColumn(key, visible) {
   if (visible) hiddenColumns = hiddenColumns.filter(k => k !== key);
@@ -4022,17 +4299,116 @@ function openAlertPopover(symbol, el) {
   pop.style.display = 'block';
   pop.style.left = Math.min(rect.left, window.innerWidth - 240) + 'px';
   pop.style.top = (rect.bottom + 4) + 'px';
+  // Auto-focus the "Above" input so Enter immediately saves
+  setTimeout(() => {
+    const inp = document.getElementById('alert-above');
+    if (inp) { inp.focus(); inp.select(); }
+  }, 0);
   // Close on outside click
   setTimeout(() => document.addEventListener('click', _closeAlertPopover, { once: true }), 0);
 }
 function _closeAlertPopover() {
   document.getElementById('alert-popover').style.display = 'none';
 }
+// Track whether we've already prompted for notification permission this session.
+// Some browsers (esp. on file://) keep permission at 'default' forever if the
+// user dismisses the prompt, which used to cause us to re-ask on every save.
+let _notifPermAsked = false;
+
+// Lazy AudioContext — created on first use so we don't spin up audio hardware
+// just to load the page. Browsers also require a user gesture before allowing
+// audio, so we also try to resume() on the first click.
+let _audioCtx = null;
+function _getAudioCtx() {
+  if (_audioCtx) return _audioCtx;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  try { _audioCtx = new Ctx(); } catch (_) { return null; }
+  return _audioCtx;
+}
+// Unlock audio on first user interaction (Chrome/Safari autoplay policy)
+document.addEventListener('click', function _unlockAudio() {
+  const ctx = _getAudioCtx();
+  if (ctx && ctx.state === 'suspended') { try { ctx.resume(); } catch (_) {} }
+}, { once: true, capture: true });
+
+// Flash the browser tab title until the user focuses the tab again. Queues
+// multiple alerts so each one is shown briefly before settling into the
+// blinking pattern. Safe no-op if the document is already visible.
+let _flashTitleOriginal = null;
+let _flashTitleInterval = null;
+let _flashTitleQueue = [];
+let _flashTitleToggle = false;
+function flashTabTitle(msg) {
+  if (typeof document === 'undefined') return;
+  if (!document.hidden) return; // no point flashing the active tab
+  if (_flashTitleOriginal == null) _flashTitleOriginal = document.title;
+  _flashTitleQueue.push(msg);
+  // Keep queue reasonable — old alerts get dropped
+  if (_flashTitleQueue.length > 6) _flashTitleQueue.shift();
+  if (_flashTitleInterval) return; // already flashing
+  let idx = 0;
+  _flashTitleInterval = setInterval(() => {
+    _flashTitleToggle = !_flashTitleToggle;
+    if (_flashTitleToggle) {
+      const m = _flashTitleQueue[idx % _flashTitleQueue.length];
+      document.title = '\uD83D\uDD14 ' + m;
+      idx++;
+    } else {
+      document.title = _flashTitleOriginal;
+    }
+  }, 900);
+}
+function _stopFlashingTitle() {
+  if (_flashTitleInterval) { clearInterval(_flashTitleInterval); _flashTitleInterval = null; }
+  if (_flashTitleOriginal != null) { document.title = _flashTitleOriginal; _flashTitleOriginal = null; }
+  _flashTitleQueue = [];
+  _flashTitleToggle = false;
+}
+// Stop flashing as soon as the user returns to the tab.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) _stopFlashingTitle();
+});
+window.addEventListener('focus', _stopFlashingTitle);
+
+// Play a simple two-note chime. direction='up' = bright ascending (above alert);
+// direction='down' = darker descending (below alert). Uses pure oscillators so
+// no audio files are needed — keeps the app single-file.
+function playAlertSound(direction) {
+  const ctx = _getAudioCtx();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') { try { ctx.resume(); } catch (_) {} }
+  const now = ctx.currentTime;
+  // Two notes: up = C5 -> E5 (523.25, 659.25), down = A4 -> E4 (440, 329.63)
+  const notes = direction === 'up'
+    ? [{ f: 523.25, t: 0.00 }, { f: 659.25, t: 0.14 }]
+    : [{ f: 440.00, t: 0.00 }, { f: 329.63, t: 0.14 }];
+  const type = direction === 'up' ? 'triangle' : 'sine';
+  for (const n of notes) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = n.f;
+    // Short ADSR: fast attack, decay to silence in ~0.28s
+    const start = now + n.t;
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(0.22, start + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.28);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + 0.30);
+  }
+}
 function _maybeRequestNotificationPermission() {
   if (typeof Notification === 'undefined') return;
-  if (Notification.permission === 'default') {
-    try { Notification.requestPermission(); } catch (_) {}
-  }
+  if (_notifPermAsked) return;
+  if (Notification.permission !== 'default') return;
+  _notifPermAsked = true;
+  try {
+    const r = Notification.requestPermission();
+    // Older Safari returns undefined; modern APIs return a Promise.
+    if (r && typeof r.then === 'function') r.catch(() => {});
+  } catch (_) {}
 }
 function saveAlertFromPopover() {
   const above = parseFloat(document.getElementById('alert-above').value);
@@ -4071,12 +4447,20 @@ function checkAllAlerts() {
     const q = quoteData[pos.symbol];
     if (!q || q.price == null || !alerts[pos.symbol]) continue;
     const a = alerts[pos.symbol];
-    const triggered = (a.above != null && q.price >= a.above) || (a.below != null && q.price <= a.below);
+    const aboveHit = a.above != null && q.price >= a.above;
+    const belowHit = a.below != null && q.price <= a.below;
+    const triggered = aboveHit || belowHit;
     if (triggered && !a._notified) {
       a._notified = true;
+      const direction = aboveHit ? 'up' : 'down';
+      const arrow = aboveHit ? '\u25B2' : '\u25BC'; // ▲ / ▼
       if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        new Notification('Price Alert: ' + pos.symbol, { body: pos.symbol + ' is now $' + fmt(q.price) });
+        try {
+          new Notification(arrow + ' Price Alert: ' + pos.symbol, { body: pos.symbol + ' is now $' + fmt(q.price) });
+        } catch (_) { /* browser may block notifications from file:// */ }
       }
+      playAlertSound(direction);
+      flashTabTitle(arrow + ' ' + pos.symbol + ' $' + fmt(q.price));
     } else if (!triggered) {
       a._notified = false;
     }
@@ -4084,7 +4468,37 @@ function checkAllAlerts() {
 }
 
 // ==================== ALLOCATION PIE CHART ====================
-const ALLOC_COLORS = ['#4a9eff','#00c853','#ff6d00','#e040fb','#ff1744','#00bfa5','#ffd600','#651fff','#ff3d00','#00e5ff','#76ff03','#f50057','#2979ff','#69f0ae','#ff9100'];
+// 24-color palette anchored on the app's #4a9eff and #3c8 accents. Mostly cool
+// tones (blue/teal/purple) to fit the dark terminal UI, with carefully chosen
+// warm accents (pink/amber/lime/coral) interleaved so adjacent slices stay
+// distinguishable even at 20+ positions. Order is hand-tuned for high contrast
+// between neighbors — large slices first hit blue→teal→purple→pink→amber, etc.
+const ALLOC_COLORS = [
+  '#4a9eff', // 1  bright blue (anchor)
+  '#3c8',    // 2  teal (anchor)
+  '#b86fff', // 3  bright purple
+  '#ff7eb6', // 4  pink
+  '#ffc14a', // 5  amber
+  '#5fd4ff', // 6  cyan
+  '#a3e635', // 7  lime
+  '#ff8c5a', // 8  coral
+  '#7c6aff', // 9  indigo
+  '#3eddc4', // 10 turquoise
+  '#d886ff', // 11 lavender
+  '#ffa3c5', // 12 rose pink
+  '#84ddff', // 13 sky blue
+  '#62d4a0', // 14 mint
+  '#c3a3ff', // 15 soft purple
+  '#ffd87a', // 16 pale gold
+  '#5fa8c7', // 17 muted teal-blue
+  '#9d8df1', // 18 periwinkle
+  '#48c4d6', // 19 bright teal
+  '#ff6f91', // 20 deep rose
+  '#6c8cd5', // 21 dusty blue
+  '#a878ff', // 22 violet
+  '#3d8eb9', // 23 navy-teal
+  '#8aff7c', // 24 light green
+];
 let _lastAllocSig = ''; // signature of the last drawn allocation: skips re-render when nothing changed meaningfully
 let allocationVisible = localStorage.getItem('stonks_alloc_visible') === '1';
 function toggleAllocationChart() {
