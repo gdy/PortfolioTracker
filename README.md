@@ -16,23 +16,24 @@ A real-time portfolio tracker for stocks, crypto, and commodities that runs enti
 - **Multi-source price fetching** — fetches from Yahoo Finance, FinnHub, Alpaca Markets, Financial Modeling Prep, and CoinGecko simultaneously, picks the source with the most coverage, and fills individual missing fields from secondary sources.
 - **Automatic source fallback** — if one API is down or rate-limited, data is pulled from the next available source automatically, with no user action required.
 - **Auto-refresh** — configurable polling intervals (5s / 10s / 15s / 30s / 60s). Works alongside WebSocket intelligently: when WebSocket is streaming live stock prices, REST polling is automatically throttled to once per 60 seconds (since it's only needed for fundamentals, volume, and non-stock assets). Without WebSocket, polling runs at the selected interval.
-- **Three-phase refresh scheduling** — during active market hours (4 AM–8 PM ET weekdays) all sources are polled; outside those hours, only crypto and commodity positions (24/7 markets) are refreshed on a lightweight path; on weekends, auto-refresh pauses unless you hold crypto or commodities.
+- **Three-phase refresh scheduling** — during active market hours (4 AM–8 PM ET weekdays) all sources are polled; outside those hours, only crypto and commodity positions (24/7 markets) are refreshed on a lightweight path; on weekends, auto-refresh pauses unless you hold crypto or commodities. Switching portfolios aborts any in-flight refresh to avoid stale data bleeding across portfolios.
 - **Pre-market and after-hours pricing** — displayed inline per row with change indicators. Sourced from Yahoo Finance v7 batch (one proxy call for all symbols), with a v8 chart candle fallback for any symbols not covered. Correctly handles the 2 AM overnight case where Yahoo's `currentTradingPeriod` points to the next session.
-- **Price flash animations** — green/red flashes on price changes (from both WebSocket updates and polling).
+- **Price flash animations** — green/red flashes on price changes (from both WebSocket updates and polling). WebSocket updates use targeted in-place DOM patching to avoid disrupting fields being edited.
 - **Source attribution** — the status bar shows which data sources are active and whether WebSocket streaming is live (e.g. "Data via FinnHub + CoinGecko | WS streaming").
-- **Smart CORS proxy rotation** — 7 proxy endpoints with automatic failover, last-working-proxy memory, and validation of proxy error responses (rejects HTML pages, rate-limit strings, and proxy-specific JSON error bodies before accepting a response).
+- **Smart CORS proxy rotation** — 6 proxy endpoints with automatic failover, last-working-proxy memory, and validation of proxy error responses (rejects HTML pages, rate-limit strings, and proxy-specific JSON error bodies before accepting a response).
 
 ### Portfolio Management
 - **30+ data columns** — last price, $ change, % change, after-hours, quantity, cost basis, purchase date, market value, day P&L, dividend/yield, ex-div date, next earnings, YTD/6M/1Y performance, total P&L, P&L %, previous close, open, bid, ask, day range, 52-week range, volume, avg volume, market cap, P/E, EPS, beta, notes
 - **Multiple portfolios** — switch between unlimited named portfolios (e.g. "Long-term", "Trading", "Crypto") via the portfolio bar above the toolbar. Create, rename, and delete portfolios on the fly. Each portfolio has its own positions, notes, fetch caches, and undo history. The active portfolio is remembered across sessions.
 - **Inline editing** — click any quantity, cost basis, date, or notes field to edit directly in the table. Changes are saved instantly.
 - **Drag-to-reorder** — grab any row in the desktop table or any mobile card (via the ☰ handle) to manually rearrange positions. Switching to a sorted column disables manual order; clearing the sort restores it.
-- **Column visibility toggle** — click **Columns** in the toolbar to hide/show any of the 30+ columns. Selection is persisted to localStorage.
+- **Column visibility toggle** — click **Columns** in the toolbar to hide/show any of the 30+ columns. Essential fields (symbol, name, price, change, quantity, cost basis) are locked and cannot be hidden. Selection is persisted to localStorage.
 - **Drag-to-reorder columns** — grab any column header in the desktop table to rearrange columns directly, or use the drag handles in the **Columns** picker. Order is persisted per browser; use **Reset Order** in the picker to restore the default.
 - **Allocation pie chart** — toggleable SVG pie chart showing percentage allocation by symbol, sorted largest first, with a 24-color palette tuned for dark backgrounds (mostly cool tones with warm accents interleaved for distinction at 20+ positions). Click **Show Chart** in the summary bar to show/hide; updates live as prices change.
-- **Price alerts** — set above/below price thresholds per symbol. A 🔔 icon appears next to alerted symbols; rows pulse when triggered. Browser notifications fire on threshold cross (requires notification permission). Set from the symbol bell on desktop or the Alert fields in the mobile expanded card.
+- **Price alerts** — set above/below price thresholds per symbol. A 🔔 icon appears next to alerted symbols; rows pulse when triggered. Browser notifications fire on threshold cross (requires notification permission — the bell tooltip shows current permission status). Set from the symbol bell on desktop or the Alert fields in the mobile expanded card.
 - **Export CSV** — one-click download of the current portfolio as CSV (filename includes the portfolio name and date), respecting your current sort order.
-- **Share via URL** — generate a shareable URL containing your portfolio (symbols, shares, cost basis, dates) encoded in the hash. Recipients are prompted before any positions replace their current portfolio.
+- **Export / Import settings** — save and restore your API keys, column visibility, column order, price alerts, and refresh preferences as a JSON file. Found in the Settings panel.
+- **Share via URL** — generate a shareable URL containing your portfolio (symbols, shares, cost basis, dates) encoded in the hash (up to 99 positions). Recipients are prompted before any positions replace their current portfolio. Shared symbols are sanitized and length-validated on import.
 - **Undo / Redo** — `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) undoes and redoes any portfolio change: add, remove, edit shares/cost/date, import, reorder, or clear all. Up to 50 levels of history.
 - **Short selling** — negative share quantities track short positions with correct P&L math.
 - **Per-position notes** — free-text notes column for each ticker.
@@ -65,7 +66,7 @@ Commodity futures symbols containing `=` are handled carefully: `=` is kept raw 
 ### Sorting & UI
 - **Click any column header to sort** — ascending/descending toggle with a sort indicator arrow.
 - **Sticky headers** — column headers stay visible while scrolling horizontally.
-- **Keyboard shortcuts** — `Tab` moves between toolbar inputs (ticker → shares → cost → date); `Enter` adds a position; `Ctrl+Z` / `Ctrl+Y` undo/redo.
+- **Keyboard shortcuts** — `Tab` moves between toolbar inputs (ticker → shares → cost → date); `Enter` adds a position; `Ctrl+Z` / `Ctrl+Y` undo/redo; `?` opens the keyboard shortcuts help overlay; `Esc` closes overlays.
 - **Dark theme** — terminal-style monospace UI with `color-scheme: dark` applied at the root so native browser widgets (date picker, scrollbars) match the theme.
 
 ### Mobile Responsive
@@ -93,9 +94,9 @@ Commodity futures symbols containing `=` are handled carefully: `=` is kept raw 
 
 ### API Call Strategy
 
-**Proxy efficiency** — Yahoo Finance requests go through CORS proxies. The code uses a single rotating proxy list (`lastWorkingProxy` cache) with HTML-page, rate-limit-string, and proxy-error-JSON detection to skip bad responses. Sequential processing with per-symbol delays prevents proxy saturation:
-- Performance history (YTD/6M/1Y): processed one symbol at a time with 800 ms gaps
-- Commodity retry: 2 s between symbols in the main pass; 4 s initial delay then per-proxy fallback in the background retry
+**Proxy efficiency** — Yahoo Finance requests go through CORS proxies. The code uses a single rotating proxy list (`lastWorkingProxy` cache) with HTML-page, rate-limit-string, and proxy-error-JSON detection to skip bad responses. Proxy-dependent tasks (fundamentals, performance history) run sequentially to avoid saturating the shared proxy pool, while direct-CORS tasks (Alpaca, CoinGecko) run in parallel:
+- Performance history (YTD/6M/1Y): processed one symbol at a time with configurable gaps
+- Commodity retry: staggered in the main pass; deferred background retry with overlap prevention via `AbortController`
 - FinnHub free quotes: 200 ms between symbols, stops on HTTP 429
 
 **Yahoo crumb** — fetched once and cached for 30 minutes (crumbs expire ~30 min). Automatically refreshed on expiry rather than failing silently with stale auth.

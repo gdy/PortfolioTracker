@@ -113,6 +113,10 @@
   @keyframes pulse-live { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
   #ws-indicator { animation: pulse-live 2s ease-in-out infinite; }
 
+  /* Responsive label swap for buttons that say different things on mobile */
+  .label-mobile { display: none; }
+  .label-desktop { display: inline; }
+
   .status-bar {
     background: #111;
     padding: 4px 12px;
@@ -254,44 +258,61 @@
 
   .after-hours { color: #b388ff; font-size: 11px; }
 
+  /* Auto-refresh toggle is styled exactly like .btn .btn-refresh but green.
+     The native checkbox is hidden and a leading glyph (\u2713 when checked,
+     \u25CB when not) is drawn via ::before, mirroring the \u21BB glyph used
+     on the Refresh button. iOS Chrome won't draw a native widget anywhere. */
   .auto-refresh-toggle {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 4px;
+    justify-content: center;
+    gap: 6px;
+    padding: 4px 14px;
+    border: 1px solid #2a6;
+    background: #1e1e3a;
+    color: #3c8;
     cursor: pointer;
-    color: #888;
-    font-size: 11px;
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1;
+    border-radius: 2px;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    user-select: none;
   }
+  .auto-refresh-toggle:hover { background: #1a3a2a; }
+  .auto-refresh-toggle:has(input:checked) {
+    background: #1a4a2c;
+    border-color: #4ed896;
+    color: #7fffaf;
+  }
+  /* Visually hide the real checkbox (kept for form/JS state + label click toggle) */
   .auto-refresh-toggle input[type="checkbox"] {
-    cursor: pointer;
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    padding: 0;
+    pointer-events: none;
     -webkit-appearance: none;
     appearance: none;
-    width: 11px;
-    height: 11px;
-    padding: 0;
-    border: 1px solid #555;
-    border-radius: 2px;
-    background: #0d0d1a;
-    margin: 0;
-    position: relative;
-    transition: background 0.15s, border-color 0.15s;
   }
-  .auto-refresh-toggle input:checked {
-    background: #2a6;
-    border-color: #3c8;
+  /* Glyph: \u25CB hollow circle when off, \u2713 check when on (matches the
+     way Refresh shows its \u21BB symbol before the label text) */
+  .auto-refresh-toggle::before {
+    content: '\25CB';
+    font-size: 13px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
   }
-  .auto-refresh-toggle input:checked::after {
-    content: '';
-    position: absolute;
-    left: 3px;
-    top: 0px;
-    width: 3px;
-    height: 7px;
-    border: solid #fff;
-    border-width: 0 1.5px 1.5px 0;
-    transform: rotate(40deg);
+  .auto-refresh-toggle:has(input:checked)::before {
+    content: '\2713';
+    font-weight: bold;
   }
-  .auto-refresh-toggle input:hover { border-color: #4a9eff; }
 
   .slide-wrap {
     display: grid;
@@ -439,26 +460,37 @@
   .welcome-banner .dismiss-btn:hover { background: #2a2a50; color: #ddd; }
 
   .welcome-tips { margin-top: 14px; border-top: 1px solid #2a2a44; padding-top: 10px; }
-  .welcome-tips summary {
+  .welcome-tips-summary {
     cursor: pointer;
-    list-style: none;
     outline: none;
     padding: 4px 0;
     color: #aab;
     user-select: none;
     font-size: 13px;
   }
-  .welcome-tips summary::-webkit-details-marker { display: none; }
-  .welcome-tips summary::marker { display: none; content: ''; }
   .welcome-tips-arrow {
     display: inline-block;
-    transition: transform 0.15s ease;
+    transition: transform 0.25s ease;
     color: #888;
     font-size: 10px;
     width: 10px;
   }
-  .welcome-tips[open] .welcome-tips-arrow { transform: rotate(90deg); }
-  .welcome-tips-body { margin-top: 8px; }
+  .welcome-tips.open .welcome-tips-arrow { transform: rotate(90deg); }
+  .welcome-tips-body {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.25s ease;
+  }
+  .welcome-tips.open .welcome-tips-body {
+    grid-template-rows: 1fr;
+  }
+  .welcome-tips-body-inner {
+    overflow: hidden;
+    min-height: 0;
+  }
+  .welcome-tips.open .welcome-tips-body-inner {
+    margin-top: 8px;
+  }
 
   .import-overlay {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -603,12 +635,31 @@
   }
 
   /* ==================== COLUMN PICKER ==================== */
-  .col-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ccc; cursor: grab; padding: 6px 8px; border-radius: 2px; border: 1px solid transparent; user-select: none; }
+  /* Modal becomes a flex column so the list can grow to fill the modal height */
+  .column-picker-modal { display: flex; flex-direction: column; }
+  .column-picker-modal h3 { flex: 0 0 auto; }
+  .column-picker-modal > div:not(#column-picker-list) { flex: 0 0 auto; }
+  #column-picker-list {
+    flex: 1 1 auto;
+    display: flex; flex-direction: column; gap: 4px;
+    overflow-y: auto;
+    min-height: 0;
+  }
+  .col-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ccc; padding: 6px 8px; border-radius: 2px; border: 1px solid transparent; user-select: none; }
   .col-check:hover { background: #1a1a30; border-color: #2a2a44; }
   .col-check.dragging { opacity: 0.4; }
   .col-check.drag-over { border-color: #4a9eff; background: #1a2540; }
-  .col-check input { cursor: pointer; }
-  .col-drag-handle { color: #555; font-size: 14px; margin-right: 2px; }
+  .col-check input { cursor: pointer; min-width: 18px; min-height: 18px; }
+  .col-check.essential { color: #888; }
+  .col-check.essential input { cursor: not-allowed; opacity: 0.55; }
+  .col-lock { font-size: 9px; opacity: 0.6; margin-left: 4px; vertical-align: middle; }
+  .col-drag-handle {
+    color: #888; font-size: 16px; margin-right: 2px;
+    cursor: grab; padding: 4px 8px 4px 0;
+    touch-action: none;
+    -webkit-user-select: none; user-select: none;
+  }
+  .col-drag-handle:active { cursor: grabbing; color: #4a9eff; }
 
   /* ==================== DRAG TO REORDER ==================== */
   tr[draggable="true"] { cursor: grab; }
@@ -742,6 +793,10 @@
     /* Hide table, show cards */
     .table-wrap { display: none; }
     .mobile-cards { display: block; padding-bottom: env(safe-area-inset-bottom); }
+
+    /* Swap responsive labels (e.g. Columns -> Fields on mobile) */
+    .label-mobile { display: inline; }
+    .label-desktop { display: none; }
     /* .mobile-sort-bar visibility is controlled by JS (renderTable) so it
        hides when the portfolio is empty. */
 
@@ -783,6 +838,20 @@
     }
     /* Hide label when date has a value (toggled via JS) */
     .date-input-wrap.has-value .date-label { display: none; }
+    /* iOS shows its native "mm/dd/yyyy" placeholder text inside the input even
+       when empty, which collides with our custom "Date" label. Hide the native
+       text while empty so only "Date" is visible; let it reappear once the
+       user picks a value (or focuses the field via the picker). */
+    .date-input-wrap:not(.has-value) input[type="date"]::-webkit-datetime-edit {
+      color: transparent;
+    }
+    .date-input-wrap:not(.has-value) input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+    .date-input-wrap:not(.has-value) input[type="date"]::-webkit-datetime-edit-text,
+    .date-input-wrap:not(.has-value) input[type="date"]::-webkit-datetime-edit-month-field,
+    .date-input-wrap:not(.has-value) input[type="date"]::-webkit-datetime-edit-day-field,
+    .date-input-wrap:not(.has-value) input[type="date"]::-webkit-datetime-edit-year-field {
+      color: transparent;
+    }
     .toolbar > div:first-child .btn-add {
       grid-column: 1 / -1;
       width: 100%;
@@ -806,6 +875,7 @@
       display: grid !important;
       grid-template-columns: 1fr 1fr 1fr;
       gap: 6px;
+      position: relative;
     }
     .toolbar > div:last-child .btn,
     .toolbar > div:last-child select {
@@ -814,40 +884,31 @@
       min-height: 40px;
       text-align: center;
     }
-    /* Mobile auto-toggle: full pill, the wrap itself is the visual toggle */
+    /* Pin the Live badge absolutely so it doesn't take a grid cell and shift
+       buttons when WebSocket connects mid-session. */
+    .toolbar > div:last-child #ws-indicator {
+      position: absolute !important;
+      top: -18px;
+      right: 4px;
+      font-size: 10px !important;
+      pointer-events: none;
+    }
+    /* Mobile: just enlarge the unified pill so it's a comfortable touch target.
+       The desktop rule already hides the native checkbox and draws the glyph,
+       so iOS Chrome can't leak its native widget here. */
     .auto-refresh-toggle {
+      display: flex;
+      width: 100%;
       font-size: 13px;
       min-height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      padding: 0 16px;
       gap: 8px;
-      padding: 0 14px;
-      background: #1e1e3a;
-      border: 1px solid #555;
       border-radius: 4px;
-      color: #888;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      transition: background 0.15s, border-color 0.15s, color 0.15s;
     }
-    .auto-refresh-toggle:has(input:checked) {
-      background: #1a3a2a;
-      border-color: #3c8;
-      color: #3c8;
-    }
-    .auto-refresh-toggle input[type="checkbox"] {
-      width: 16px;
-      height: 16px;
-      flex: 0 0 16px;
-    }
-    .auto-refresh-toggle input:checked::after {
-      left: 4px;
-      top: 0;
-      width: 4px;
-      height: 9px;
-      border-width: 0 2px 2px 0;
+    .auto-refresh-toggle::before {
+      font-size: 15px;
+      width: 15px;
+      height: 15px;
     }
 
     /* Status bar */
@@ -994,7 +1055,7 @@
     <button class="btn btn-refresh" onclick="refreshAll()">&#8635; Refresh</button>
     <button class="btn" onclick="openImportModal()">Import</button>
     <button class="btn" onclick="exportCSV()">Export</button>
-    <button class="btn" onclick="toggleColumnPicker()">Columns</button>
+    <button class="btn" onclick="toggleColumnPicker()"><span class="label-desktop">Columns</span><span class="label-mobile">Fields</span></button>
     <button class="btn" onclick="toggleSettings()">Settings</button>
     <button class="btn" onclick="sharePortfolio()">Share</button>
     <button class="btn btn-danger" onclick="clearAll()">Clear All</button>
@@ -1025,16 +1086,16 @@
 
 <!-- Column Picker -->
 <div class="import-overlay" id="column-picker-overlay" onclick="if(event.target===this)toggleColumnPicker()">
-  <div class="import-modal" style="width:400px;">
+  <div class="import-modal column-picker-modal" style="width:400px;">
     <button class="close-btn" onclick="toggleColumnPicker()">&times;</button>
-    <h3>Visible Columns</h3>
+    <h3 id="column-picker-title">Visible Columns</h3>
     <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
       <button class="btn" onclick="hiddenColumns=[];saveHiddenColumns();renderColumnPicker();buildHeader();renderTable();">Show All</button>
-      <button class="btn" onclick="hiddenColumns=COLUMNS.filter(c=>!['symbol','name','last','change','changePct','shares','costBasis','mktValue','totalPL','delete'].includes(c.key)).map(c=>c.key);saveHiddenColumns();renderColumnPicker();buildHeader();renderTable();">Essential Only</button>
+      <button class="btn" onclick="hiddenColumns=COLUMNS.filter(c=>!ESSENTIAL_COLUMN_KEYS.has(c.key)&&!['mktValue','totalPL','delete'].includes(c.key)).map(c=>c.key);saveHiddenColumns();renderColumnPicker();buildHeader();renderTable();">Essential Only</button>
       <button class="btn" onclick="resetColumnOrder()">Reset Order</button>
     </div>
-    <div style="font-size:11px; color:#777; margin-bottom:8px;">Drag rows to reorder columns. Use checkboxes to show/hide.</div>
-    <div id="column-picker-list" style="display:flex; flex-direction:column; gap:4px; max-height:60vh; overflow-y:auto;"></div>
+    <div id="column-picker-hint" style="font-size:11px; color:#777; margin-bottom:8px;">Drag rows to reorder. Use checkboxes to show/hide.</div>
+    <div id="column-picker-list"></div>
   </div>
 </div>
 
@@ -1049,6 +1110,24 @@
       <button class="btn btn-add" onclick="copyShareURL()">Copy Link</button>
       <span class="save-confirm" id="confirm-share">&#10003; Copied</span>
     </div>
+  </div>
+</div>
+
+<!-- Keyboard Shortcuts Overlay -->
+<div class="import-overlay" id="shortcuts-overlay" onclick="if(event.target===this)document.getElementById('shortcuts-overlay').classList.remove('show')">
+  <div class="import-modal" style="width:380px;">
+    <button class="close-btn" onclick="document.getElementById('shortcuts-overlay').classList.remove('show')">&times;</button>
+    <h3>Keyboard Shortcuts</h3>
+    <div style="display:grid; grid-template-columns:auto 1fr; gap:6px 16px; font-size:13px; color:#ccc;">
+      <kbd style="background:#1a1a30; padding:2px 8px; border-radius:3px; font-size:11px; text-align:center;">?</kbd><span>Show this help</span>
+      <kbd style="background:#1a1a30; padding:2px 8px; border-radius:3px; font-size:11px; text-align:center;">Ctrl+Z</kbd><span>Undo</span>
+      <kbd style="background:#1a1a30; padding:2px 8px; border-radius:3px; font-size:11px; text-align:center;">Ctrl+Y</kbd><span>Redo</span>
+      <kbd style="background:#1a1a30; padding:2px 8px; border-radius:3px; font-size:11px; text-align:center;">Ctrl+Shift+Z</kbd><span>Redo (alt)</span>
+      <kbd style="background:#1a1a30; padding:2px 8px; border-radius:3px; font-size:11px; text-align:center;">Tab</kbd><span>Move between toolbar inputs</span>
+      <kbd style="background:#1a1a30; padding:2px 8px; border-radius:3px; font-size:11px; text-align:center;">Enter</kbd><span>Add position (when in toolbar)</span>
+      <kbd style="background:#1a1a30; padding:2px 8px; border-radius:3px; font-size:11px; text-align:center;">Esc</kbd><span>Close overlays</span>
+    </div>
+    <div style="margin-top:14px; font-size:11px; color:#666; text-align:center;">Press <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:10px;">?</kbd> or <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:10px;">Esc</kbd> to close</div>
   </div>
 </div>
 
@@ -1094,8 +1173,11 @@
         <span class="save-confirm" id="confirm-fmp">&#10003; Saved</span>
         <span style="color:#666; font-size:11px;">250 req/day &mdash; financialmodelingprep.com</span>
       </div>
-      <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+      <div style="display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:wrap;">
         <button class="btn" onclick="showWelcomeBanner(true)" style="font-size:11px; padding:2px 10px;">Show Welcome Guide</button>
+        <button class="btn" onclick="exportSettings()" style="font-size:11px; padding:2px 10px;">Export Settings</button>
+        <label class="btn" style="font-size:11px; padding:2px 10px; cursor:pointer;">Import Settings<input type="file" accept=".json" onchange="importSettings(this.files[0])" style="display:none;" /></label>
+        <span class="save-confirm" id="confirm-settings-io">&#10003; Done</span>
       </div>
     </div>
   </div>
@@ -1132,9 +1214,9 @@
       </div>
       <p style="margin-top:14px; color:#888;">Without API keys, basic price data is still available via Yahoo Finance. Adding a FinnHub key unlocks real-time WebSocket streaming and full fundamentals.</p>
 
-      <details class="welcome-tips">
-        <summary><span class="welcome-tips-arrow">&#9656;</span> <strong style="color:#e0e0e0;">Tips</strong> <span style="color:#666; font-weight:normal; font-size:11px;">(click to expand)</span></summary>
-        <div class="welcome-tips-body">
+      <div class="welcome-tips" id="welcome-tips">
+        <div class="welcome-tips-summary" onclick="document.getElementById('welcome-tips').classList.toggle('open')"><span class="welcome-tips-arrow">&#9656;</span> <strong style="color:#e0e0e0;">Tips</strong> <span style="color:#666; font-weight:normal; font-size:11px;">(click to expand)</span></div>
+        <div class="welcome-tips-body"><div class="welcome-tips-body-inner">
           <div class="step">
             <span class="step-num">&bull;</span>
             <span><strong>Multiple portfolios</strong> &mdash; Use the portfolio bar above the toolbar to create, switch, rename, and delete named portfolios (e.g. <em>Long-term</em>, <em>Trading</em>, <em>Crypto</em>). Each has its own positions, notes, and price alerts.</span>
@@ -1167,8 +1249,8 @@
             <span class="step-num">&bull;</span>
             <span><strong>Undo / Redo</strong> &mdash; Press <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Z</kbd> to undo and <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Y</kbd> or <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Shift+Z</kbd> to redo any change (add, remove, edit, reorder, import, clear). Up to 50 levels of history.</span>
           </div>
-        </div>
-      </details>
+        </div></div>
+      </div>
       <div style="display:flex; align-items:center; justify-content:space-between; margin-top:16px;">
         <button class="dismiss-btn" onclick="dismissWelcome()">Got it</button>
         <span style="color:#555; font-size:11px;">Made by <a href="https://github.com/gdy" target="_blank" style="color:#6a8ccc;">Grant</a></span>
@@ -1268,12 +1350,17 @@
 (function() {
   const phrase = 'grant is nice with it';
   let buf = '';
+  let pos = 0; // index into phrase for O(1) check
   const emojis = ['🚀','💰','📈','💎','🔥','⭐','💸','🏆','👑','💪'];
   document.addEventListener('keypress', function(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    buf += e.key.toLowerCase();
+    const ch = e.key.toLowerCase();
+    // Fast-path: track position in phrase for O(1) match
+    if (ch === phrase[pos]) { pos++; } else { pos = ch === phrase[0] ? 1 : 0; }
+    buf += ch;
     if (buf.length > phrase.length) buf = buf.slice(-phrase.length);
-    if (buf === phrase) {
+    if (pos === phrase.length && buf === phrase) {
+      pos = 0;
       buf = '';
       const overlay = document.getElementById('ee-overlay');
       const particles = document.getElementById('ee-particles');
@@ -1334,6 +1421,76 @@ const COLUMNS = [
   { key: 'delete',    label: '',              align: 'right', sortable: false, w: 40  },
 ];
 
+// Required fields that cannot be hidden — without these the row/card is meaningless.
+// (Symbol, last price, change, share quantity, and cost basis are the bare minimum
+// for any portfolio row to make sense; name keeps you from staring at tickers alone.)
+const ESSENTIAL_COLUMN_KEYS = new Set(['symbol','name','last','change','changePct','shares','costBasis']);
+
+// ==================== TUNING CONSTANTS ====================
+// Timeouts (ms)
+const DIRECT_FETCH_TIMEOUT = 4000;
+const PROXY_FETCH_TIMEOUT = 10000;
+const PROXY_RACE_TIMEOUT = 8000;
+const ALPACA_TIMEOUT = 8000;
+const COINGECKO_TIMEOUT = 8000;
+const FMP_TIMEOUT = 8000;
+const FINNHUB_TIMEOUT = 4000;
+const FINNHUB_FUND_TIMEOUT = 6000;
+const YAHOO_SUMMARY_TIMEOUT_PRIMARY = 7000;
+const YAHOO_SUMMARY_TIMEOUT_SECONDARY = 6000;
+const YAHOO_PERF_TIMEOUT = 7000;
+const YAHOO_AH_TIMEOUT = 12000;
+// Delays (ms)
+const FINNHUB_QUOTE_DELAY = 200;          // between sequential FinnHub /quote calls
+const FINNHUB_BATCH_DELAY = 1500;         // between fundamentals batches
+const PERF_SYMBOL_DELAY = 500;            // between sequential perf requests
+const COMMODITY_STAGGER = 200;            // stagger between parallel commodity fetches
+const COMMODITY_RETRY_DELAY = 1500;       // initial delay before deferred commodity retry
+const COMMODITY_RETRY_GAP = 1200;         // gap between deferred retry symbols
+const STILL_MISSING_BATCH_DELAY = 600;    // between batches of v8 fallback fetches
+const STILL_MISSING_STAGGER = 150;        // per-symbol stagger within a batch
+const FILL_FUND_BATCH_DELAY = 800;        // between fillFundamentals batches
+const AH_CHART_DELAY = 400;              // between sequential after-hours chart fetches
+const CG_SUPPLEMENTAL_DELAY = 1500;       // between CoinGecko supplemental requests
+// Batch sizes
+const FINNHUB_FUND_BATCH = 5;
+const FINNHUB_QUOTE_BATCH = 10;
+const STILL_MISSING_BATCH = 4;
+const FILL_FUND_BATCH = 3;
+// Limits
+const MAX_WS_SYMBOLS = 50;
+const MAX_UNDO = 50;
+const CG_MIN_INTERVAL = 30000;           // 30s minimum between CoinGecko calls
+const YF_CRUMB_TTL = 30 * 60 * 1000;     // crumbs expire ~30 minutes
+const YF_V7_RETRY_MS = 3 * 60 * 1000;    // retry v7 after 3 minutes
+const WS_FRESH_MS = 10000;               // how recent a WS trade must be to skip REST quote
+const WS_REST_THROTTLE = 60000;           // throttle REST when WS is active (ms)
+const OFF_HOURS_FULL_INTERVAL = 60000;    // min interval between full off-hours refreshes
+const WS_RECONNECT_DELAY = 5000;
+const FLASH_TITLE_INTERVAL = 900;
+const FLASH_TITLE_MAX_QUEUE = 6;
+
+// ==================== QUOTE FACTORY ====================
+// Single source of truth for the quote object shape. Every normalizer spreads
+// from this so new fields are automatically present everywhere. Without this,
+// adding a field to one normalizer but forgetting another would make it
+// `undefined` instead of `null`, breaking `== null` checks silently.
+function makeEmptyQuote(sym) {
+  return {
+    symbol: sym, name: sym, price: null,
+    change: null, changePct: null, prevClose: null, open: null,
+    dayHigh: null, dayLow: null, wk52High: null, wk52Low: null,
+    volume: null, avgVolume: null, marketCap: null,
+    pe: null, eps: null, beta: null,
+    dividend: null, dividendYield: null, exDivDate: null, earningsDate: null,
+    bid: null, ask: null, bidEstimated: false, askEstimated: false,
+    postMarketPrice: null, postMarketChange: null,
+    preMarketPrice: null, preMarketChange: null, marketState: null,
+    perfYTD: null, perf6M: null, perf1Y: null,
+    _lastUpdate: null, // timestamp of last data update for this symbol
+  };
+}
+
 // ==================== STATE ====================
 function lsGet(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key) || fallback); } catch (_) { return JSON.parse(fallback); }
@@ -1360,13 +1517,15 @@ let fundamentalsCache = {}; // cache profile, metrics, earnings, dividends from 
 let alpacaWorkingFeed = null; // cache which Alpaca feed works ('', 'iex', or null=unknown)
 let attemptedSymbols = new Set(); // symbols that have had at least one fetch attempt
 let hiddenColumns = lsGet('stonks_hidden_columns', '[]'); // column keys to hide
+// Strip any stale-saved essentials from a previous version of the app where they
+// could be hidden — they're locked now and the picker won't render them as hidden.
+hiddenColumns = hiddenColumns.filter(k => !ESSENTIAL_COLUMN_KEYS.has(k));
 let columnOrder = lsGet('stonks_column_order', '[]'); // user-defined column order (keys); empty = default
 let alerts = lsGet('stonks_alerts', '{}'); // { symbol: { above: num|null, below: num|null } }
 
 // ==================== UNDO / REDO ====================
 const undoStack = [];
 const redoStack = [];
-const MAX_UNDO = 50;
 function pushUndo() {
   undoStack.push({
     portfolio: JSON.parse(JSON.stringify(portfolio)),
@@ -1408,13 +1567,19 @@ function redo() {
 document.addEventListener('keydown', e => {
   const tag = document.activeElement && document.activeElement.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-  const k = e.key.toLowerCase();
-  if ((e.ctrlKey || e.metaKey) && k === 'z' && !e.shiftKey) {
+  const k = e.key;
+  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'z' && !e.shiftKey) {
     e.preventDefault();
     undo();
-  } else if ((e.ctrlKey || e.metaKey) && (k === 'y' || (k === 'z' && e.shiftKey))) {
+  } else if ((e.ctrlKey || e.metaKey) && (k.toLowerCase() === 'y' || (k.toLowerCase() === 'z' && e.shiftKey))) {
     e.preventDefault();
     redo();
+  } else if (k === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const so = document.getElementById('shortcuts-overlay');
+    if (so) so.classList.toggle('show');
+  } else if (k === 'Escape') {
+    const so = document.getElementById('shortcuts-overlay');
+    if (so && so.classList.contains('show')) { so.classList.remove('show'); e.preventDefault(); }
   }
 });
 
@@ -1440,10 +1605,12 @@ function saveNotes() {
 function saveHiddenColumns() { localStorage.setItem('stonks_hidden_columns', JSON.stringify(hiddenColumns)); }
 function saveColumnOrder() { localStorage.setItem('stonks_column_order', JSON.stringify(columnOrder)); }
 function saveAlerts() {
-  // Strip volatile _notified flag — it's a runtime debounce, not persistent state
+  // Strip volatile _notified flag and drop entries where both thresholds are null
   const clean = {};
   for (const k of Object.keys(alerts)) {
-    clean[k] = { above: alerts[k].above ?? null, below: alerts[k].below ?? null };
+    const above = alerts[k].above ?? null;
+    const below = alerts[k].below ?? null;
+    if (above != null || below != null) clean[k] = { above, below };
   }
   localStorage.setItem('stonks_alerts', JSON.stringify(clean));
 }
@@ -1559,6 +1726,9 @@ function addPosition() {
     const totalShares = existing.shares + shares;
     if (totalShares !== 0) {
       existing.costBasis = ((existing.costBasis * existing.shares) + (costBasis * shares)) / totalShares;
+    } else {
+      // Fully closed position — reset cost basis so reopening later starts fresh
+      existing.costBasis = 0;
     }
     existing.shares = totalShares;
     if (purchaseDate && !existing.purchaseDate) existing.purchaseDate = purchaseDate;
@@ -1652,6 +1822,57 @@ function toggleSettings() {
     document.getElementById('alpaca-secret').value = alpaca.secret;
     document.getElementById('fmp-key').value = getFmpKey();
   }
+}
+
+function exportSettings() {
+  const data = {
+    _format: 'stonks_settings_v1',
+    finnhubKey: getApiKey(),
+    alpacaKeyId: getAlpacaKeys().keyId,
+    alpacaSecret: getAlpacaKeys().secret,
+    fmpKey: getFmpKey(),
+    hiddenColumns: hiddenColumns,
+    columnOrder: columnOrder,
+    alerts: alerts,
+    refreshInterval: localStorage.getItem('stonks_refresh_interval'),
+    autoRefresh: localStorage.getItem('stonks_auto_refresh'),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'stonks-settings-' + new Date().toISOString().slice(0, 10) + '.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function importSettings(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (data._format !== 'stonks_settings_v1') { alert('Invalid settings file.'); return; }
+      if (!confirm('Import settings? This will overwrite your current API keys, column settings, and alerts.')) return;
+      if (data.finnhubKey) localStorage.setItem('stonks_finnhub_key', data.finnhubKey);
+      if (data.alpacaKeyId) localStorage.setItem('stonks_alpaca_key_id', data.alpacaKeyId);
+      if (data.alpacaSecret) localStorage.setItem('stonks_alpaca_secret', data.alpacaSecret);
+      if (data.fmpKey) localStorage.setItem('stonks_fmp_key', data.fmpKey);
+      if (Array.isArray(data.hiddenColumns)) { hiddenColumns = data.hiddenColumns; saveHiddenColumns(); }
+      if (Array.isArray(data.columnOrder)) { columnOrder = data.columnOrder; saveColumnOrder(); }
+      if (data.alerts && typeof data.alerts === 'object') { alerts = data.alerts; saveAlerts(); }
+      if (data.refreshInterval) localStorage.setItem('stonks_refresh_interval', data.refreshInterval);
+      if (data.autoRefresh != null) localStorage.setItem('stonks_auto_refresh', data.autoRefresh);
+      // Refresh UI
+      document.getElementById('finnhub-key').value = getApiKey();
+      const alpaca = getAlpacaKeys();
+      document.getElementById('alpaca-key-id').value = alpaca.keyId;
+      document.getElementById('alpaca-secret').value = alpaca.secret;
+      document.getElementById('fmp-key').value = getFmpKey();
+      buildHeader(); renderTable(); updateSummary();
+      const conf = document.getElementById('confirm-settings-io');
+      if (conf) { conf.style.opacity = '1'; setTimeout(() => conf.style.opacity = '0', 2000); }
+    } catch (e) { alert('Failed to parse settings file: ' + e.message); }
+  };
+  reader.readAsText(file);
 }
 
 // ==================== IMPORT ====================
@@ -1948,6 +2169,8 @@ function executeImport() {
       const totalShares = existing.shares + pos.shares;
       if (totalShares !== 0) {
         existing.costBasis = ((existing.costBasis * existing.shares) + (pos.costBasis * pos.shares)) / totalShares;
+      } else {
+        existing.costBasis = 0;
       }
       existing.shares = totalShares;
       if (pos.purchaseDate && !existing.purchaseDate) existing.purchaseDate = pos.purchaseDate;
@@ -1963,18 +2186,7 @@ function executeImport() {
 
     // Seed quoteData with CSV last price as fallback (visible immediately even if APIs are down)
     if (pos.lastPrice && !quoteData[pos.symbol]) {
-      quoteData[pos.symbol] = {
-        symbol: pos.symbol, name: pos.symbol, price: pos.lastPrice,
-        change: null, changePct: null, prevClose: null, open: null,
-        dayHigh: null, dayLow: null, wk52High: null, wk52Low: null,
-        volume: null, avgVolume: null, marketCap: null,
-        pe: null, eps: null, beta: null,
-        dividend: null, dividendYield: null, exDivDate: null, earningsDate: null,
-        bid: null, ask: null,
-        postMarketPrice: null, postMarketChange: null,
-        preMarketPrice: null, preMarketChange: null, marketState: null,
-        perfYTD: null, perf6M: null, perf1Y: null,
-      };
+      quoteData[pos.symbol] = { ...makeEmptyQuote(pos.symbol), price: pos.lastPrice };
     }
   }
 
@@ -1990,7 +2202,6 @@ function executeImport() {
 const PROXIES = [
   url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
   url => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
-  url => 'https://corsproxy.org/?' + encodeURIComponent(url),
   url => 'https://corsproxy.io/?' + encodeURIComponent(url),
   url => 'https://thingproxy.freeboard.io/fetch/' + url,
   url => 'https://proxy.cors.sh/' + url,
@@ -1998,10 +2209,10 @@ const PROXIES = [
 ];
 
 let lastWorkingProxy = 0; // remember which proxy worked last
-async function fetchWithProxy(url, proxyIndex = -1, timeout = 10000) {
+async function fetchWithProxy(url, proxyIndex = -1, timeout = PROXY_FETCH_TIMEOUT) {
   // Try direct fetch first (works when served from a web server or extensions with relaxed CORS)
   try {
-    const directResp = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    const directResp = await fetch(url, { signal: AbortSignal.timeout(DIRECT_FETCH_TIMEOUT) });
     if (directResp.ok) {
       const text = await directResp.text();
       if (text && (text.trimStart()[0] === '{' || text.trimStart()[0] === '[')) return text;
@@ -2018,14 +2229,7 @@ async function fetchWithProxy(url, proxyIndex = -1, timeout = 10000) {
     try {
       const resp = await fetch(proxiedUrl, { signal: AbortSignal.timeout(timeout) });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const text = await resp.text();
-      // Validate response is actual data, not an error page from the proxy
-      if (text && text.trimStart().startsWith('<')) throw new Error('Proxy returned HTML error page');
-      if (text && text.startsWith('Edge:')) throw new Error('Proxy rate limited');
-      // Reject proxy's own JSON error messages (e.g. corsproxy.io paywall)
-      if (text && text.length < 300) {
-        try { const j = JSON.parse(text); if (j.error && !j.chart && !j.quoteResponse) throw new Error('Proxy error: ' + j.error); } catch (pe) { if (pe.message.startsWith('Proxy error')) throw pe; }
-      }
+      const text = _validateProxyResponse(await resp.text());
       lastWorkingProxy = idx;
       return text;
     } catch (err) {
@@ -2049,10 +2253,10 @@ function _validateProxyResponse(text) {
 
 // Race N proxies in parallel and return the first valid response.
 // Used for slow commodity fetches where sequential proxy attempts add 30+ seconds.
-async function fetchWithProxyRace(url, n = 3, timeout = 8000) {
+async function fetchWithProxyRace(url, n = 3, timeout = PROXY_RACE_TIMEOUT) {
   // Try direct fetch first (cheap if it works, e.g. served from a real web server)
   try {
-    const directResp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+    const directResp = await fetch(url, { signal: AbortSignal.timeout(DIRECT_FETCH_TIMEOUT - 1000) });
     if (directResp.ok) {
       const text = await directResp.text();
       if (text && (text.trimStart()[0] === '{' || text.trimStart()[0] === '[')) return text;
@@ -2113,7 +2317,6 @@ async function fetchAnyVariantRace(urls, timeout = 9000, maxAttempts = 8) {
 // --- Yahoo Finance: Get crumb ---
 let yfCrumb = null;
 let yfCrumbTime = 0;
-const YF_CRUMB_TTL = 30 * 60 * 1000; // crumbs expire ~30 minutes
 async function getYahooCrumb() {
   if (yfCrumb && Date.now() - yfCrumbTime < YF_CRUMB_TTL) return yfCrumb;
   yfCrumb = null; // force re-fetch if expired
@@ -2139,7 +2342,6 @@ function yfPath(sym) { return sym.replace(/ /g, '%20'); }
 // --- Yahoo v7 batch quote ---
 let yahooV7Failed = false;       // skip v7 if it failed this refresh cycle
 let yahooV7FailedTime = 0;       // timestamp of last failure
-const YF_V7_RETRY_MS = 3 * 60 * 1000; // retry v7 after 3 minutes
 async function fetchYahooQuotes(symbols) {
   // Reset v7 failure flag after cooldown so transient proxy errors don't
   // permanently degrade all future refreshes to the slower per-symbol v8 path
@@ -2209,13 +2411,12 @@ async function fetchYahooQuotes(symbols) {
   // OR v7 batch failed entirely under yahooV7Failed). Batch in groups of 4 with a small
   // stagger so a failed v7 doesn't cause 20× sequential ~5s fetches.
   const stillMissing = symbols.filter(s => !v7Results[s] && !isCommoditySymbol(s));
-  const STILL_BATCH = 4;
-  for (let bi = 0; bi < stillMissing.length; bi += STILL_BATCH) {
-    if (bi > 0) await new Promise(r => setTimeout(r, 600));
-    const batch = stillMissing.slice(bi, bi + STILL_BATCH);
+  for (let bi = 0; bi < stillMissing.length; bi += STILL_MISSING_BATCH) {
+    if (bi > 0) await new Promise(r => setTimeout(r, STILL_MISSING_BATCH_DELAY));
+    const batch = stillMissing.slice(bi, bi + STILL_MISSING_BATCH);
     await Promise.all(batch.map(async (sym, k) => {
       // Tiny per-symbol stagger so they don't all hit the same proxy at the same instant
-      if (k > 0) await new Promise(r => setTimeout(r, 150 * k));
+      if (k > 0) await new Promise(r => setTimeout(r, STILL_MISSING_STAGGER * k));
       try {
         const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true', 3, 8000);
         const data = JSON.parse(text);
@@ -2305,14 +2506,14 @@ async function fetchYahooSummary(sym) {
   // symbols in parallel, so this caps total parallel proxy connections at
   // BATCH_SIZE × 3 (not BATCH_SIZE × 7 × 4 like the old sequential rotation).
   try {
-    const text = await fetchWithProxyRace(urls[0], 3, 7000);
+    const text = await fetchWithProxyRace(urls[0], 3, YAHOO_SUMMARY_TIMEOUT_PRIMARY);
     const result = parseResult(text);
     if (result) return result;
   } catch (e) { /* fall through to second URL */ }
   // Second-chance: try the alternate URL with a slightly smaller race
   if (urls.length > 1) {
     try {
-      const text = await fetchWithProxyRace(urls[1], 2, 6000);
+      const text = await fetchWithProxyRace(urls[1], 2, YAHOO_SUMMARY_TIMEOUT_SECONDARY);
       const result = parseResult(text);
       if (result) return result;
     } catch (e) { /* exhausted */ }
@@ -2322,8 +2523,7 @@ async function fetchYahooSummary(sym) {
 }
 
 function normalizeYahoo(q) {
-  return {
-    symbol: q.symbol,
+  return { ...makeEmptyQuote(q.symbol),
     name: q.shortName || q.longName || '',
     price: q.regularMarketPrice,
     change: q.regularMarketChange,
@@ -2345,14 +2545,11 @@ function normalizeYahoo(q) {
     exDivDate: q.dividendDate ? new Date(q.dividendDate * 1000).toLocaleDateString() : null,
     earningsDate: q.earningsTimestamp ? new Date(q.earningsTimestamp * 1000).toLocaleDateString() :
                   q.earningsTimestampStart ? new Date(q.earningsTimestampStart * 1000).toLocaleDateString() : null,
-    bid: q.bid,
-    ask: q.ask,
-    postMarketPrice: q.postMarketPrice,
-    postMarketChange: q.postMarketChange,
-    preMarketPrice: q.preMarketPrice,
-    preMarketChange: q.preMarketChange,
+    bid: q.bid, ask: q.ask,
+    postMarketPrice: q.postMarketPrice, postMarketChange: q.postMarketChange,
+    preMarketPrice: q.preMarketPrice, preMarketChange: q.preMarketChange,
     marketState: q.marketState,
-    perfYTD: null, perf6M: null, perf1Y: null,
+    _lastUpdate: Date.now(),
   };
 }
 
@@ -2419,8 +2616,7 @@ function normalizeYahooChart(sym, chart) {
     }
   }
 
-  return {
-    symbol: sym,
+  return { ...makeEmptyQuote(sym),
     name: meta.shortName || meta.longName || sym,
     price,
     change: price && prevClose ? price - prevClose : null,
@@ -2432,13 +2628,10 @@ function normalizeYahooChart(sym, chart) {
     wk52High: meta.fiftyTwoWeekHigh,
     wk52Low: meta.fiftyTwoWeekLow,
     volume: meta.regularMarketVolume,
-    avgVolume: null, marketCap: null, pe: null, eps: null, beta: null,
-    dividend: null, dividendYield: null, exDivDate: null, earningsDate: null,
-    bid: null, ask: null,
     postMarketPrice, postMarketChange,
     preMarketPrice, preMarketChange,
     marketState,
-    perfYTD: null, perf6M: null, perf1Y: null,
+    _lastUpdate: Date.now(),
   };
 }
 
@@ -2461,10 +2654,9 @@ async function fetchFinnhubQuotes(symbols) {
   if (needFundamentals.length > 0) {
     const fromDate = new Date(now.getTime() - 7 * 86400000).toISOString().split('T')[0];
     const toDate = new Date(now.getTime() + 90 * 86400000).toISOString().split('T')[0];
-    const BATCH_SIZE = 5;
-    for (let i = 0; i < needFundamentals.length; i += BATCH_SIZE) {
-      if (i > 0) await new Promise(r => setTimeout(r, 1500)); // rate limit pause
-      const batch = needFundamentals.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < needFundamentals.length; i += FINNHUB_FUND_BATCH) {
+      if (i > 0) await new Promise(r => setTimeout(r, FINNHUB_BATCH_DELAY)); // rate limit pause
+      const batch = needFundamentals.slice(i, i + FINNHUB_FUND_BATCH);
       // process batch
       const fundPromises = batch.map(async sym => {
         try {
@@ -2528,15 +2720,14 @@ async function fetchFinnhubQuotes(symbols) {
 
   // Fetch /quote in batches of 10 (10 calls per batch, 1s delay between)
   // Skip symbols that have fresh WebSocket data (<10s old) — WS already provides real-time prices
-  const WS_FRESH_MS = 10000;
   const now_ws = Date.now();
   const quoteSymbols = stockSymbols.filter(s => {
     const lastWs = wsLastTradeTime[s];
     return !lastWs || (now_ws - lastWs) >= WS_FRESH_MS;
   });
-  for (let i = 0; i < quoteSymbols.length; i += 10) {
+  for (let i = 0; i < quoteSymbols.length; i += FINNHUB_QUOTE_BATCH) {
     if (i > 0) await new Promise(r => setTimeout(r, 1000));
-    const batch = quoteSymbols.slice(i, i + 10);
+    const batch = quoteSymbols.slice(i, i + FINNHUB_QUOTE_BATCH);
     const quotePromises = batch.map(async sym => {
       try {
         const resp = await fetch(`https://finnhub.io/api/v1/quote?symbol=${yfEnc(sym)}&token=${key}`);
@@ -2544,8 +2735,8 @@ async function fetchFinnhubQuotes(symbols) {
         const quote = await resp.json();
         if (quote.c && quote.c > 0) {
           const cached = fundamentalsCache[sym] || {};
-          results[sym] = {
-            symbol: sym, name: cached.name || sym,
+          results[sym] = { ...makeEmptyQuote(sym),
+            name: cached.name || sym,
             price: quote.c, change: quote.d, changePct: quote.dp,
             prevClose: quote.pc, open: quote.o, dayHigh: quote.h, dayLow: quote.l,
             wk52High: cached.wk52High, wk52Low: cached.wk52Low,
@@ -2554,10 +2745,8 @@ async function fetchFinnhubQuotes(symbols) {
             pe: cached.pe, eps: cached.eps, beta: cached.beta,
             dividend: cached.dividend, dividendYield: cached.dividendYield,
             exDivDate: cached.exDivDate, earningsDate: cached.earningsDate,
-            bid: null, ask: null,
-            postMarketPrice: null, postMarketChange: null,
-            preMarketPrice: null, preMarketChange: null, marketState: null,
             perfYTD: cached.perfYTD, perf6M: cached.perf6M, perf1Y: cached.perf1Y,
+            _lastUpdate: Date.now(),
           };
         }
       } catch (e) {
@@ -2585,7 +2774,7 @@ async function fetchAlpacaQuotes(symbols) {
     try {
       const resp = await fetch(snapUrl, {
         headers: { 'APCA-API-KEY-ID': keyId, 'APCA-API-SECRET-KEY': secret },
-        signal: AbortSignal.timeout(8000)
+        signal: AbortSignal.timeout(ALPACA_TIMEOUT)
       });
       if (resp.ok) {
         data = await resp.json();
@@ -2611,19 +2800,13 @@ async function fetchAlpacaQuotes(symbols) {
       const price = trade.p || bar.c;
       const prevClose = prevBar.c || null;
       if (!price) continue;
-      results[sym] = {
-        symbol: sym, name: sym,
+      results[sym] = { ...makeEmptyQuote(sym),
         price, change: prevClose ? price - prevClose : null,
         changePct: prevClose ? ((price - prevClose) / prevClose) * 100 : null,
         prevClose, open: bar.o || null, dayHigh: bar.h || null, dayLow: bar.l || null,
-        wk52High: null, wk52Low: null,
-        volume: bar.v || null, avgVolume: null, marketCap: null,
-        pe: null, eps: null, beta: null,
-        dividend: null, dividendYield: null, exDivDate: null, earningsDate: null,
+        volume: bar.v || null,
         bid: quote.bp || null, ask: quote.ap || null,
-        postMarketPrice: null, postMarketChange: null,
-        preMarketPrice: null, preMarketChange: null, marketState: null,
-        perfYTD: null, perf6M: null, perf1Y: null,
+        _lastUpdate: Date.now(),
       };
     }
     if (Object.keys(results).length > 0) {
@@ -2645,7 +2828,7 @@ async function fetchFmpQuotes(symbols) {
   if (stockSyms.length === 0) return null;
   try {
     const resp = await fetch('https://financialmodelingprep.com/api/v3/quote/' + stockSyms.join(',') + '?apikey=' + key, {
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(FMP_TIMEOUT)
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
@@ -2653,23 +2836,20 @@ async function fetchFmpQuotes(symbols) {
     const results = {};
     for (const q of data) {
       const sym = q.symbol;
-      results[sym] = {
-        symbol: sym, name: q.name || sym,
+      results[sym] = { ...makeEmptyQuote(sym),
+        name: q.name || sym,
         price: q.price, change: q.change, changePct: q.changesPercentage,
         prevClose: q.previousClose, open: q.open, dayHigh: q.dayHigh, dayLow: q.dayLow,
         wk52High: q.yearHigh || null, wk52Low: q.yearLow || null,
         volume: q.volume || null, avgVolume: q.avgVolume || null,
         marketCap: q.marketCap || null,
-        pe: q.pe || null, eps: q.eps || null, beta: null,
-        dividend: null, dividendYield: null, exDivDate: null, earningsDate: q.earningsAnnouncement || null,
-        bid: null, ask: null,
+        pe: q.pe || null, eps: q.eps || null,
+        earningsDate: q.earningsAnnouncement || null,
         postMarketPrice: q.afterHoursPrice || null,
         postMarketChange: q.afterHoursChange || null,
         preMarketPrice: q.preMarketPrice || null,
         preMarketChange: q.preMarketChange || null,
-        marketState: null,
-        perfYTD: null, // FMP doesn't provide true YTD — filled by FinnHub or Yahoo later
-        perf6M: null, perf1Y: null,
+        _lastUpdate: Date.now(),
       };
     }
     if (Object.keys(results).length > 0) {
@@ -2687,7 +2867,7 @@ async function fetchYahooV6Quotes(symbols) {
   if (symbols.length === 0) return null;
   try {
     const url = 'https://query1.finance.yahoo.com/v6/finance/quote?symbols=' + symbols.map(yfEnc).join(',');
-    const text = await fetchWithProxy(url, -1, 10000);
+    const text = await fetchWithProxy(url);
     const data = JSON.parse(text);
     const quotes = data.quoteResponse && data.quoteResponse.result;
     if (quotes && quotes.length > 0) {
@@ -2710,29 +2890,21 @@ async function fetchFinnhubFreeQuotes(symbols) {
   const results = {};
   // FinnHub free tier: process sequentially to avoid hitting the demo token rate limit
   for (let i = 0; i < stockSyms.length; i++) {
-    if (i > 0) await new Promise(r => setTimeout(r, 200)); // 200ms between calls (~5/s, well under limit)
+    if (i > 0) await new Promise(r => setTimeout(r, FINNHUB_QUOTE_DELAY)); // ~5/s, well under limit
     const sym = stockSyms[i];
     try {
       const resp = await fetch(`https://finnhub.io/api/v1/quote?symbol=${yfEnc(sym)}&token=demo`, {
-        signal: AbortSignal.timeout(4000)
+        signal: AbortSignal.timeout(FINNHUB_TIMEOUT)
       });
       if (resp.status === 429 || resp.status === 401 || resp.status === 403) break; // rate limited or invalid token — stop
       if (!resp.ok) continue;
       const q = await resp.json();
       if (q.error) break; // API returned an error (e.g. invalid token) — stop
       if (q.c && q.c > 0) {
-        results[sym] = {
-          symbol: sym, name: sym,
+        results[sym] = { ...makeEmptyQuote(sym),
           price: q.c, change: q.d, changePct: q.dp,
           prevClose: q.pc, open: q.o, dayHigh: q.h, dayLow: q.l,
-          wk52High: null, wk52Low: null,
-          volume: null, avgVolume: null, marketCap: null,
-          pe: null, eps: null, beta: null,
-          dividend: null, dividendYield: null, exDivDate: null, earningsDate: null,
-          bid: null, ask: null,
-          postMarketPrice: null, postMarketChange: null,
-          preMarketPrice: null, preMarketChange: null, marketState: null,
-          perfYTD: null, perf6M: null, perf1Y: null,
+          _lastUpdate: Date.now(),
         };
       }
     } catch (e) { /* rate limited or failed, skip */ }
@@ -2758,7 +2930,6 @@ const CRYPTO_NAMES = {
   'SHIB-USD': 'Shiba Inu', 'ATOM-USD': 'Cosmos', 'XLM-USD': 'Stellar',
 };
 let _cgCache = { data: null, time: 0 };
-const CG_MIN_INTERVAL = 30000; // 30s minimum between CoinGecko calls
 async function fetchCryptoQuotes(symbols) {
   const cryptoSyms = symbols.filter(s => COINGECKO_IDS[s]);
   if (cryptoSyms.length === 0) return null;
@@ -2778,7 +2949,7 @@ async function fetchCryptoQuotes(symbols) {
     // Use /coins/markets for reliable high_24h/low_24h (simple/price doesn't support these on free tier)
     const resp = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=' + ids +
       '&order=market_cap_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h', {
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(COINGECKO_TIMEOUT)
     });
     if (resp.status === 429) {
       console.warn('CoinGecko rate limited — using cached data');
@@ -2798,19 +2969,13 @@ async function fetchCryptoQuotes(symbols) {
       const changePct = d.price_change_percentage_24h || null;
       const prevClose = changePct != null ? price / (1 + changePct / 100) : null;
       const change = prevClose ? price - prevClose : null;
-      results[sym] = {
-        symbol: sym, name: d.name || CRYPTO_NAMES[sym] || sym,
+      results[sym] = { ...makeEmptyQuote(sym),
+        name: d.name || CRYPTO_NAMES[sym] || sym,
         price, change, changePct, prevClose,
-        open: null, dayHigh: d.high_24h || null, dayLow: d.low_24h || null,
-        wk52High: null, wk52Low: null, // filled by fetchCryptoSupplemental from 1-year chart
-        volume: d.total_volume || null, avgVolume: null,
+        dayHigh: d.high_24h || null, dayLow: d.low_24h || null,
+        volume: d.total_volume || null,
         marketCap: d.market_cap || null,
-        pe: null, eps: null, beta: null,
-        dividend: null, dividendYield: null, exDivDate: null, earningsDate: null,
-        bid: null, ask: null,
-        postMarketPrice: null, postMarketChange: null,
-        preMarketPrice: null, preMarketChange: null, marketState: null,
-        perfYTD: null, perf6M: null, perf1Y: null,
+        _lastUpdate: Date.now(),
       };
     }
     if (Object.keys(results).length > 0) {
@@ -2858,13 +3023,13 @@ async function fetchPerformanceData(symbols) {
   // burning the entire proxy pool on one symbol.
   for (let i = 0; i < symbols.length; i++) {
     const sym = symbols[i];
-    if (i > 0) await new Promise(r => setTimeout(r, 500));
+    if (i > 0) await new Promise(r => setTimeout(r, PERF_SYMBOL_DELAY));
 
     // Try Yahoo first — race 2 proxies on the primary CDN domain
     let gotPerf = false;
     try {
       const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) +
-        '?period1=' + oneYearAgo + '&period2=' + nowUnix + '&interval=1d', 2, 7000);
+        '?period1=' + oneYearAgo + '&period2=' + nowUnix + '&interval=1d', 2, YAHOO_PERF_TIMEOUT);
       const data = JSON.parse(text);
       const result = data.chart && data.chart.result && data.chart.result[0];
       if (result && result.timestamp && result.timestamp.length > 1) {
@@ -2889,7 +3054,7 @@ async function fetchPerformanceData(symbols) {
           const resp = await fetch(
             `https://data.alpaca.markets/v2/stocks/${sym}/bars?timeframe=1Day&start=${oneYAgoDate}&limit=400${feedParam}`, {
             headers: { 'APCA-API-KEY-ID': keyId, 'APCA-API-SECRET-KEY': secret },
-            signal: AbortSignal.timeout(8000)
+            signal: AbortSignal.timeout(ALPACA_TIMEOUT)
           });
           if (resp.status === 401 || resp.status === 403) break;
           if (!resp.ok) continue;
@@ -2923,7 +3088,7 @@ async function fetchCryptoSupplemental(symbols) {
     try {
       const resp = await fetch(
         `https://api.coingecko.com/api/v3/coins/${cgId}/market_chart?vs_currency=usd&days=365&interval=daily`, {
-        signal: AbortSignal.timeout(8000)
+        signal: AbortSignal.timeout(COINGECKO_TIMEOUT)
       });
       if (resp.status === 429) continue; // rate limited, skip
       if (!resp.ok) continue;
@@ -2958,7 +3123,7 @@ async function fetchCryptoSupplemental(symbols) {
       console.warn('CoinGecko supplemental failed for', sym, e.message);
     }
     // Small delay between requests to stay under CoinGecko rate limit
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, CG_SUPPLEMENTAL_DELAY));
   }
 }
 
@@ -2980,7 +3145,7 @@ async function fetchAlpacaSupplemental(symbols) {
       const resp = await fetch(
         `https://data.alpaca.markets/v2/stocks/bars?symbols=${stockSyms.join(',')}&timeframe=1Day&start=${startDate}&limit=10${feedParam}`, {
         headers: { 'APCA-API-KEY-ID': keyId, 'APCA-API-SECRET-KEY': secret },
-        signal: AbortSignal.timeout(10000)
+        signal: AbortSignal.timeout(PROXY_FETCH_TIMEOUT)
       });
       if (resp.status === 401 || resp.status === 403) {
         console.warn('Alpaca bars auth failed for feed:', feed || 'default');
@@ -3043,14 +3208,13 @@ async function fillFundamentals(symbols) {
 
   const finnhubKey = getApiKey() || 'demo';
 
-  // Process in small batches. Each fetchYahooSummary now races 3 proxies in parallel,
-  // so BATCH=4 means up to 12 simultaneous proxy connections — enough to be fast
-  // without overwhelming the proxy fleet (which is already shared with the main
-  // refresh's quote calls). Smaller BATCH also keeps us under FinnHub's 60/min limit.
-  const BATCH = 4;
-  for (let i = 0; i < toFetch.length; i += BATCH) {
-    if (i > 0) await new Promise(r => setTimeout(r, 800));
-    const batch = toFetch.slice(i, i + BATCH);
+  // Process in small batches. Each fetchYahooSummary races proxies in parallel,
+  // so BATCH=3 means up to 9 simultaneous proxy connections — enough to be fast
+  // without overwhelming the proxy fleet (shared with performance data, after-hours,
+  // and commodity retry paths). Smaller BATCH also keeps us under FinnHub's 60/min limit.
+  for (let i = 0; i < toFetch.length; i += FILL_FUND_BATCH) {
+    if (i > 0) await new Promise(r => setTimeout(r, FILL_FUND_BATCH_DELAY));
+    const batch = toFetch.slice(i, i + FILL_FUND_BATCH);
     const promises = batch.map(async sym => {
       const q = quoteData[sym];
       if (!q) return;
@@ -3091,8 +3255,8 @@ async function fillFundamentals(symbols) {
       if (!isCryptoSymbol(sym) && !fundamentalsCache[sym]) {
         try {
           const [metricsResp, profileResp] = await Promise.all([
-            fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${finnhubKey}`, { signal: AbortSignal.timeout(6000) }),
-            fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${finnhubKey}`, { signal: AbortSignal.timeout(6000) }),
+            fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${finnhubKey}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
+            fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${finnhubKey}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
           ]);
           if (metricsResp.status === 429) { console.warn('FinnHub rate limited in fillFundamentals for', sym); return; }
           if (metricsResp.ok) {
@@ -3210,11 +3374,22 @@ async function fetchOneSymbolNow(sym) {
 // ==================== MAIN REFRESH ====================
 let refreshInProgress = false;
 let pendingRefreshAfter = false; // queued refresh (e.g. symbol added during refresh)
+let refreshAbort = null; // AbortController for the current refresh cycle
+let _deferredCommodityAbort = null; // tracks deferred commodity retry to prevent overlap
+function abortRefresh() {
+  if (refreshAbort) { refreshAbort.abort(); refreshAbort = null; }
+}
 async function refreshAll() {
   if (refreshInProgress) return Promise.resolve(); // prevent overlapping refreshes
+  abortRefresh();
+  refreshAbort = new AbortController();
   refreshInProgress = true;
-  try { await _refreshAll(); } finally {
+  try { await _refreshAll(refreshAbort.signal); } catch (e) {
+    if (e.name === 'AbortError') { console.log('Refresh aborted'); return; }
+    throw e;
+  } finally {
     refreshInProgress = false;
+    refreshAbort = null;
     // If a symbol was added while refresh was running, run again to pick it up
     if (pendingRefreshAfter) {
       pendingRefreshAfter = false;
@@ -3222,7 +3397,8 @@ async function refreshAll() {
     }
   }
 }
-async function _refreshAll() {
+async function _refreshAll(signal) {
+  if (signal && signal.aborted) return;
   const symbols = portfolio.map(p => p.symbol);
   if (symbols.length === 0) { renderTable(); updateSummary(); return; }
 
@@ -3246,6 +3422,8 @@ async function _refreshAll() {
     hasCrypto ? fetchCryptoQuotes(symbols) : Promise.resolve(null),
     !hasFinnHub ? fetchFinnhubFreeQuotes(symbols) : Promise.resolve(null),
   ]);
+
+  if (signal && signal.aborted) return;
 
   // Mark all symbols as attempted (for UI: show "loading..." vs "retrying...")
   for (const s of symbols) attemptedSymbols.add(s);
@@ -3276,7 +3454,7 @@ async function _refreshAll() {
   const missingCommodities = symbols.filter(s => isCommoditySymbol(s) && !allResults.some(r => r && r.data[s]));
   if (missingCommodities.length > 0) {
     const retryPromises = missingCommodities.map(async (sym, i) => {
-      if (i > 0) await new Promise(r => setTimeout(r, 250 * i));
+      if (i > 0) await new Promise(r => setTimeout(r, COMMODITY_STAGGER * i));
       try {
         const chartUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true';
         const text = await fetchWithProxyRace(chartUrl, 4, 8000);
@@ -3487,6 +3665,8 @@ async function _refreshAll() {
   renderTable();
   updateSummary();
 
+  if (signal && signal.aborted) return;
+
   // Run fundamentals + performance in parallel (deferred, re-render only if data changed)
   const needsSummary = symbols.filter(s => {
     const q = quoteData[s];
@@ -3504,25 +3684,36 @@ async function _refreshAll() {
     !fetchedPerformance.has(s) && !isCryptoSymbol(s) &&
     (quoteData[s].perfYTD == null || quoteData[s].perf6M == null || quoteData[s].perf1Y == null));
 
-  const tasks = [];
-  if (needsSummary.length > 0) tasks.push(fillFundamentals(needsSummary));
-  if (needsPerf.length > 0) tasks.push(fetchPerformanceData(needsPerf).then(() => {
-    needsPerf.forEach(s => fetchedPerformance.add(s));
-  }));
+  // Run proxy-dependent tasks (fundamentals, performance) sequentially to avoid
+  // saturating the shared proxy pool. Non-proxy tasks (Alpaca, CoinGecko) run in parallel.
+  const directTasks = [];
   // Alpaca supplemental: avg volume, 52-week range from historical bars (only if needed)
   if (hasAlpaca && symbols.some(s => quoteData[s] && quoteData[s].avgVolume == null && !isCryptoSymbol(s) && !isCommoditySymbol(s))) {
-    tasks.push(fetchAlpacaSupplemental(symbols));
+    directTasks.push(fetchAlpacaSupplemental(symbols));
   }
   // CoinGecko supplemental: 52-week range, YTD/6M/1Y perf for crypto (only if needed)
   if (hasCrypto && symbols.some(s => COINGECKO_IDS[s] && quoteData[s] && (quoteData[s].wk52High == null || quoteData[s].perfYTD == null))) {
-    tasks.push(fetchCryptoSupplemental(symbols));
+    directTasks.push(fetchCryptoSupplemental(symbols));
   }
 
-  if (tasks.length > 0) {
-    await Promise.all(tasks);
+  // Proxy-dependent tasks run sequentially: fundamentals first, then performance data
+  const proxyTask = (async () => {
+    if (needsSummary.length > 0) await fillFundamentals(needsSummary);
+    if (signal && signal.aborted) return;
+    if (needsPerf.length > 0) {
+      await fetchPerformanceData(needsPerf);
+      needsPerf.forEach(s => fetchedPerformance.add(s));
+    }
+  })();
+
+  const allTasks = [...directTasks, proxyTask];
+  if (allTasks.length > 0) {
+    await Promise.all(allTasks);
     renderTable();
     updateSummary();
   }
+
+  if (signal && signal.aborted) return;
 
   // After-hours pass: for symbols that still lack after-hours data (e.g. FinnHub was primary
   // and doesn't provide after-hours), fetch via a SINGLE Yahoo v7 batch request (1 proxy call
@@ -3543,8 +3734,8 @@ async function _refreshAll() {
       const ahBase2 = 'https://query2.finance.yahoo.com/v7/finance/quote?symbols=' + ahSymList;
       const ahCrumb = crumb ? '&crumb=' + encodeURIComponent(crumb) : '';
       const text = await Promise.any([
-        fetchWithProxy(ahBase1 + ahCrumb, -1, 12000),
-        fetchWithProxy(ahBase2 + ahCrumb, -1, 12000),
+        fetchWithProxy(ahBase1 + ahCrumb, -1, YAHOO_AH_TIMEOUT),
+        fetchWithProxy(ahBase2 + ahCrumb, -1, YAHOO_AH_TIMEOUT),
       ]);
       const data = JSON.parse(text);
       if (data.quoteResponse && data.quoteResponse.result) {
@@ -3580,13 +3771,13 @@ async function _refreshAll() {
     if (stillNeeds.length > 0) {
       // Process sequentially with delays to avoid proxy rate limits
       for (let i = 0; i < stillNeeds.length; i++) {
-        if (i > 0) await new Promise(r => setTimeout(r, 400));
+        if (i > 0) await new Promise(r => setTimeout(r, AH_CHART_DELAY));
         const sym = stillNeeds[i];
         await (async () => {
           const q = quoteData[sym];
           if (!q) return;
           try {
-            const text = await fetchWithProxy('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=1d&interval=5m&includePrePost=true', -1, 10000);
+            const text = await fetchWithProxy('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=1d&interval=5m&includePrePost=true');
             const cData = JSON.parse(text);
             const cResult = cData.chart && cData.chart.result && cData.chart.result[0];
             if (cResult) {
@@ -3625,15 +3816,18 @@ async function _refreshAll() {
   // 30+ seconds per symbol because each proxy got its full 10s timeout.
   const stillMissingCommodities = symbols.filter(s => isCommoditySymbol(s) && (!quoteData[s] || quoteData[s].price == null));
   if (stillMissingCommodities.length > 0) {
+    // Cancel any previous deferred commodity retry before starting a new one
+    if (_deferredCommodityAbort) _deferredCommodityAbort.abort();
+    const deferAbort = _deferredCommodityAbort = new AbortController();
     (async () => {
       // Short initial delay to let any in-flight proxy rate limits relax
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, COMMODITY_RETRY_DELAY));
       for (const sym of stillMissingCommodities) {
-        if (refreshInProgress || (quoteData[sym] && quoteData[sym].price != null)) continue;
+        if (deferAbort.signal.aborted || refreshInProgress || (quoteData[sym] && quoteData[sym].price != null)) continue;
         try {
           const yahooUrl = 'https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true';
           // Race up to 5 proxies for the retry — we already failed once, so widen the net
-          const text = await fetchWithProxyRace(yahooUrl, 5, 10000);
+          const text = await fetchWithProxyRace(yahooUrl, 5, PROXY_FETCH_TIMEOUT);
           const data = JSON.parse(text);
           if (data.chart && data.chart.result && data.chart.result[0]) {
             const q = normalizeYahooChart(sym, data.chart.result[0]);
@@ -3645,8 +3839,9 @@ async function _refreshAll() {
           }
         } catch (e) { /* still failing — give up for this cycle */ }
         // Brief gap between symbols so we don't slam every proxy at once
-        await new Promise(r => setTimeout(r, 1200));
+        await new Promise(r => setTimeout(r, COMMODITY_RETRY_GAP));
       }
+      if (_deferredCommodityAbort === deferAbort) _deferredCommodityAbort = null;
     })();
   }
 }
@@ -3741,6 +3936,11 @@ function getCellHtml(col, pos, q, computed) {
       } else if (_hasAlert) {
         _cls = 'alert-icon active';
         _ttl = 'Price alert set \u2014 click to edit';
+      }
+      // Append notification permission status so user knows if alerts will fire
+      if (typeof Notification !== 'undefined') {
+        if (Notification.permission === 'denied') _ttl += ' (notifications blocked)';
+        else if (Notification.permission === 'default') _ttl += ' (notifications not enabled)';
       }
       return `<td class="sym">${sym}<span class="${_cls}" onclick="event.stopPropagation();openAlertPopover('${sym}',this)" title="${_ttl}">&#128276;</span></td>`;
     }
@@ -3887,14 +4087,24 @@ function getSortValue(pos, q) {
   }
 }
 
+let _sortedCache = null;
+let _sortedCacheKey = '';
 function getSortedPortfolio() {
-  if (!sortCol) return [...portfolio];
-  return [...portfolio].sort((a, b) => {
+  // Cache the sorted result to avoid redundant copies+sorts when called
+  // multiple times in the same render cycle (table + summary + chart).
+  const key = sortCol + '|' + sortAsc + '|' + portfolio.length + '|' + portfolio.map(p => p.symbol).join(',');
+  if (_sortedCache && _sortedCacheKey === key) return _sortedCache;
+  let result;
+  if (!sortCol) result = [...portfolio];
+  else result = [...portfolio].sort((a, b) => {
     const va = getSortValue(a, quoteData[a.symbol] || {});
     const vb = getSortValue(b, quoteData[b.symbol] || {});
     if (typeof va === 'string') return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
     return sortAsc ? va - vb : vb - va;
   });
+  _sortedCache = result;
+  _sortedCacheKey = key;
+  return result;
 }
 
 function renderTable() {
@@ -3979,6 +4189,79 @@ function renderTable() {
   }
 
   body.innerHTML = html;
+}
+
+// Targeted in-place update of price-sensitive cells (used by WebSocket path when
+// an input is focused to avoid destroying the active element via innerHTML rebuild).
+function updatePriceCells() {
+  const body = document.getElementById('portfolio-body');
+  if (!body) return;
+  body.querySelectorAll('tr[data-sym]').forEach(row => {
+    const sym = row.dataset.sym;
+    const q = quoteData[sym] || {};
+    const pos = portfolio.find(p => p.symbol === sym);
+    if (!pos) return;
+    const price = q.price;
+    const change = q.change;
+    const changePct = q.changePct;
+    const visCols = getVisibleColumns();
+    const cells = row.querySelectorAll('td');
+    visCols.forEach((col, ci) => {
+      const td = cells[ci];
+      if (!td) return;
+      // Only update price-derived display cells, never input cells
+      switch (col.key) {
+        case 'last':
+          td.className = cc(change);
+          td.textContent = price != null ? fmt(price) : '\u2014';
+          break;
+        case 'change':
+          td.className = cc(change);
+          td.textContent = change != null ? (change >= 0 ? '+' : '') + fmt(change) : '\u2014';
+          break;
+        case 'changePct':
+          td.className = cc(changePct);
+          td.textContent = changePct != null ? fmtPct(changePct) : '\u2014';
+          break;
+        case 'mktValue': {
+          const mv = price != null ? price * pos.shares : null;
+          td.textContent = mv != null ? fmtDollar(mv) : '\u2014';
+          break;
+        }
+        case 'dayPL': {
+          const dp = change != null ? change * pos.shares : null;
+          td.className = cc(dp);
+          td.textContent = dp != null ? fmtDollar(dp) : '\u2014';
+          break;
+        }
+        case 'totalPL': {
+          const tp = (price != null && pos.costBasis) ? (price - pos.costBasis) * pos.shares : null;
+          td.className = cc(tp);
+          td.textContent = tp != null ? fmtDollar(tp) : '\u2014';
+          break;
+        }
+        case 'totalPLPct': {
+          const tp2 = (price != null && pos.costBasis) ? (price - pos.costBasis) * pos.shares : null;
+          const pct = (tp2 != null && pos.costBasis) ? (tp2 / (Math.abs(pos.shares) * pos.costBasis)) * 100 : null;
+          td.className = cc(pct);
+          td.textContent = pct != null ? fmtPct(pct) : '\u2014';
+          break;
+        }
+        case 'bid':
+          td.textContent = q.bid != null ? (q.bidEstimated ? '~' : '') + fmt(q.bid) : '\u2014';
+          break;
+        case 'ask':
+          td.textContent = q.ask != null ? (q.askEstimated ? '~' : '') + fmt(q.ask) : '\u2014';
+          break;
+        // Skip input cells (shares, costBasis, date, notes) and non-price cells
+      }
+    });
+    // Apply flash class
+    if (prevPrices[sym] != null && price != null) {
+      if (price > prevPrices[sym]) { row.classList.add('flash-green'); row.classList.remove('flash-red'); }
+      else if (price < prevPrices[sym]) { row.classList.add('flash-red'); row.classList.remove('flash-green'); }
+    }
+  });
 }
 
 function isMobileView() {
@@ -4083,6 +4366,14 @@ function renderMobileCards() {
     const cardClass = ['mobile-card', flashClass, isError ? 'error-row' : '', isExpanded ? 'expanded' : '', checkAlertTriggered(pos.symbol, price) ? 'alert-triggered' : ''].filter(Boolean).join(' ');
     const noteVal = escAttr(notes[pos.symbol] || '');
 
+    // Helper: emit a mobile detail item only if its corresponding column key
+    // isn't hidden via the Fields picker. Each item carries its column key so
+    // we can later toggle without re-rendering if we want to.
+    const showItem = (colKey) => !hiddenColumns.includes(colKey);
+    const item = (colKey, label, valueHtml) => showItem(colKey)
+      ? `<div class="mobile-detail-item" data-col="${colKey}"><span class="mobile-detail-label">${label}</span><span class="mobile-detail-value">${valueHtml}</span></div>`
+      : '';
+
     html += `<div class="${cardClass}" data-sym="${sym}" onclick="toggleMobileCard(this, event)">
       <div class="mobile-card-main">
         <span class="mobile-drag-handle" style="${sortCol ? 'display:none;' : ''}" title="Drag to reorder">&#9776;</span>
@@ -4115,30 +4406,30 @@ function renderMobileCards() {
       <div class="mobile-card-expand">\u25BC</div>
       <div class="mobile-card-detail">
         <div class="mobile-detail-grid">
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Mkt Value</span><span class="mobile-detail-value">${mktValue != null ? fmtDollar(mktValue) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Day P&L</span><span class="mobile-detail-value ${cc(dayPL)}">${dayPL != null ? fmtDollar(dayPL) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Total P&L</span><span class="mobile-detail-value ${cc(totalPL)}">${totalPL != null ? fmtDollar(totalPL) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">P&L %</span><span class="mobile-detail-value ${cc(totalPLPct)}">${totalPLPct != null ? fmtPct(totalPLPct) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Prev Close</span><span class="mobile-detail-value">${q.prevClose != null ? fmt(q.prevClose) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Open</span><span class="mobile-detail-value">${q.open != null ? fmt(q.open) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Day Range</span><span class="mobile-detail-value">${q.dayLow && q.dayHigh ? fmt(q.dayLow) + ' - ' + fmt(q.dayHigh) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">52-Wk</span><span class="mobile-detail-value">${q.wk52Low && q.wk52High ? fmt(q.wk52Low) + ' - ' + fmt(q.wk52High) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Volume</span><span class="mobile-detail-value">${fmtVol(q.volume)}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Avg Vol</span><span class="mobile-detail-value">${fmtVol(q.avgVolume)}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Mkt Cap</span><span class="mobile-detail-value">${q.marketCap != null ? fmtBig(q.marketCap) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">P/E</span><span class="mobile-detail-value">${q.pe != null ? fmt(q.pe, 1) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">EPS</span><span class="mobile-detail-value">${q.eps != null ? fmt(q.eps) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Beta</span><span class="mobile-detail-value">${q.beta != null ? fmt(q.beta) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Div/Yield</span><span class="mobile-detail-value">${fmtDivYield(q.dividend, q.dividendYield)}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Ex-Div</span><span class="mobile-detail-value">${q.exDivDate || '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Earnings</span><span class="mobile-detail-value">${q.earningsDate || '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">YTD</span><span class="mobile-detail-value ${cc(q.perfYTD)}">${q.perfYTD != null ? fmtPct(q.perfYTD) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">6M</span><span class="mobile-detail-value ${cc(q.perf6M)}">${q.perf6M != null ? fmtPct(q.perf6M) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">1Y</span><span class="mobile-detail-value ${cc(q.perf1Y)}">${q.perf1Y != null ? fmtPct(q.perf1Y) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Bid</span><span class="mobile-detail-value"${q.bidEstimated ? ' style="color:#666"' : ''}>${q.bid != null ? (q.bidEstimated ? '~' : '') + fmt(q.bid) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Ask</span><span class="mobile-detail-value"${q.askEstimated ? ' style="color:#666"' : ''}>${q.ask != null ? (q.askEstimated ? '~' : '') + fmt(q.ask) : '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Purchased</span><span class="mobile-detail-value">${pos.purchaseDate || '\u2014'}</span></div>
-          <div class="mobile-detail-item"><span class="mobile-detail-label">Notes</span><span class="mobile-detail-value" style="color:#ff9">${esc(notes[pos.symbol] || '') || '\u2014'}</span></div>
+          ${item('mktValue',   'Mkt Value',  mktValue != null ? fmtDollar(mktValue) : '\u2014')}
+          ${showItem('dayPL') ? `<div class="mobile-detail-item" data-col="dayPL"><span class="mobile-detail-label">Day P&L</span><span class="mobile-detail-value ${cc(dayPL)}">${dayPL != null ? fmtDollar(dayPL) : '\u2014'}</span></div>` : ''}
+          ${showItem('totalPL') ? `<div class="mobile-detail-item" data-col="totalPL"><span class="mobile-detail-label">Total P&L</span><span class="mobile-detail-value ${cc(totalPL)}">${totalPL != null ? fmtDollar(totalPL) : '\u2014'}</span></div>` : ''}
+          ${showItem('totalPLPct') ? `<div class="mobile-detail-item" data-col="totalPLPct"><span class="mobile-detail-label">P&L %</span><span class="mobile-detail-value ${cc(totalPLPct)}">${totalPLPct != null ? fmtPct(totalPLPct) : '\u2014'}</span></div>` : ''}
+          ${item('prevClose',  'Prev Close', q.prevClose != null ? fmt(q.prevClose) : '\u2014')}
+          ${item('open',       'Open',       q.open != null ? fmt(q.open) : '\u2014')}
+          ${item('dayRange',   'Day Range',  q.dayLow && q.dayHigh ? fmt(q.dayLow) + ' - ' + fmt(q.dayHigh) : '\u2014')}
+          ${item('wk52Range',  '52-Wk',      q.wk52Low && q.wk52High ? fmt(q.wk52Low) + ' - ' + fmt(q.wk52High) : '\u2014')}
+          ${item('volume',     'Volume',     fmtVol(q.volume))}
+          ${item('avgVol',     'Avg Vol',    fmtVol(q.avgVolume))}
+          ${item('mktCap',     'Mkt Cap',    q.marketCap != null ? fmtBig(q.marketCap) : '\u2014')}
+          ${item('pe',         'P/E',        q.pe != null ? fmt(q.pe, 1) : '\u2014')}
+          ${item('eps',        'EPS',        q.eps != null ? fmt(q.eps) : '\u2014')}
+          ${item('beta',       'Beta',       q.beta != null ? fmt(q.beta) : '\u2014')}
+          ${item('divYield',   'Div/Yield',  fmtDivYield(q.dividend, q.dividendYield))}
+          ${item('exDiv',      'Ex-Div',     q.exDivDate || '\u2014')}
+          ${item('earnings',   'Earnings',   q.earningsDate || '\u2014')}
+          ${showItem('perfYTD') ? `<div class="mobile-detail-item" data-col="perfYTD"><span class="mobile-detail-label">YTD</span><span class="mobile-detail-value ${cc(q.perfYTD)}">${q.perfYTD != null ? fmtPct(q.perfYTD) : '\u2014'}</span></div>` : ''}
+          ${showItem('perf6M') ? `<div class="mobile-detail-item" data-col="perf6M"><span class="mobile-detail-label">6M</span><span class="mobile-detail-value ${cc(q.perf6M)}">${q.perf6M != null ? fmtPct(q.perf6M) : '\u2014'}</span></div>` : ''}
+          ${showItem('perf1Y') ? `<div class="mobile-detail-item" data-col="perf1Y"><span class="mobile-detail-label">1Y</span><span class="mobile-detail-value ${cc(q.perf1Y)}">${q.perf1Y != null ? fmtPct(q.perf1Y) : '\u2014'}</span></div>` : ''}
+          ${showItem('bid') ? `<div class="mobile-detail-item" data-col="bid"><span class="mobile-detail-label">Bid</span><span class="mobile-detail-value"${q.bidEstimated ? ' style="color:#666"' : ''}>${q.bid != null ? (q.bidEstimated ? '~' : '') + fmt(q.bid) : '\u2014'}</span></div>` : ''}
+          ${showItem('ask') ? `<div class="mobile-detail-item" data-col="ask"><span class="mobile-detail-label">Ask</span><span class="mobile-detail-value"${q.askEstimated ? ' style="color:#666"' : ''}>${q.ask != null ? (q.askEstimated ? '~' : '') + fmt(q.ask) : '\u2014'}</span></div>` : ''}
+          ${item('date',       'Purchased',  pos.purchaseDate || '\u2014')}
+          ${showItem('notes') ? `<div class="mobile-detail-item" data-col="notes"><span class="mobile-detail-label">Notes</span><span class="mobile-detail-value" style="color:#ff9">${esc(notes[pos.symbol] || '') || '\u2014'}</span></div>` : ''}
         </div>
         <div class="mobile-card-actions" onclick="event.stopPropagation()">
           <div class="mobile-edit-group"><label>Qty</label><input type="number" value="${pos.shares}" onchange="updateShares('${sym}', this.value)" /></div>
@@ -4174,37 +4465,64 @@ function toggleMobileCard(card, event) {
 function toggleColumnPicker() {
   const overlay = document.getElementById('column-picker-overlay');
   overlay.classList.toggle('show');
-  if (overlay.classList.contains('show')) renderColumnPicker();
+  if (overlay.classList.contains('show')) {
+    // Adjust label for mobile (cards have "fields", not columns)
+    const mobile = isMobileView();
+    const title = document.getElementById('column-picker-title');
+    const hint = document.getElementById('column-picker-hint');
+    if (title) title.textContent = mobile ? 'Visible Fields' : 'Visible Columns';
+    if (hint) hint.textContent = mobile
+      ? 'Drag rows to reorder. Uncheck to hide a field from the cards.'
+      : 'Drag rows to reorder. Use checkboxes to show/hide.';
+    renderColumnPicker();
+  }
 }
 function renderColumnPicker() {
   const list = document.getElementById('column-picker-list');
-  // Render in current display order (excluding the always-pinned delete column)
+  // Render in current display order (excluding the always-pinned delete column).
+  // The HANDLE is draggable, NOT the row — putting draggable="true" on a row that
+  // contains a checkbox blocks taps on the checkbox on iOS Chrome.
   const cols = getOrderedColumns().filter(c => c.key !== 'delete');
   list.innerHTML = cols.map(col => {
-    const checked = !hiddenColumns.includes(col.key) ? 'checked' : '';
-    return `<div class="col-check" draggable="true" data-col-key="${col.key}">
-      <span class="col-drag-handle">\u2630</span>
-      <input type="checkbox" ${checked} onchange="toggleColumn('${col.key}', this.checked)" />
-      <span>${col.label || 'Actions'}</span>
+    const isEssential = ESSENTIAL_COLUMN_KEYS.has(col.key);
+    const checked = (isEssential || !hiddenColumns.includes(col.key)) ? 'checked' : '';
+    const disabled = isEssential ? 'disabled' : '';
+    const essentialClass = isEssential ? ' essential' : '';
+    const lockBadge = isEssential ? ' <span class="col-lock" title="Required field">\u{1F512}</span>' : '';
+    return `<div class="col-check${essentialClass}" data-col-key="${col.key}"${isEssential ? ' title="Required field — cannot be hidden"' : ''}>
+      <span class="col-drag-handle" draggable="true" title="Drag to reorder">\u2630</span>
+      <input type="checkbox" ${checked} ${disabled} onchange="toggleColumn('${col.key}', this.checked)" />
+      <span>${col.label || 'Actions'}${lockBadge}</span>
     </div>`;
   }).join('');
 
-  // Wire up drag-and-drop reordering
+  // Unified pointer-event reorder (works for mouse + touch + pen on all browsers).
+  // We use pointer events because HTML5 drag-and-drop doesn't fire on touch
+  // devices, and pointer events don't have the passive-listener trap that
+  // touchmove does. Mouse drag still uses native HTML5 drag for accessibility
+  // (cursor:grab feedback) but the actual reordering is driven by pointer events.
   let draggedKey = null;
+  let activeRow = null;
   list.querySelectorAll('.col-check').forEach(row => {
-    row.addEventListener('dragstart', (e) => {
+    const handle = row.querySelector('.col-drag-handle');
+    if (!handle) return;
+
+    // ---------- HTML5 drag (desktop mouse, for native cursor feedback) ----------
+    handle.addEventListener('dragstart', (e) => {
       draggedKey = row.dataset.colKey;
+      activeRow = row;
       row.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
-      // Required for Firefox to start the drag
       try { e.dataTransfer.setData('text/plain', draggedKey); } catch (_) {}
     });
-    row.addEventListener('dragend', () => {
+    handle.addEventListener('dragend', () => {
       row.classList.remove('dragging');
       list.querySelectorAll('.col-check').forEach(r => r.classList.remove('drag-over'));
       draggedKey = null;
+      activeRow = null;
     });
     row.addEventListener('dragover', (e) => {
+      if (!draggedKey) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
       if (row.dataset.colKey !== draggedKey) row.classList.add('drag-over');
@@ -4217,6 +4535,57 @@ function renderColumnPicker() {
       if (!draggedKey || draggedKey === targetKey) return;
       reorderColumn(draggedKey, targetKey);
     });
+
+    // ---------- Pointer events (touch / pen / mouse fallback) ----------
+    let pointerDragging = false;
+    let pointerStartY = 0;
+    let lastOverRow = null;
+    handle.addEventListener('pointerdown', (e) => {
+      // Only react to touch + pen here. Mouse uses HTML5 drag above so we get
+      // the proper grab cursor and don't double-fire.
+      if (e.pointerType === 'mouse') return;
+      pointerDragging = true;
+      pointerStartY = e.clientY;
+      draggedKey = row.dataset.colKey;
+      activeRow = row;
+      row.classList.add('dragging');
+      try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (!pointerDragging) return;
+      // Block page scroll while dragging the handle
+      if (e.cancelable) e.preventDefault();
+      const overRow = document.elementFromPoint(e.clientX, e.clientY);
+      const target = overRow && overRow.closest ? overRow.closest('.col-check') : null;
+      if (target !== lastOverRow) {
+        if (lastOverRow) lastOverRow.classList.remove('drag-over');
+        lastOverRow = target;
+      }
+      if (target && target.dataset.colKey !== draggedKey) {
+        target.classList.add('drag-over');
+      }
+    });
+    const endPointerDrag = (e) => {
+      if (!pointerDragging) return;
+      pointerDragging = false;
+      row.classList.remove('dragging');
+      list.querySelectorAll('.col-check').forEach(r => r.classList.remove('drag-over'));
+      let targetKey = null;
+      if (e && e.clientX != null) {
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        const target = el && el.closest ? el.closest('.col-check') : null;
+        if (target) targetKey = target.dataset.colKey;
+      }
+      if (targetKey && targetKey !== draggedKey) {
+        reorderColumn(draggedKey, targetKey);
+      }
+      draggedKey = null;
+      activeRow = null;
+      lastOverRow = null;
+      try { if (e && e.pointerId != null) handle.releasePointerCapture(e.pointerId); } catch (_) {}
+    };
+    handle.addEventListener('pointerup', endPointerDrag);
+    handle.addEventListener('pointercancel', endPointerDrag);
   });
 }
 function reorderColumn(fromKey, toKey) {
@@ -4229,7 +4598,15 @@ function reorderColumn(fromKey, toKey) {
   current.splice(toIdx, 0, fromKey);
   columnOrder = current;
   saveColumnOrder();
-  renderColumnPicker();
+  // Move DOM nodes in the picker instead of destroying/recreating, so mid-drag
+  // event listeners survive. Full renderColumnPicker would kill pointer capture.
+  const list = document.getElementById('column-picker-list');
+  const fromRow = list.querySelector(`[data-col-key="${fromKey}"]`);
+  const toRow = list.querySelector(`[data-col-key="${toKey}"]`);
+  if (fromRow && toRow) {
+    if (fromIdx < toIdx) toRow.insertAdjacentElement('afterend', fromRow);
+    else toRow.insertAdjacentElement('beforebegin', fromRow);
+  }
   buildHeader();
   renderTable();
 }
@@ -4241,6 +4618,13 @@ function resetColumnOrder() {
   renderTable();
 }
 function toggleColumn(key, visible) {
+  // Required fields can never be hidden — guard here so localStorage tampering or
+  // the "Essential Only" button can't sneak them out either.
+  if (!visible && ESSENTIAL_COLUMN_KEYS.has(key)) {
+    hiddenColumns = hiddenColumns.filter(k => k !== key);
+    renderColumnPicker();
+    return;
+  }
   if (visible) hiddenColumns = hiddenColumns.filter(k => k !== key);
   else if (!hiddenColumns.includes(key)) hiddenColumns.push(key);
   saveHiddenColumns();
@@ -4345,7 +4729,7 @@ function flashTabTitle(msg) {
   if (_flashTitleOriginal == null) _flashTitleOriginal = document.title;
   _flashTitleQueue.push(msg);
   // Keep queue reasonable — old alerts get dropped
-  if (_flashTitleQueue.length > 6) _flashTitleQueue.shift();
+  if (_flashTitleQueue.length > FLASH_TITLE_MAX_QUEUE) _flashTitleQueue.shift();
   if (_flashTitleInterval) return; // already flashing
   let idx = 0;
   _flashTitleInterval = setInterval(() => {
@@ -4357,7 +4741,7 @@ function flashTabTitle(msg) {
     } else {
       document.title = _flashTitleOriginal;
     }
-  }, 900);
+  }, FLASH_TITLE_INTERVAL);
 }
 function _stopFlashingTitle() {
   if (_flashTitleInterval) { clearInterval(_flashTitleInterval); _flashTitleInterval = null; }
@@ -4441,6 +4825,10 @@ function setMobileAlert(symbol, type, val) {
   if (alerts[symbol].above == null && alerts[symbol].below == null) delete alerts[symbol];
   else _maybeRequestNotificationPermission();
   saveAlerts();
+  // Re-render so the bell color/state updates immediately (was previously stuck
+  // on .triggered after clearing the threshold from a triggered alert).
+  renderTable();
+  updateSummary();
 }
 function checkAllAlerts() {
   for (const pos of portfolio) {
@@ -4514,6 +4902,17 @@ function renderAllocationChart() {
   const toggleBtn = document.getElementById('alloc-toggle');
   if (!wrap || !chart) return;
 
+  // Fast path: if chart is hidden, skip the items computation entirely.
+  // On high-frequency WS trades this avoids building arrays for no visible effect.
+  if (!allocationVisible) {
+    if (toggleBtn) toggleBtn.textContent = 'Show Chart';
+    wrap.style.display = 'none';
+    _lastAllocSig = '';
+    // Still show/hide toggle based on whether data exists
+    if (toggleBtn) toggleBtn.style.display = (portfolio.length > 0 && portfolio.some(p => { const q = quoteData[p.symbol]; return q && q.price != null; })) ? '' : 'none';
+    return;
+  }
+
   // Decide whether the chart is even possible (need positions with prices)
   const items = [];
   let total = 0;
@@ -4530,10 +4929,10 @@ function renderAllocationChart() {
   // Show/hide the toggle button based on possibility
   if (toggleBtn) {
     toggleBtn.style.display = possible ? '' : 'none';
-    toggleBtn.textContent = allocationVisible ? 'Hide Chart' : 'Show Chart';
+    toggleBtn.textContent = 'Hide Chart';
   }
 
-  if (!possible || !allocationVisible) {
+  if (!possible) {
     wrap.style.display = 'none';
     _lastAllocSig = '';
     return;
@@ -4613,6 +5012,11 @@ function renderPortfolioSelector() {
   }
 }
 function switchPortfolio(name) {
+  // Abort any in-flight refresh for the old portfolio
+  abortRefresh();
+  if (_deferredCommodityAbort) { _deferredCommodityAbort.abort(); _deferredCommodityAbort = null; }
+  refreshInProgress = false;
+  pendingRefreshAfter = false;
   // Save current
   savePortfolio(); saveNotes();
   // Load new
@@ -4716,51 +5120,63 @@ function initDragReorder() {
     tbody.querySelectorAll('.drag-over, .dragging').forEach(r => r.classList.remove('drag-over', 'dragging'));
   });
 
-  // Mobile: touch-based drag on mobile cards
+  // Mobile: pointer-event drag on mobile cards. Pointer events unify mouse +
+  // touch + pen and don't have the passive-listener trap that plagued the
+  // earlier touch-event implementation. Delegated on the container, so
+  // recreating cards via renderTable() doesn't break anything.
   const mc = document.getElementById('mobile-cards');
-  let _touchCard = null, _touchStartY = 0, _touchIdx = 0;
-  mc.addEventListener('touchstart', e => {
-    const handle = e.target.closest('.mobile-drag-handle');
+  let _ptrCard = null, _ptrStartY = 0, _ptrIdx = 0, _ptrId = null;
+  mc.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse') return; // mouse uses HTML5 drag on desktop
+    const handle = e.target.closest && e.target.closest('.mobile-drag-handle');
     if (!handle) return;
     const card = handle.closest('.mobile-card');
     if (!card) return;
-    _touchCard = card;
-    _touchStartY = e.touches[0].clientY;
+    _ptrCard = card;
+    _ptrStartY = e.clientY;
+    _ptrId = e.pointerId;
     const cards = mc.querySelectorAll('.mobile-card');
-    _touchIdx = [...cards].indexOf(card);
+    _ptrIdx = [...cards].indexOf(card);
     card.style.zIndex = '100';
     card.style.transition = 'none';
-  }, { passive: true });
-  mc.addEventListener('touchmove', e => {
-    if (!_touchCard) return;
-    const dy = e.touches[0].clientY - _touchStartY;
-    _touchCard.style.transform = 'translateY(' + dy + 'px)';
-    _touchCard.style.opacity = '0.8';
-  }, { passive: true });
-  mc.addEventListener('touchend', e => {
-    if (!_touchCard) return;
-    _touchCard.style.transform = '';
-    _touchCard.style.opacity = '';
-    _touchCard.style.zIndex = '';
-    _touchCard.style.transition = '';
-    // Determine drop target by final position
-    const rect = _touchCard.getBoundingClientRect();
+    window._mobileDragActive = true;
+    try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  mc.addEventListener('pointermove', e => {
+    if (!_ptrCard || e.pointerId !== _ptrId) return;
+    if (e.cancelable) e.preventDefault();
+    const dy = e.clientY - _ptrStartY;
+    _ptrCard.style.transform = 'translateY(' + dy + 'px)';
+    _ptrCard.style.opacity = '0.8';
+  });
+  const _endPtrDrag = (e) => {
+    if (!_ptrCard) return;
+    if (e && e.pointerId != null && e.pointerId !== _ptrId) return;
+    _ptrCard.style.transform = '';
+    _ptrCard.style.opacity = '';
+    _ptrCard.style.zIndex = '';
+    _ptrCard.style.transition = '';
+    const rect = _ptrCard.getBoundingClientRect();
     const centerY = rect.top + rect.height / 2;
     const cards = [...mc.querySelectorAll('.mobile-card')];
-    let destIdx = _touchIdx;
+    let destIdx = _ptrIdx;
     for (let i = 0; i < cards.length; i++) {
       const cr = cards[i].getBoundingClientRect();
-      if (centerY > cr.top && centerY < cr.bottom && i !== _touchIdx) { destIdx = i; break; }
+      if (centerY > cr.top && centerY < cr.bottom && i !== _ptrIdx) { destIdx = i; break; }
     }
-    if (destIdx !== _touchIdx) {
+    if (destIdx !== _ptrIdx) {
       pushUndo();
       // Drag handle is hidden during sort, so portfolio[] indices align with visual order.
-      const [moved] = portfolio.splice(_touchIdx, 1);
+      const [moved] = portfolio.splice(_ptrIdx, 1);
       portfolio.splice(destIdx, 0, moved);
       savePortfolio(); renderTable();
     }
-    _touchCard = null;
-  }, { passive: true });
+    _ptrCard = null;
+    _ptrId = null;
+    window._mobileDragActive = false;
+  };
+  mc.addEventListener('pointerup', _endPtrDrag);
+  mc.addEventListener('pointercancel', _endPtrDrag);
 }
 
 // ==================== SHARE VIA URL ====================
@@ -4789,15 +5205,17 @@ function loadFromURL() {
   if (!hash.startsWith('#p=')) return;
   const encoded = decodeURIComponent(hash.substring(3));
   const parts = encoded.split(';').filter(Boolean);
-  if (parts.length === 0) return;
+  if (parts.length === 0 || parts.length > 99) return;
   const positions = [];
   for (const part of parts) {
-    const [symbol, shares, cost, date] = part.split(':');
-    if (!symbol) continue;
+    const [rawSym, shares, cost, date] = part.split(':');
+    if (!rawSym) continue;
+    const symbol = rawSym.toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+    if (!symbol || symbol.length > 10) continue; // sanitize + length-limit
     const sh = parseFloat(shares);
     if (!isFinite(sh) || sh === 0) continue; // skip malformed entries
     positions.push({
-      symbol: symbol.toUpperCase(),
+      symbol: symbol,
       shares: sh,
       costBasis: parseFloat(cost) || 0,
       purchaseDate: date || '',
@@ -4957,7 +5375,15 @@ function connectFinnhubWebSocket() {
           requestAnimationFrame(() => {
             wsRenderPending = false;
             if (!refreshInProgress) {
-              renderTable();
+              // If user is editing an input in the table, do targeted cell updates
+              // instead of full innerHTML rebuild to avoid destroying focus/selection.
+              const editing = document.activeElement && document.activeElement.closest &&
+                document.activeElement.closest('#portfolio-body, #mobile-cards');
+              if (editing) {
+                updatePriceCells();
+              } else {
+                renderTable();
+              }
               updateSummary();
               document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString() + ' (live)';
             }
@@ -4981,7 +5407,7 @@ function connectFinnhubWebSocket() {
     // Reconnect after 5 seconds if we have a key
     if (getApiKey()) {
       if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-      wsReconnectTimer = setTimeout(() => connectFinnhubWebSocket(), 5000);
+      wsReconnectTimer = setTimeout(() => connectFinnhubWebSocket(), WS_RECONNECT_DELAY);
     }
   };
 }
@@ -5004,7 +5430,7 @@ function syncWsSubscriptions() {
   }
   // Subscribe new symbols (FinnHub free tier: up to 50)
   for (const sym of stockSymbols) {
-    if (!wsSubscribedSymbols.has(sym) && wsSubscribedSymbols.size < 50) {
+    if (!wsSubscribedSymbols.has(sym) && wsSubscribedSymbols.size < MAX_WS_SYMBOLS) {
       try { finnhubWs.send(JSON.stringify({ type: 'subscribe', symbol: sym })); } catch(_){}
       wsSubscribedSymbols.add(sym);
     }
@@ -5015,10 +5441,23 @@ function syncWsSubscriptions() {
 function getMarketPhase() {
   // Returns 'active' during US market + extended hours (4am-8pm ET weekdays),
   // 'after' for weeknight off-hours (8pm-4am ET), or 'closed' for weekends.
+  // Uses UTC offset arithmetic instead of toLocaleString to avoid locale/polyfill issues.
   const now = new Date();
-  const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const day = et.getDay(); // 0=Sun, 6=Sat
-  const hour = et.getHours();
+  const utcMs = now.getTime();
+  // US Eastern: UTC-5 standard, UTC-4 DST. Determine DST using the 2nd Sunday in March / 1st Sunday in November rule.
+  const year = now.getUTCFullYear();
+  const mar1 = new Date(Date.UTC(year, 2, 1)); // March 1
+  const marSun2 = 8 + (7 - mar1.getUTCDay()) % 7; // 2nd Sunday
+  const dstStart = Date.UTC(year, 2, marSun2, 7); // 2 AM EST = 7 AM UTC
+  const nov1 = new Date(Date.UTC(year, 10, 1)); // November 1
+  const novSun1 = 1 + (7 - nov1.getUTCDay()) % 7; // 1st Sunday
+  const dstEnd = Date.UTC(year, 10, novSun1, 6); // 2 AM EDT = 6 AM UTC
+  const isDST = utcMs >= dstStart && utcMs < dstEnd;
+  const etOffsetH = isDST ? -4 : -5;
+  const etMs = utcMs + etOffsetH * 3600000;
+  const et = new Date(etMs);
+  const day = et.getUTCDay(); // 0=Sun, 6=Sat
+  const hour = et.getUTCHours();
   if (day === 0 || day === 6) return 'closed';
   if (hour >= 4 && hour < 20) return 'active';
   return 'after'; // weeknight off-hours (8pm-4am ET)
@@ -5059,12 +5498,12 @@ async function refreshAlwaysOnOnly() {
   }
 
   // Commodities via Yahoo v8 (only if not fetched recently via full refresh)
-  if (commoditySyms.length > 0 && Date.now() - offHoursLastFullRefresh >= 60000) {
+  if (commoditySyms.length > 0 && Date.now() - offHoursLastFullRefresh >= OFF_HOURS_FULL_INTERVAL) {
     for (let ci = 0; ci < commoditySyms.length; ci++) {
-      if (ci > 0) await new Promise(r => setTimeout(r, 800));
+      if (ci > 0) await new Promise(r => setTimeout(r, FILL_FUND_BATCH_DELAY));
       const sym = commoditySyms[ci];
       try {
-        const text = await fetchWithProxy('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true', -1, 15000);
+        const text = await fetchWithProxy('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true');
         const data = JSON.parse(text);
         if (data.chart && data.chart.result && data.chart.result[0]) {
           const q = normalizeYahooChart(sym, data.chart.result[0]);
@@ -5100,7 +5539,7 @@ function setupAutoRefresh() {
       if (phase === 'active') {
         // When WebSocket is streaming live prices, throttle full REST refreshes to 60s
         // (WS handles prices; REST is only needed for fundamentals, volume, after-hours)
-        if (wsConnected && Date.now() - lastRestRefresh < 60000) return;
+        if (wsConnected && Date.now() - lastRestRefresh < WS_REST_THROTTLE) return;
         lastRestRefresh = Date.now();
         refreshAll();
       } else {
@@ -5109,7 +5548,7 @@ function setupAutoRefresh() {
         if (phase === 'after') {
           // Full refresh (all sources including stocks) throttled to once per 60s for after-hours data
           const now = Date.now();
-          if (now - offHoursLastFullRefresh >= 60000) {
+          if (now - offHoursLastFullRefresh >= OFF_HOURS_FULL_INTERVAL) {
             offHoursLastFullRefresh = now;
             refreshAll(); // full refresh covers crypto/commodity too — skip lightweight
           } else if (hasAlwaysOn) {
@@ -5205,12 +5644,18 @@ function dismissWelcome() {
 
   container.addEventListener('touchstart', function(e) {
     if (container.scrollTop > 0 || refreshInProgress) return;
+    // Skip if the touch started on a drag handle — that's a reorder gesture,
+    // not a pull-to-refresh, and we don't want them competing for the touch.
+    if (e.target && e.target.closest && e.target.closest('.mobile-drag-handle')) return;
     startY = e.touches[0].clientY;
     pulling = true;
   }, { passive: true });
 
   container.addEventListener('touchmove', function(e) {
     if (!pulling) return;
+    // Bail out if a card drag started after our touchstart (shouldn't normally
+    // happen with the .mobile-drag-handle check above, but belt-and-braces)
+    if (window._mobileDragActive) { pulling = false; indicator.style.height = '0'; return; }
     const dy = e.touches[0].clientY - startY;
     if (dy < 0) { indicator.style.height = '0'; return; }
     const h = Math.min(dy * 0.5, 50);
