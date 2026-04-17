@@ -1495,6 +1495,26 @@ function makeEmptyQuote(sym) {
 function lsGet(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key) || fallback); } catch (_) { return JSON.parse(fallback); }
 }
+// Safely write to localStorage. Returns true on success; on QuotaExceededError
+// (or any other write failure) surfaces a one-time warning and returns false so
+// callers can fall back / stop issuing further writes in the same flow.
+let _lsQuotaWarned = false;
+function safeSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    if (!_lsQuotaWarned) {
+      _lsQuotaWarned = true;
+      try { setStatus && setStatus('Local storage full — changes may not persist. Try exporting settings and clearing old data.', 'error'); } catch (_) {}
+      console.warn('localStorage write failed for key "' + key + '":', e);
+    }
+    return false;
+  }
+}
+// Reset the quota warning flag so a successful save path can resume notifying
+// the user of future failures (e.g. after they clear storage).
+function resetQuotaWarning() { _lsQuotaWarned = false; }
 let portfolio = lsGet('stonks_portfolio', '[]');
 let notes = lsGet('stonks_notes', '{}');
 let quoteData = {};
@@ -1524,6 +1544,10 @@ let columnOrder = lsGet('stonks_column_order', '[]'); // user-defined column ord
 let alerts = lsGet('stonks_alerts', '{}'); // { symbol: { above: num|null, below: num|null } }
 
 // ==================== UNDO / REDO ====================
+// Undo tracks portfolio + notes (the structured data the user directly edits).
+// Alerts and column picker state are intentionally left out — they're UI
+// preferences, and capturing them here would cause unrelated alert/column
+// edits to silently revert on Ctrl+Z.
 const undoStack = [];
 const redoStack = [];
 function pushUndo() {
@@ -1585,25 +1609,26 @@ document.addEventListener('keydown', e => {
 
 // ==================== PERSISTENCE ====================
 function savePortfolio() {
-  localStorage.setItem('stonks_portfolio', JSON.stringify(portfolio));
+  bumpPortfolioVersion();
+  safeSet('stonks_portfolio', JSON.stringify(portfolio));
   // Also save into the active portfolio slot
   const all = lsGet('stonks_portfolios', '{}');
   const name = localStorage.getItem('stonks_active_portfolio') || 'Default';
   if (!all[name]) all[name] = {};
   all[name].portfolio = portfolio;
   all[name].notes = notes;
-  localStorage.setItem('stonks_portfolios', JSON.stringify(all));
+  safeSet('stonks_portfolios', JSON.stringify(all));
 }
 function saveNotes() {
-  localStorage.setItem('stonks_notes', JSON.stringify(notes));
+  safeSet('stonks_notes', JSON.stringify(notes));
   const all = lsGet('stonks_portfolios', '{}');
   const name = localStorage.getItem('stonks_active_portfolio') || 'Default';
   if (!all[name]) all[name] = {};
   all[name].notes = notes;
-  localStorage.setItem('stonks_portfolios', JSON.stringify(all));
+  safeSet('stonks_portfolios', JSON.stringify(all));
 }
-function saveHiddenColumns() { localStorage.setItem('stonks_hidden_columns', JSON.stringify(hiddenColumns)); }
-function saveColumnOrder() { localStorage.setItem('stonks_column_order', JSON.stringify(columnOrder)); }
+function saveHiddenColumns() { safeSet('stonks_hidden_columns', JSON.stringify(hiddenColumns)); }
+function saveColumnOrder() { safeSet('stonks_column_order', JSON.stringify(columnOrder)); }
 function saveAlerts() {
   // Strip volatile _notified flag and drop entries where both thresholds are null
   const clean = {};
@@ -1612,7 +1637,7 @@ function saveAlerts() {
     const below = alerts[k].below ?? null;
     if (above != null || below != null) clean[k] = { above, below };
   }
-  localStorage.setItem('stonks_alerts', JSON.stringify(clean));
+  safeSet('stonks_alerts', JSON.stringify(clean));
 }
 function flashConfirm(id) {
   const el = document.getElementById(id);
@@ -1622,7 +1647,7 @@ function flashConfirm(id) {
 }
 function saveApiKey() {
   const key = document.getElementById('finnhub-key').value.trim();
-  if (key) localStorage.setItem('stonks_finnhub_key', key);
+  if (key) safeSet('stonks_finnhub_key', key);
   else localStorage.removeItem('stonks_finnhub_key');
   document.getElementById('welcome-wrap').classList.remove('show');
   flashConfirm('confirm-finnhub');
@@ -1636,9 +1661,9 @@ function getApiKey() { return localStorage.getItem('stonks_finnhub_key') || ''; 
 function saveAlpacaKeys() {
   const keyId = document.getElementById('alpaca-key-id').value.trim();
   const secret = document.getElementById('alpaca-secret').value.trim();
-  if (keyId) localStorage.setItem('stonks_alpaca_key_id', keyId);
+  if (keyId) safeSet('stonks_alpaca_key_id', keyId);
   else localStorage.removeItem('stonks_alpaca_key_id');
-  if (secret) localStorage.setItem('stonks_alpaca_secret', secret);
+  if (secret) safeSet('stonks_alpaca_secret', secret);
   else localStorage.removeItem('stonks_alpaca_secret');
   document.getElementById('welcome-wrap').classList.remove('show');
   flashConfirm('confirm-alpaca');
@@ -1649,7 +1674,7 @@ function getAlpacaKeys() {
 }
 function saveFmpKey() {
   const key = document.getElementById('fmp-key').value.trim();
-  if (key) localStorage.setItem('stonks_fmp_key', key);
+  if (key) safeSet('stonks_fmp_key', key);
   else localStorage.removeItem('stonks_fmp_key');
   document.getElementById('welcome-wrap').classList.remove('show');
   flashConfirm('confirm-fmp');
@@ -1852,15 +1877,15 @@ function importSettings(file) {
       const data = JSON.parse(reader.result);
       if (data._format !== 'stonks_settings_v1') { alert('Invalid settings file.'); return; }
       if (!confirm('Import settings? This will overwrite your current API keys, column settings, and alerts.')) return;
-      if (data.finnhubKey) localStorage.setItem('stonks_finnhub_key', data.finnhubKey);
-      if (data.alpacaKeyId) localStorage.setItem('stonks_alpaca_key_id', data.alpacaKeyId);
-      if (data.alpacaSecret) localStorage.setItem('stonks_alpaca_secret', data.alpacaSecret);
-      if (data.fmpKey) localStorage.setItem('stonks_fmp_key', data.fmpKey);
+      if (data.finnhubKey) safeSet('stonks_finnhub_key', data.finnhubKey);
+      if (data.alpacaKeyId) safeSet('stonks_alpaca_key_id', data.alpacaKeyId);
+      if (data.alpacaSecret) safeSet('stonks_alpaca_secret', data.alpacaSecret);
+      if (data.fmpKey) safeSet('stonks_fmp_key', data.fmpKey);
       if (Array.isArray(data.hiddenColumns)) { hiddenColumns = data.hiddenColumns; saveHiddenColumns(); }
       if (Array.isArray(data.columnOrder)) { columnOrder = data.columnOrder; saveColumnOrder(); }
       if (data.alerts && typeof data.alerts === 'object') { alerts = data.alerts; saveAlerts(); }
-      if (data.refreshInterval) localStorage.setItem('stonks_refresh_interval', data.refreshInterval);
-      if (data.autoRefresh != null) localStorage.setItem('stonks_auto_refresh', data.autoRefresh);
+      if (data.refreshInterval) safeSet('stonks_refresh_interval', data.refreshInterval);
+      if (data.autoRefresh != null) safeSet('stonks_auto_refresh', data.autoRefresh);
       // Refresh UI
       document.getElementById('finnhub-key').value = getApiKey();
       const alpaca = getAlpacaKeys();
@@ -2422,9 +2447,16 @@ async function fetchYahooQuotes(symbols) {
         const data = JSON.parse(text);
         if (data.chart && data.chart.result && data.chart.result[0]) {
           const chart = normalizeYahooChart(sym, data.chart.result[0]);
-          v7Results[sym] = chart;
-          if (chart && (chart.postMarketPrice != null || chart.preMarketPrice != null)) {
-            fetchedAfterHours.add(sym);
+          // normalizeYahooChart now returns null for empty-envelope responses
+          // (Yahoo returns these for unknown tickers like "GHH" for a UK stock
+          // entered without the .L suffix). Skip those so the symbol falls
+          // through to the "Unknown ticker" path in _refreshAll instead of
+          // being stored with price=undefined.
+          if (chart) {
+            v7Results[sym] = chart;
+            if (chart.postMarketPrice != null || chart.preMarketPrice != null) {
+              fetchedAfterHours.add(sym);
+            }
           }
         }
       } catch (e) {
@@ -2557,6 +2589,18 @@ function normalizeYahooChart(sym, chart) {
   const meta = chart.meta || {};
   const price = meta.regularMarketPrice;
   const prevClose = meta.chartPreviousClose || meta.previousClose;
+
+  // Yahoo occasionally returns a chart envelope for unknown symbols (e.g. a US
+  // user typing "GHH" for the UK ticker Gooch & Housego, which is really GHH.L)
+  // with no regularMarketPrice and no candle data. Returning an object with
+  // price=undefined here would let the caller claim Yahoo "resolved" the
+  // symbol, which both suppresses the "Unknown ticker" marker in _refreshAll
+  // and leaves the row stuck on "loading..." forever. Bail out cleanly so the
+  // symbol falls through to the error-marking path.
+  const hasCandle = chart.timestamp && chart.timestamp.length > 0 &&
+    chart.indicators && chart.indicators.quote && chart.indicators.quote[0] &&
+    chart.indicators.quote[0].close && chart.indicators.quote[0].close.some(c => c != null);
+  if (price == null && !hasCandle) return null;
 
   // Extract after-hours pricing: check meta fields first, then fall back to candle data
   let postMarketPrice = meta.postMarketPrice ?? null;
@@ -3390,6 +3434,10 @@ async function refreshAll() {
   } finally {
     refreshInProgress = false;
     refreshAbort = null;
+    // Quote data likely changed during the refresh — invalidate the sort cache
+    // so live-price sorts (e.g. sorted by Last) pick up the new order on the
+    // next renderTable without needing per-symbol-list recomputation.
+    bumpPortfolioVersion();
     // If a symbol was added while refresh was running, run again to pick it up
     if (pendingRefreshAfter) {
       pendingRefreshAfter = false;
@@ -3505,11 +3553,16 @@ async function _refreshAll(signal) {
         if (q.marketState == null && p.marketState != null) q.marketState = p.marketState;
       }
     }
-    // Only mark tickers as unknown if at least one source returned data for OTHER symbols
-    // (meaning the source works but this ticker genuinely doesn't exist)
+    // Mark tickers as unknown when any source replied successfully (even with
+    // no hits for the batch) — an empty-but-non-null response means the source
+    // is reachable and the symbol genuinely doesn't exist there. Previously
+    // this required totalHits > 0, but that broke single-symbol portfolios:
+    // adding just "GHH" (UK ticker entered without .L) left the row stuck on
+    // "loading..." because there were no *other* symbols to prove the fetch
+    // layer was working.
     // Never mark known commodity/crypto symbols as errors — they're valid but proxy-dependent
-    const totalHits = allResults.reduce((n, r) => n + (r ? Object.keys(r.data).length : 0), 0);
-    if (totalHits > 0) {
+    const anySourceReplied = allResults.length > 0;
+    if (anySourceReplied) {
       for (const sym of symbols) {
         const found = allResults.some(r => r && r.data[sym]);
         if (!found && !quoteData[sym] && !isCommoditySymbol(sym) && !isCryptoSymbol(sym)) {
@@ -4087,12 +4140,17 @@ function getSortValue(pos, q) {
   }
 }
 
+// Monotonic counter bumped whenever portfolio membership or quote data changes
+// in a way that could affect sort order. Used as an O(1) cache key for
+// getSortedPortfolio so multiple calls within one render cycle share a sort.
+let _portfolioVersion = 0;
+function bumpPortfolioVersion() { _portfolioVersion++; }
 let _sortedCache = null;
 let _sortedCacheKey = '';
 function getSortedPortfolio() {
   // Cache the sorted result to avoid redundant copies+sorts when called
   // multiple times in the same render cycle (table + summary + chart).
-  const key = sortCol + '|' + sortAsc + '|' + portfolio.length + '|' + portfolio.map(p => p.symbol).join(',');
+  const key = sortCol + '|' + sortAsc + '|' + _portfolioVersion;
   if (_sortedCache && _sortedCacheKey === key) return _sortedCache;
   let result;
   if (!sortCol) result = [...portfolio];
@@ -4262,6 +4320,92 @@ function updatePriceCells() {
       else if (price < prevPrices[sym]) { row.classList.add('flash-red'); row.classList.remove('flash-green'); }
     }
   });
+}
+
+// Mobile equivalent of updatePriceCells: patches just the price-dependent
+// fields on each mobile-card in place, so a WS tick doesn't blow away input
+// focus, selection, or expanded state on mobile.
+function updateMobileCardPrices() {
+  const container = document.getElementById('mobile-cards');
+  if (!container) return;
+  // Swap the sign class on an element in place without touching sibling
+  // classes like `mobile-card-price` or `mobile-detail-value` that the card
+  // template relies on for layout.
+  const _SIGN_CLASSES = ['pos', 'neg', 'neutral'];
+  const applySignClass = (el, value) => {
+    el.classList.remove(..._SIGN_CLASSES);
+    const cls = cc(value);
+    if (cls) el.classList.add(cls);
+  };
+  const setTextWithSign = (el, value, formatter, withPlus) => {
+    if (!el) return;
+    if (value == null || isNaN(value)) {
+      el.textContent = '\u2014';
+      el.classList.remove(..._SIGN_CLASSES);
+      return;
+    }
+    el.textContent = (withPlus && value >= 0 ? '+' : '') + formatter(value);
+    applySignClass(el, value);
+  };
+  container.querySelectorAll('.mobile-card[data-sym]').forEach(card => {
+    const sym = card.dataset.sym;
+    const q = quoteData[sym] || {};
+    const pos = portfolio.find(p => p.symbol === sym);
+    if (!pos) return;
+    const price = q.price;
+    const change = q.change;
+    const changePct = q.changePct;
+
+    // Main price — only update when we actually have a price; otherwise leave
+    // whatever placeholder renderMobileCards drew (loading/retrying/unknown).
+    const priceEl = card.querySelector('.mobile-card-price');
+    if (priceEl && price != null) {
+      priceEl.textContent = '$' + fmt(price);
+      applySignClass(priceEl, change);
+    }
+
+    // Change / %change line
+    const changeEl = card.querySelector('.mobile-card-change');
+    if (changeEl) {
+      let txt = '';
+      if (change != null) txt += (change >= 0 ? '+' : '') + fmt(change);
+      if (changePct != null) txt += (txt ? ' ' : '') + '(' + fmtPct(changePct) + ')';
+      changeEl.textContent = txt;
+      applySignClass(changeEl, changePct);
+    }
+
+    // Derived detail items — only the ones that depend on live price
+    const mv = price != null ? price * pos.shares : null;
+    const dayPL = change != null ? change * pos.shares : null;
+    const totalPL = (price != null && pos.costBasis) ? (price - pos.costBasis) * pos.shares : null;
+    const totalPLPct = (totalPL != null && pos.costBasis) ? (totalPL / (Math.abs(pos.shares) * pos.costBasis)) * 100 : null;
+
+    const mvEl = card.querySelector('.mobile-detail-item[data-col="mktValue"] .mobile-detail-value');
+    if (mvEl) mvEl.textContent = mv != null ? fmtDollar(mv) : '\u2014';
+
+    setTextWithSign(card.querySelector('.mobile-detail-item[data-col="dayPL"] .mobile-detail-value'), dayPL, fmtDollar, false);
+    setTextWithSign(card.querySelector('.mobile-detail-item[data-col="totalPL"] .mobile-detail-value'), totalPL, fmtDollar, false);
+    setTextWithSign(card.querySelector('.mobile-detail-item[data-col="totalPLPct"] .mobile-detail-value'), totalPLPct, fmtPct, false);
+
+    const bidEl = card.querySelector('.mobile-detail-item[data-col="bid"] .mobile-detail-value');
+    if (bidEl) bidEl.textContent = q.bid != null ? (q.bidEstimated ? '~' : '') + fmt(q.bid) : '\u2014';
+    const askEl = card.querySelector('.mobile-detail-item[data-col="ask"] .mobile-detail-value');
+    if (askEl) askEl.textContent = q.ask != null ? (q.askEstimated ? '~' : '') + fmt(q.ask) : '\u2014';
+
+    // Flash class
+    if (prevPrices[sym] != null && price != null) {
+      if (price > prevPrices[sym]) { card.classList.add('flash-green'); card.classList.remove('flash-red'); }
+      else if (price < prevPrices[sym]) { card.classList.add('flash-red'); card.classList.remove('flash-green'); }
+    }
+  });
+}
+
+// Decide whether the current sort key depends on live price — if it does, a WS
+// tick can change row order, so we need a full renderTable rather than an
+// in-place patch. Otherwise the order is stable and targeted updates suffice.
+const _LIVE_PRICE_SORT_KEYS = new Set(['last','change','changePct','afterHours','mktValue','dayPL','totalPL','totalPLPct','bid','ask']);
+function _currentSortNeedsFullRender() {
+  return !!(sortCol && _LIVE_PRICE_SORT_KEYS.has(sortCol));
 }
 
 function isMobileView() {
@@ -4891,7 +5035,7 @@ let _lastAllocSig = ''; // signature of the last drawn allocation: skips re-rend
 let allocationVisible = localStorage.getItem('stonks_alloc_visible') === '1';
 function toggleAllocationChart() {
   allocationVisible = !allocationVisible;
-  localStorage.setItem('stonks_alloc_visible', allocationVisible ? '1' : '0');
+  safeSet('stonks_alloc_visible', allocationVisible ? '1' : '0');
   _lastAllocSig = ''; // force re-render
   renderAllocationChart();
 }
@@ -4992,11 +5136,11 @@ function initPortfolios() {
     all[portfolioName] = { portfolio: [], notes: {} };
     dirty = true;
   }
-  if (dirty) localStorage.setItem('stonks_portfolios', JSON.stringify(all));
+  if (dirty) safeSet('stonks_portfolios', JSON.stringify(all));
   // Load active portfolio
   portfolio = all[portfolioName].portfolio || [];
   notes = all[portfolioName].notes || {};
-  localStorage.setItem('stonks_active_portfolio', portfolioName);
+  safeSet('stonks_active_portfolio', portfolioName);
   renderPortfolioSelector();
 }
 function renderPortfolioSelector() {
@@ -5023,17 +5167,21 @@ function switchPortfolio(name) {
   const all = lsGet('stonks_portfolios', '{}');
   if (!all[name]) return;
   portfolioName = name;
-  localStorage.setItem('stonks_active_portfolio', name);
+  safeSet('stonks_active_portfolio', name);
   portfolio = all[name].portfolio || [];
   notes = all[name].notes || {};
   // Also update the flat keys for backward compat
-  localStorage.setItem('stonks_portfolio', JSON.stringify(portfolio));
-  localStorage.setItem('stonks_notes', JSON.stringify(notes));
+  safeSet('stonks_portfolio', JSON.stringify(portfolio));
+  safeSet('stonks_notes', JSON.stringify(notes));
   // Reset fetch caches
   quoteData = {}; fundamentalsCache = {}; prevPrices = {}; wsLastTradeTime = {};
   errorSymbols.clear(); fetchedSummary.clear(); fetchedFundamentals.clear();
   fetchedPerformance.clear(); fetchedAfterHours.clear(); attemptedSymbols.clear();
   undoStack.length = 0; redoStack.length = 0;
+  // New portfolio means a different set of symbols — invalidate the sort cache
+  // so the first render of the new portfolio doesn't reuse the previous one's
+  // sorted array (cache key would otherwise collide when lengths happen to match).
+  bumpPortfolioVersion();
   renderTable(); updateSummary();
   if (portfolio.length > 0) refreshAll().then(() => syncWsSubscriptions());
   else syncWsSubscriptions();
@@ -5044,7 +5192,7 @@ function createPortfolioPrompt() {
   const all = lsGet('stonks_portfolios', '{}');
   if (all[name.trim()]) { alert('Portfolio "' + name.trim() + '" already exists.'); return; }
   all[name.trim()] = { portfolio: [], notes: {} };
-  localStorage.setItem('stonks_portfolios', JSON.stringify(all));
+  safeSet('stonks_portfolios', JSON.stringify(all));
   renderPortfolioSelector();
   switchPortfolio(name.trim());
 }
@@ -5056,8 +5204,8 @@ function renamePortfolioPrompt() {
   all[newName.trim()] = all[portfolioName];
   delete all[portfolioName];
   portfolioName = newName.trim();
-  localStorage.setItem('stonks_portfolios', JSON.stringify(all));
-  localStorage.setItem('stonks_active_portfolio', portfolioName);
+  safeSet('stonks_portfolios', JSON.stringify(all));
+  safeSet('stonks_active_portfolio', portfolioName);
   renderPortfolioSelector();
 }
 function deletePortfolioPrompt() {
@@ -5065,15 +5213,17 @@ function deletePortfolioPrompt() {
   if (Object.keys(all).length <= 1) { alert('Cannot delete the last portfolio.'); return; }
   if (!confirm('Delete portfolio "' + portfolioName + '"?')) return;
   delete all[portfolioName];
-  localStorage.setItem('stonks_portfolios', JSON.stringify(all));
+  safeSet('stonks_portfolios', JSON.stringify(all));
   portfolioName = Object.keys(all)[0];
-  localStorage.setItem('stonks_active_portfolio', portfolioName);
+  safeSet('stonks_active_portfolio', portfolioName);
   portfolio = all[portfolioName].portfolio || [];
   notes = all[portfolioName].notes || {};
-  localStorage.setItem('stonks_portfolio', JSON.stringify(portfolio));
-  localStorage.setItem('stonks_notes', JSON.stringify(notes));
+  safeSet('stonks_portfolio', JSON.stringify(portfolio));
+  safeSet('stonks_notes', JSON.stringify(notes));
   quoteData = {}; fundamentalsCache = {};
   undoStack.length = 0; redoStack.length = 0;
+  // Fresh portfolio loaded — invalidate the sort cache.
+  bumpPortfolioVersion();
   renderPortfolioSelector();
   renderTable(); updateSummary();
   if (portfolio.length > 0) refreshAll().then(() => syncWsSubscriptions());
@@ -5203,7 +5353,15 @@ function copyShareURL() {
 function loadFromURL() {
   const hash = window.location.hash;
   if (!hash.startsWith('#p=')) return;
-  const encoded = decodeURIComponent(hash.substring(3));
+  let encoded;
+  try {
+    encoded = decodeURIComponent(hash.substring(3));
+  } catch (_) {
+    // Malformed percent-escapes in the share URL — ignore silently and
+    // clear the hash so subsequent reloads don't keep trying to decode it.
+    history.replaceState(null, '', window.location.pathname);
+    return;
+  }
   const parts = encoded.split(';').filter(Boolean);
   if (parts.length === 0 || parts.length > 99) return;
   const positions = [];
@@ -5375,14 +5533,21 @@ function connectFinnhubWebSocket() {
           requestAnimationFrame(() => {
             wsRenderPending = false;
             if (!refreshInProgress) {
-              // If user is editing an input in the table, do targeted cell updates
-              // instead of full innerHTML rebuild to avoid destroying focus/selection.
-              const editing = document.activeElement && document.activeElement.closest &&
-                document.activeElement.closest('#portfolio-body, #mobile-cards');
-              if (editing) {
-                updatePriceCells();
-              } else {
+              // Prefer targeted in-place updates on every WS tick — they
+              // preserve input focus/selection, expanded mobile cards, and
+              // avoid rebuilding ~N×30 cells per tick. Only fall back to a
+              // full renderTable when the active sort column depends on live
+              // price, since a tick can reorder rows in that case.
+              if (_currentSortNeedsFullRender()) {
+                // Prices changed — invalidate the sort cache so the full
+                // renderTable picks up the new order instead of returning
+                // the previously-sorted array for the same portfolio.
+                bumpPortfolioVersion();
                 renderTable();
+              } else if (isMobileView()) {
+                updateMobileCardPrices();
+              } else {
+                updatePriceCells();
               }
               updateSummary();
               document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString() + ' (live)';
@@ -5569,11 +5734,11 @@ function setupAutoRefresh() {
 
 // Persist auto-refresh settings to localStorage
 document.getElementById('refresh-interval').addEventListener('change', function() {
-  localStorage.setItem('stonks_refresh_interval', this.value);
+  safeSet('stonks_refresh_interval', this.value);
   setupAutoRefresh();
 });
 document.getElementById('auto-refresh').addEventListener('change', function() {
-  localStorage.setItem('stonks_auto_refresh', this.checked ? '1' : '0');
+  safeSet('stonks_auto_refresh', this.checked ? '1' : '0');
 });
 
 // ==================== KEYBOARD ====================
@@ -5631,7 +5796,7 @@ function showWelcomeBanner(force) {
 }
 function dismissWelcome() {
   document.getElementById('welcome-wrap').classList.remove('show');
-  localStorage.setItem('stonks_welcome_dismissed', '1');
+  safeSet('stonks_welcome_dismissed', '1');
 }
 
 // ==================== PULL TO REFRESH (mobile) ====================
@@ -5644,9 +5809,13 @@ function dismissWelcome() {
 
   container.addEventListener('touchstart', function(e) {
     if (container.scrollTop > 0 || refreshInProgress) return;
-    // Skip if the touch started on a drag handle — that's a reorder gesture,
-    // not a pull-to-refresh, and we don't want them competing for the touch.
-    if (e.target && e.target.closest && e.target.closest('.mobile-drag-handle')) return;
+    // Skip if the touch started on a drag handle (that's a reorder gesture),
+    // on any input/button/select/textarea (the user is typing or tapping a
+    // control), or on the inline editor strip inside an expanded card —
+    // otherwise the pull indicator flashes during normal input taps.
+    if (e.target && e.target.closest && e.target.closest(
+      '.mobile-drag-handle, input, button, select, textarea, .mobile-card-actions'
+    )) return;
     startY = e.touches[0].clientY;
     pulling = true;
   }, { passive: true });
