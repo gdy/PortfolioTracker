@@ -1477,14 +1477,14 @@ const YAHOO_AH_TIMEOUT = 12000;
 // Delays (ms)
 const FINNHUB_QUOTE_DELAY = 200;          // between sequential FinnHub /quote calls
 const FINNHUB_BATCH_DELAY = 1500;         // between fundamentals batches
-const PERF_SYMBOL_DELAY = 500;            // between sequential perf requests
+const PERF_SYMBOL_DELAY = 300;            // between sequential perf requests (session-cached, only first load)
 const COMMODITY_STAGGER = 200;            // stagger between parallel commodity fetches
 const COMMODITY_RETRY_DELAY = 1500;       // initial delay before deferred commodity retry
 const COMMODITY_RETRY_GAP = 1200;         // gap between deferred retry symbols
 const STILL_MISSING_BATCH_DELAY = 600;    // between batches of v8 fallback fetches
 const STILL_MISSING_STAGGER = 150;        // per-symbol stagger within a batch
 const FILL_FUND_BATCH_DELAY = 800;        // between fillFundamentals batches
-const AH_CHART_DELAY = 400;              // between sequential after-hours chart fetches
+const AH_CHART_DELAY = 250;              // between sequential after-hours chart fetches
 const CG_SUPPLEMENTAL_DELAY = 1500;       // between CoinGecko supplemental requests
 // Batch sizes
 const FINNHUB_FUND_BATCH = 5;
@@ -2352,15 +2352,26 @@ const PROXIES = [
 ];
 
 let lastWorkingProxy = 0; // remember which proxy worked last
+// Latch: once a direct fetch throws (CORS / network / timeout), Yahoo & friends
+// have no CORS headers so every other URL on the same origin will also fail.
+// Skip the up-front direct attempt for the rest of the session — saves ~4s
+// per proxy fetch on file:// / static hosting (GitHub Pages), which is most
+// of the deploys. A real 2xx response keeps the latch open so sites that do
+// support direct fetches never get degraded.
+let _directFetchBlocked = false;
 async function fetchWithProxy(url, proxyIndex = -1, timeout = PROXY_FETCH_TIMEOUT) {
   // Try direct fetch first (works when served from a web server or extensions with relaxed CORS)
-  try {
-    const directResp = await fetch(url, { signal: AbortSignal.timeout(DIRECT_FETCH_TIMEOUT) });
-    if (directResp.ok) {
-      const text = await directResp.text();
-      if (text && (text.trimStart()[0] === '{' || text.trimStart()[0] === '[')) return text;
+  if (!_directFetchBlocked) {
+    try {
+      const directResp = await fetch(url, { signal: AbortSignal.timeout(DIRECT_FETCH_TIMEOUT) });
+      if (directResp.ok) {
+        const text = await directResp.text();
+        if (text && (text.trimStart()[0] === '{' || text.trimStart()[0] === '[')) return text;
+      }
+    } catch (_) {
+      _directFetchBlocked = true; /* expected on file:// — skip from now on */
     }
-  } catch (_) { /* expected to fail from file:// — fall through to proxies */ }
+  }
 
   // Fall through to CORS proxies
   if (proxyIndex === -1) proxyIndex = lastWorkingProxy;
@@ -2398,13 +2409,17 @@ function _validateProxyResponse(text) {
 // Used for slow commodity fetches where sequential proxy attempts add 30+ seconds.
 async function fetchWithProxyRace(url, n = 3, timeout = PROXY_RACE_TIMEOUT) {
   // Try direct fetch first (cheap if it works, e.g. served from a real web server)
-  try {
-    const directResp = await fetch(url, { signal: AbortSignal.timeout(DIRECT_FETCH_TIMEOUT - 1000) });
-    if (directResp.ok) {
-      const text = await directResp.text();
-      if (text && (text.trimStart()[0] === '{' || text.trimStart()[0] === '[')) return text;
+  if (!_directFetchBlocked) {
+    try {
+      const directResp = await fetch(url, { signal: AbortSignal.timeout(DIRECT_FETCH_TIMEOUT - 1000) });
+      if (directResp.ok) {
+        const text = await directResp.text();
+        if (text && (text.trimStart()[0] === '{' || text.trimStart()[0] === '[')) return text;
+      }
+    } catch (_) {
+      _directFetchBlocked = true; /* skip direct for the rest of the session */
     }
-  } catch (_) { /* expected on file:// — fall through */ }
+  }
 
   // Pick N proxies, starting with the last-known-good one
   const order = [];
