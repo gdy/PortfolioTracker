@@ -2307,13 +2307,16 @@ function executeImport() {
           ? (existing.costBasis * aW + pos.costBasis * bW) / denom
           : existing.costBasis;
       } else {
-        // Opposite sides: keep whichever side has more shares remaining.
-        if (Math.abs(totalShares) > 0 && ((totalShares > 0) === (existing.shares > 0))) {
-          // Existing side wins — keep its basis.
-        } else {
-          // New lot's side wins — adopt its basis.
+        // Opposite sides: the surviving side (whose sign matches totalShares)
+        // keeps its cost basis. Using Math.sign handles the zombie-row edge
+        // case where existing.shares === 0 from a prior full close —
+        // Math.sign(0) is 0, which never matches ±1, so the new lot correctly
+        // wins. (The older `> 0` predicate treated zero as "negative side"
+        // and kept the stale $0 basis against short imports.)
+        if (Math.sign(existing.shares) !== Math.sign(totalShares)) {
           existing.costBasis = pos.costBasis;
         }
+        // else existing side wins; keep existing.costBasis untouched.
       }
       existing.shares = totalShares;
       if (pos.purchaseDate && !existing.purchaseDate) existing.purchaseDate = pos.purchaseDate;
