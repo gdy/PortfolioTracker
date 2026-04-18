@@ -34,7 +34,7 @@ A real-time portfolio tracker for stocks, crypto, and commodities that runs enti
 - **Export CSV** — one-click download of the current portfolio as CSV (filename includes the portfolio name and date), respecting your current sort order.
 - **Export / Import settings** — save and restore your API keys, column visibility, column order, price alerts, and refresh preferences as a JSON file. Found in the Settings panel.
 - **Share via URL** — generate a shareable URL containing your portfolio (symbols, shares, cost basis, dates) encoded in the hash (up to 99 positions). Recipients are prompted before any positions replace their current portfolio. Shared symbols are sanitized and length-validated on import.
-- **Undo / Redo** — `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) undoes and redoes any portfolio change: add, remove, edit shares/cost/date, import, reorder, or clear all. Up to 50 levels of history.
+- **Undo / Redo** — `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) undoes and redoes any portfolio change: add, remove, edit shares/cost/date, import, reorder, or clear all. Up to 50 levels of history. Visible **Undo** and **Redo** buttons in the toolbar auto-enable/disable as the stacks change, so the feature is discoverable without needing the shortcut.
 - **Short selling** — negative share quantities track short positions with correct P&L math.
 - **Per-position notes** — free-text notes column for each ticker.
 - **Purchase date tracking** — records when each position was opened, sortable and editable inline.
@@ -51,7 +51,7 @@ A real-time portfolio tracker for stocks, crypto, and commodities that runs enti
 - **Simple CSV** — also accepts `Symbol, Shares, Cost, Date` with no headers.
 - **Live preview** — parsed positions are shown in real time as you type or drop a file, with column mapping diagnostics.
 - **Short detection** — recognises negative shares or `Short` / `Sell` / `Sell Short` in a Type column.
-- **Smart merging** — duplicate symbols use weighted-average cost basis.
+- **Smart merging** — duplicate symbols are merged by side. Two long lots (or two short lots) are combined with a weighted-average cost basis. A long lot imported on top of an existing short position (or vice versa) is treated as a closing trade: the remaining side keeps its cost basis instead of mixing long and short prices into a meaningless average.
 - **Price seeding** — imported last prices display immediately before APIs respond.
 
 ### Asset Classes
@@ -68,6 +68,11 @@ Commodity futures symbols containing `=` are handled carefully: `=` is kept raw 
 - **Sticky headers** — column headers stay visible while scrolling horizontally.
 - **Keyboard shortcuts** — `Tab` moves between toolbar inputs (ticker → shares → cost → date); `Enter` adds a position; `Ctrl+Z` / `Ctrl+Y` undo/redo; `?` opens the keyboard shortcuts help overlay; `Esc` closes overlays.
 - **Dark theme** — terminal-style monospace UI with `color-scheme: dark` applied at the root so native browser widgets (date picker, scrollbars) match the theme.
+
+### Accessibility
+- **Colorblind-safe P&L** — every gain/loss cell shows a subtle ▲ / ▼ glyph in addition to the green/red tint, so direction is readable without color perception.
+- **Screen-reader hooks** — the status bar, summary bar, and live indicator are `aria-live="polite"` regions, so price and status changes are announced automatically. The main table carries an `aria-label`, and every icon-only toolbar button (New/Rename/Delete portfolio, Undo, Redo, Refresh, Import, Export, Columns, Settings, Share, Clear All) has an explicit `aria-label`.
+- **Keyboard focus ring** — a high-contrast `:focus-visible` outline makes keyboard navigation obvious against the dark theme while staying invisible for mouse clicks.
 
 ### Mobile Responsive
 - **Card view** — on screens ≤768px, the data table is replaced with a tap-to-expand card layout. Each card shows symbol, name, price, change, shares, and cost at a glance. Tapping a card expands it to reveal all 30+ data fields, inline editing for quantity/cost/date/notes/alerts, and a delete button.
@@ -157,7 +162,7 @@ Negative shares = short position.
 
 ## Data Storage
 
-Everything lives in your browser's `localStorage` — nothing is sent to any server other than the financial APIs listed above.
+Everything lives in your browser's `localStorage` — nothing is sent to any server other than the financial APIs listed above. Writes to `localStorage` are debounced on a trailing 250 ms timer (and flushed on `beforeunload`), so rapid keystrokes in the cost/share/notes fields don't block the main thread, and a full-quota write only happens once per burst.
 
 | Key | Contents |
 |-----|----------|
@@ -184,6 +189,21 @@ Clearing browser data resets everything.
 ## Browser Compatibility
 
 Chrome, Firefox, Edge, Safari (any modern version supporting ES2020+). Responsive on iOS and Android. No IE support.
+
+---
+
+## Security
+
+The app ships with a strict `Content-Security-Policy` meta tag that disallows remote scripts, `eval`, object/embed content, and arbitrary framing. `connect-src` is limited to `https:` / `wss:` so data still flows to the financial APIs and CORS proxies, but nothing else. A `referrer` policy of `no-referrer` is also set, so navigating away from the app does not leak the URL (which for a shared portfolio could otherwise expose the positions encoded in the hash).
+
+All user-visible strings that originate outside the app are escaped before being written to the DOM:
+- Imported CSV fields (symbol, date, header preview, raw header line, column labels) are escaped in the import preview.
+- Column picker entries do not use inline `onclick`/`onchange` with interpolated keys — the change handler is attached via `addEventListener` and reads the key from a `data-` attribute.
+- External links open with `target="_blank" rel="noopener noreferrer"`.
+
+Portfolio imports from shared URLs are parsed with a symbol whitelist (`[A-Z0-9.\-=]`), a length cap of 10 characters, and numeric coercion for shares and cost, and are always gated behind a confirmation dialog. Positions that don't pass validation are dropped before any state is replaced.
+
+Corrupt `localStorage` entries are detected on load: the bad key is removed and the app boots with an empty fallback instead of crashing.
 
 ---
 

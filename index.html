@@ -3,6 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!--
+  CSP: no remote scripts, no eval, no frames, no unknown image/style origins.
+  'unsafe-inline' is required for the inline <style> + inline event handlers
+  the app still uses; we keep script-src to 'self' + 'unsafe-inline' so a
+  compromised CORS proxy or a crafted CSV field cannot inject a <script
+  src="evil.com">. connect-src whitelists only the financial data endpoints
+  and the CORS proxies the app talks to.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
 <title>Portfolio Tracker</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop offset='0%25' stop-color='%23003d1a'/%3E%3Cstop offset='100%25' stop-color='%230a0a0a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='url(%23g)'/%3E%3Cpolyline points='4,24 9,20 13,22 17,13 21,16 25,8 28,5' fill='none' stroke='%2300c853' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='25,5 28,5 28,8' fill='%2300c853'/%3E%3Cline x1='4' y1='27' x2='28' y2='27' stroke='%23333' stroke-width='1'/%3E%3C/svg%3E" />
 <style>
@@ -195,6 +205,28 @@
   .pos { color: #00c853; }
   .neg { color: #ff1744; }
   .neutral { color: #666; }
+
+  /* Colorblind-friendly direction glyphs. Scoped to cells and summary values
+     so after-hours inline spans and other nested uses of .pos/.neg don't
+     pick up a duplicate arrow. */
+  td.pos::before,
+  .summary-value.pos::before,
+  .mobile-detail-value.pos::before { content: "\25B2\00A0"; font-size: 0.8em; opacity: 0.75; }
+  td.neg::before,
+  .summary-value.neg::before,
+  .mobile-detail-value.neg::before { content: "\25BC\00A0"; font-size: 0.8em; opacity: 0.75; }
+
+  /* Focus ring for keyboard users — visible on dark theme, not shown on mouse
+     clicks thanks to :focus-visible. */
+  button:focus-visible,
+  a:focus-visible,
+  select:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid #4a9eff;
+    outline-offset: 1px;
+  }
 
   .range-bar {
     display: inline-block;
@@ -1012,11 +1044,11 @@
 </head>
 <body>
 
-<div class="portfolio-bar">
-  <select id="portfolio-select" onchange="switchPortfolio(this.value)"></select>
-  <button class="portfolio-btn" onclick="createPortfolioPrompt()" title="New portfolio">+</button>
-  <button class="portfolio-btn" onclick="renamePortfolioPrompt()" title="Rename">&#9998;</button>
-  <button class="portfolio-btn portfolio-btn-danger" onclick="deletePortfolioPrompt()" title="Delete">&#10005;</button>
+<div class="portfolio-bar" role="toolbar" aria-label="Portfolio selection">
+  <select id="portfolio-select" onchange="switchPortfolio(this.value)" aria-label="Select portfolio"></select>
+  <button class="portfolio-btn" onclick="createPortfolioPrompt()" title="New portfolio" aria-label="New portfolio">+</button>
+  <button class="portfolio-btn" onclick="renamePortfolioPrompt()" title="Rename portfolio" aria-label="Rename portfolio">&#9998;</button>
+  <button class="portfolio-btn portfolio-btn-danger" onclick="deletePortfolioPrompt()" title="Delete portfolio" aria-label="Delete portfolio">&#10005;</button>
 </div>
 
 <div class="toolbar">
@@ -1051,14 +1083,16 @@
       <option value="30" selected>30s</option>
       <option value="60">60s</option>
     </select>
-    <span id="ws-indicator" style="display:none; font-size:11px; color:#3c8; white-space:nowrap;" title="FinnHub WebSocket connected — real-time trade updates active">&#9679; Live</span>
-    <button class="btn btn-refresh" onclick="refreshAll()">&#8635; Refresh</button>
-    <button class="btn" onclick="openImportModal()">Import</button>
-    <button class="btn" onclick="exportCSV()">Export</button>
-    <button class="btn" onclick="toggleColumnPicker()"><span class="label-desktop">Columns</span><span class="label-mobile">Fields</span></button>
-    <button class="btn" onclick="toggleSettings()">Settings</button>
-    <button class="btn" onclick="sharePortfolio()">Share</button>
-    <button class="btn btn-danger" onclick="clearAll()">Clear All</button>
+    <span id="ws-indicator" style="display:none; font-size:11px; color:#3c8; white-space:nowrap;" title="FinnHub WebSocket connected — real-time trade updates active" role="status" aria-live="polite">&#9679; Live</span>
+    <button class="btn btn-refresh" onclick="refreshAll()" aria-label="Refresh data now">&#8635; Refresh</button>
+    <button class="btn" id="undo-btn" onclick="undo()" title="Undo (Ctrl+Z)" aria-label="Undo last change" disabled>&#8630; Undo</button>
+    <button class="btn" id="redo-btn" onclick="redo()" title="Redo (Ctrl+Y)" aria-label="Redo change" disabled>&#8631; Redo</button>
+    <button class="btn" onclick="openImportModal()" aria-label="Import portfolio from CSV">Import</button>
+    <button class="btn" onclick="exportCSV()" aria-label="Export portfolio to CSV">Export</button>
+    <button class="btn" onclick="toggleColumnPicker()" aria-label="Configure visible columns"><span class="label-desktop">Columns</span><span class="label-mobile">Fields</span></button>
+    <button class="btn" onclick="toggleSettings()" aria-label="Open settings">Settings</button>
+    <button class="btn" onclick="sharePortfolio()" aria-label="Share portfolio via URL">Share</button>
+    <button class="btn btn-danger" onclick="clearAll()" aria-label="Clear all positions">Clear All</button>
   </div>
 </div>
 
@@ -1202,15 +1236,15 @@
       <p style="margin-bottom:10px; color:#888;">For full data coverage, add one or more free API keys in <strong>Settings</strong>. Without them, many columns (market cap, P/E, EPS, dividends, etc.) will show dashes:</p>
       <div class="step">
         <span class="step-num">1.</span>
-        <span><span class="key-name">FinnHub</span> &mdash; Sign up at <a href="https://finnhub.io/register" target="_blank">finnhub.io</a> for a free key. Provides market cap, P/E, EPS, beta, dividends, earnings dates, and performance data.</span>
+        <span><span class="key-name">FinnHub</span> &mdash; Sign up at <a href="https://finnhub.io/register" target="_blank" rel="noopener noreferrer">finnhub.io</a> for a free key. Provides market cap, P/E, EPS, beta, dividends, earnings dates, and performance data.</span>
       </div>
       <div class="step">
         <span class="step-num">2.</span>
-        <span><span class="key-name">Alpaca</span> &mdash; Sign up at <a href="https://app.alpaca.markets/signup" target="_blank">alpaca.markets</a> for free API keys. Provides real-time IEX quotes with bid/ask spreads and average volume.</span>
+        <span><span class="key-name">Alpaca</span> &mdash; Sign up at <a href="https://app.alpaca.markets/signup" target="_blank" rel="noopener noreferrer">alpaca.markets</a> for free API keys. Provides real-time IEX quotes with bid/ask spreads and average volume.</span>
       </div>
       <div class="step">
         <span class="step-num">3.</span>
-        <span><span class="key-name">FMP</span> (optional) &mdash; Sign up at <a href="https://site.financialmodelingprep.com/register" target="_blank">financialmodelingprep.com</a> for an extra data source fallback.</span>
+        <span><span class="key-name">FMP</span> (optional) &mdash; Sign up at <a href="https://site.financialmodelingprep.com/register" target="_blank" rel="noopener noreferrer">financialmodelingprep.com</a> for an extra data source fallback.</span>
       </div>
       <p style="margin-top:14px; color:#888;">Without API keys, basic price data is still available via Yahoo Finance. Adding a FinnHub key unlocks real-time WebSocket streaming and full fundamentals.</p>
 
@@ -1253,18 +1287,18 @@
       </div>
       <div style="display:flex; align-items:center; justify-content:space-between; margin-top:16px;">
         <button class="dismiss-btn" onclick="dismissWelcome()">Got it</button>
-        <span style="color:#555; font-size:11px;">Made by <a href="https://github.com/gdy" target="_blank" style="color:#6a8ccc;">Grant</a></span>
+        <span style="color:#555; font-size:11px;">Made by <a href="https://github.com/gdy" target="_blank" rel="noopener noreferrer" style="color:#6a8ccc;">Grant</a></span>
       </div>
     </div>
   </div>
 </div>
 
-<div class="status-bar">
+<div class="status-bar" role="status" aria-live="polite" aria-atomic="true">
   <span id="status-text">Ready</span>
   <span id="last-update"></span>
 </div>
 
-<div class="summary-bar">
+<div class="summary-bar" role="region" aria-label="Portfolio summary" aria-live="polite">
   <div class="summary-item">
     <span class="summary-label">Market Value:</span>
     <span class="summary-value" id="total-value">$0.00</span>
@@ -1285,7 +1319,7 @@
     <span class="summary-label">Positions:</span>
     <span class="summary-value" id="total-positions">0</span>
   </div>
-  <button class="alloc-toggle" id="alloc-toggle" onclick="toggleAllocationChart()" style="display:none;">Show Chart</button>
+  <button class="alloc-toggle" id="alloc-toggle" onclick="toggleAllocationChart()" style="display:none;" aria-label="Toggle allocation pie chart">Show Chart</button>
 </div>
 
 <div id="allocation-wrap" class="allocation-wrap" style="display:none;">
@@ -1294,7 +1328,7 @@
 </div>
 
 <div class="table-wrap">
-  <table>
+  <table aria-label="Portfolio positions">
     <thead>
       <tr id="header-row"></tr>
     </thead>
@@ -1492,8 +1526,27 @@ function makeEmptyQuote(sym) {
 }
 
 // ==================== STATE ====================
+// Parses localStorage JSON safely. `fallback` is a JSON string; if it's ever
+// malformed (shouldn't be — all callers pass a literal), or if the stored
+// value is corrupted, we return a hardcoded null/empty value rather than
+// crashing app boot. Wiping the corrupt key prevents repeated warnings.
 function lsGet(key, fallback) {
-  try { return JSON.parse(localStorage.getItem(key) || fallback); } catch (_) { return JSON.parse(fallback); }
+  const raw = localStorage.getItem(key);
+  if (raw != null) {
+    try { return JSON.parse(raw); }
+    catch (e) {
+      console.warn('localStorage corrupted for key "' + key + '":', e);
+      try { localStorage.removeItem(key); } catch (_) {}
+    }
+  }
+  try { return JSON.parse(fallback); }
+  catch (_) {
+    // Last-resort: map the most common fallback literals to JS values.
+    if (fallback === '[]') return [];
+    if (fallback === '{}') return {};
+    if (fallback === 'null') return null;
+    return null;
+  }
 }
 // Safely write to localStorage. Returns true on success; on QuotaExceededError
 // (or any other write failure) surfaces a one-time warning and returns false so
@@ -1557,6 +1610,7 @@ function pushUndo() {
   });
   if (undoStack.length > MAX_UNDO) undoStack.shift();
   redoStack.length = 0; // new action clears redo history
+  updateUndoRedoButtons();
 }
 function undo() {
   if (undoStack.length === 0) return;
@@ -1572,6 +1626,7 @@ function undo() {
   renderTable();
   updateSummary();
   syncWsSubscriptions();
+  updateUndoRedoButtons();
 }
 function redo() {
   if (redoStack.length === 0) return;
@@ -1587,6 +1642,7 @@ function redo() {
   renderTable();
   updateSummary();
   syncWsSubscriptions();
+  updateUndoRedoButtons();
 }
 document.addEventListener('keydown', e => {
   const tag = document.activeElement && document.activeElement.tagName;
@@ -1608,10 +1664,17 @@ document.addEventListener('keydown', e => {
 });
 
 // ==================== PERSISTENCE ====================
-function savePortfolio() {
+// Debounced persistence. Typing in the cost/share/notes fields fires change
+// events on every keystroke; writing the whole portfolio to localStorage each
+// time blocks the main thread. We coalesce writes on a trailing 250 ms timer
+// and also flush on beforeunload so nothing is lost if the user closes the tab.
+const SAVE_DEBOUNCE_MS = 250;
+let _savePortfolioTimer = null;
+let _saveNotesTimer = null;
+function _savePortfolioNow() {
+  _savePortfolioTimer = null;
   bumpPortfolioVersion();
   safeSet('stonks_portfolio', JSON.stringify(portfolio));
-  // Also save into the active portfolio slot
   const all = lsGet('stonks_portfolios', '{}');
   const name = localStorage.getItem('stonks_active_portfolio') || 'Default';
   if (!all[name]) all[name] = {};
@@ -1619,13 +1682,34 @@ function savePortfolio() {
   all[name].notes = notes;
   safeSet('stonks_portfolios', JSON.stringify(all));
 }
-function saveNotes() {
+function _saveNotesNow() {
+  _saveNotesTimer = null;
   safeSet('stonks_notes', JSON.stringify(notes));
   const all = lsGet('stonks_portfolios', '{}');
   const name = localStorage.getItem('stonks_active_portfolio') || 'Default';
   if (!all[name]) all[name] = {};
   all[name].notes = notes;
   safeSet('stonks_portfolios', JSON.stringify(all));
+}
+function savePortfolio() {
+  if (_savePortfolioTimer) clearTimeout(_savePortfolioTimer);
+  _savePortfolioTimer = setTimeout(_savePortfolioNow, SAVE_DEBOUNCE_MS);
+  updateUndoRedoButtons();
+}
+function saveNotes() {
+  if (_saveNotesTimer) clearTimeout(_saveNotesTimer);
+  _saveNotesTimer = setTimeout(_saveNotesNow, SAVE_DEBOUNCE_MS);
+}
+function flushPendingSaves() {
+  if (_savePortfolioTimer) { clearTimeout(_savePortfolioTimer); _savePortfolioNow(); }
+  if (_saveNotesTimer) { clearTimeout(_saveNotesTimer); _saveNotesNow(); }
+}
+window.addEventListener('beforeunload', flushPendingSaves);
+function updateUndoRedoButtons() {
+  const u = document.getElementById('undo-btn');
+  const r = document.getElementById('redo-btn');
+  if (u) u.disabled = undoStack.length === 0;
+  if (r) r.disabled = redoStack.length === 0;
 }
 function saveHiddenColumns() { safeSet('stonks_hidden_columns', JSON.stringify(hiddenColumns)); }
 function saveColumnOrder() { safeSet('stonks_column_order', JSON.stringify(columnOrder)); }
@@ -1654,7 +1738,7 @@ function saveApiKey() {
   // Reconnect WebSocket with new key
   if (finnhubWs) { try { finnhubWs.close(); } catch(_){} finnhubWs = null; }
   wsSubscribedSymbols.clear();
-  refreshAll().then(() => connectFinnhubWebSocket());
+  refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => connectFinnhubWebSocket());
 }
 function getApiKey() { return localStorage.getItem('stonks_finnhub_key') || ''; }
 
@@ -1667,7 +1751,7 @@ function saveAlpacaKeys() {
   else localStorage.removeItem('stonks_alpaca_secret');
   document.getElementById('welcome-wrap').classList.remove('show');
   flashConfirm('confirm-alpaca');
-  refreshAll();
+  refreshAll().catch(e => console.warn('refreshAll failed:', e));
 }
 function getAlpacaKeys() {
   return { keyId: localStorage.getItem('stonks_alpaca_key_id') || '', secret: localStorage.getItem('stonks_alpaca_secret') || '' };
@@ -1678,7 +1762,7 @@ function saveFmpKey() {
   else localStorage.removeItem('stonks_fmp_key');
   document.getElementById('welcome-wrap').classList.remove('show');
   flashConfirm('confirm-fmp');
-  refreshAll();
+  refreshAll().catch(e => console.warn('refreshAll failed:', e));
 }
 function getFmpKey() { return localStorage.getItem('stonks_fmp_key') || ''; }
 
@@ -1783,7 +1867,7 @@ function addPosition() {
   if (refreshInProgress) {
     pendingRefreshAfter = true;
   }
-  refreshAll().then(() => syncWsSubscriptions());
+  refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
 }
 
 function removePosition(symbol) {
@@ -1798,6 +1882,7 @@ function removePosition(symbol) {
   fetchedFundamentals.delete(symbol);
   fetchedPerformance.delete(symbol);
   fetchedAfterHours.delete(symbol);
+  attemptedSymbols.delete(symbol);
   savePortfolio();
   renderTable();
   updateSummary();
@@ -1814,6 +1899,7 @@ function clearAll() {
   fetchedFundamentals.clear();
   fetchedPerformance.clear();
   fetchedAfterHours.clear();
+  attemptedSymbols.clear();
   savePortfolio();
   renderTable();
   updateSummary();
@@ -2157,21 +2243,32 @@ function previewImport() {
   if (hasPrice) html += '<th style="text-align:right">Last Price</th>';
   if (hasDate) html += '<th style="text-align:right">Date</th>';
   html += '</tr></thead><tbody>';
+  // Every field that originates from the parsed CSV (symbol, date) is escaped
+  // before being concatenated into the preview HTML. parsecsv already whitelists
+  // symbols to [A-Z0-9.\-=], but the preview is the one place where a raw
+  // purchaseDate string from the file could reach innerHTML, so we escape it
+  // here defensively.
   for (const p of pendingImport) {
     const shortTag = p.shares < 0 ? ' <span style="color:#e55;font-size:10px;">SHORT</span>' : '';
-    html += `<tr><td style="text-align:left">${p.symbol}${shortTag}</td><td style="text-align:right">${p.shares}</td><td style="text-align:right">${p.costBasis ? '$' + p.costBasis.toFixed(2) : '—'}</td>`;
-    if (hasPrice) html += `<td style="text-align:right">${p.lastPrice ? '$' + p.lastPrice.toFixed(2) : '—'}</td>`;
-    if (hasDate) html += `<td style="text-align:right">${p.purchaseDate || '—'}</td>`;
+    const safeSym = esc(p.symbol || '');
+    const safeDate = esc(p.purchaseDate || '—');
+    const safeShares = Number(p.shares);
+    const safeCost = p.costBasis ? '$' + Number(p.costBasis).toFixed(2) : '—';
+    const safePrice = p.lastPrice ? '$' + Number(p.lastPrice).toFixed(2) : '—';
+    html += `<tr><td style="text-align:left">${safeSym}${shortTag}</td><td style="text-align:right">${safeShares}</td><td style="text-align:right">${safeCost}</td>`;
+    if (hasPrice) html += `<td style="text-align:right">${safePrice}</td>`;
+    if (hasDate) html += `<td style="text-align:right">${safeDate}</td>`;
     html += '</tr>';
   }
   html += '</tbody></table>';
   html += `<div style="margin-top:6px;color:#3c8;">${pendingImport.length} position(s) ready to import</div>`;
-  // Debug info: show detected column mappings
+  // Debug info: show detected column mappings — escape everything that came
+  // from the uploaded CSV (header cells, raw line, and column labels).
   if (pendingImport._debug) {
     const d = pendingImport._debug;
-    const colName = (idx) => idx >= 0 ? `${idx} ("${d.cols[idx]}")` : 'not found';
+    const colName = (idx) => idx >= 0 ? `${idx} ("${esc(String(d.cols[idx] || ''))}")` : 'not found';
     html += `<details open style="margin-top:8px;color:#888;font-size:11px;"><summary style="cursor:pointer;color:#666;">Column mapping</summary>`
-      + `<div style="margin-top:4px;line-height:1.6;">Header found on line ${d.line + 1}: <code>${d.raw.substring(0, 120)}</code><br>`
+      + `<div style="margin-top:4px;line-height:1.6;">Header found on line ${Number(d.line) + 1}: <code>${esc(String(d.raw || '').substring(0, 120))}</code><br>`
       + `Symbol → col ${colName(d.symIdx)}<br>`
       + `Shares → col ${colName(d.sharesIdx)}<br>`
       + `Per-share cost → col ${colName(d.costIdx)}<br>`
@@ -2192,10 +2289,31 @@ function executeImport() {
     const existing = portfolio.find(p => p.symbol === pos.symbol);
     if (existing) {
       const totalShares = existing.shares + pos.shares;
-      if (totalShares !== 0) {
-        existing.costBasis = ((existing.costBasis * existing.shares) + (pos.costBasis * pos.shares)) / totalShares;
-      } else {
+      // Weighted-average cost basis is only meaningful when both lots are on
+      // the same side. If one is long and the other short (signs differ), the
+      // merge represents closing part of a position — we keep the remaining
+      // side's cost basis instead of mixing them, which would produce a
+      // nonsense basis and bogus P&L.
+      const sameSide = (existing.shares >= 0) === (pos.shares >= 0);
+      if (totalShares === 0) {
         existing.costBasis = 0;
+      } else if (sameSide) {
+        // Use absolute shares in the weights so long + long and short + short
+        // both produce a positive weighted average.
+        const aW = Math.abs(existing.shares);
+        const bW = Math.abs(pos.shares);
+        const denom = aW + bW;
+        existing.costBasis = denom > 0
+          ? (existing.costBasis * aW + pos.costBasis * bW) / denom
+          : existing.costBasis;
+      } else {
+        // Opposite sides: keep whichever side has more shares remaining.
+        if (Math.abs(totalShares) > 0 && ((totalShares > 0) === (existing.shares > 0))) {
+          // Existing side wins — keep its basis.
+        } else {
+          // New lot's side wins — adopt its basis.
+          existing.costBasis = pos.costBasis;
+        }
       }
       existing.shares = totalShares;
       if (pos.purchaseDate && !existing.purchaseDate) existing.purchaseDate = pos.purchaseDate;
@@ -2220,7 +2338,7 @@ function executeImport() {
   renderTable();
   updateSummary();
   setStatus(`Imported ${pendingImport.length} position(s). Fetching live data \u2014 this may take a moment for large portfolios...`, 'loading');
-  refreshAll().then(() => syncWsSubscriptions());
+  refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
 }
 
 // ==================== DATA FETCHING ====================
@@ -3441,7 +3559,7 @@ async function refreshAll() {
     // If a symbol was added while refresh was running, run again to pick it up
     if (pendingRefreshAfter) {
       pendingRefreshAfter = false;
-      refreshAll().then(() => syncWsSubscriptions());
+      refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
     }
   }
 }
@@ -3611,7 +3729,7 @@ async function _refreshAll(signal) {
     // recognise this specific ticker. Schedule a deferred retry instead.
     if (!hasCommodityData) {
       setTimeout(() => {
-        if (!refreshInProgress) refreshAll();
+        if (!refreshInProgress) refreshAll().catch(e => console.warn('refreshAll failed:', e));
       }, 8000);
     }
     renderTable();
@@ -4633,12 +4751,22 @@ function renderColumnPicker() {
     const disabled = isEssential ? 'disabled' : '';
     const essentialClass = isEssential ? ' essential' : '';
     const lockBadge = isEssential ? ' <span class="col-lock" title="Required field">\u{1F512}</span>' : '';
-    return `<div class="col-check${essentialClass}" data-col-key="${col.key}"${isEssential ? ' title="Required field — cannot be hidden"' : ''}>
+    // col.key goes through escAttr so that if COLUMNS is ever populated from
+    // persisted state (it isn't today, but this is cheap defence-in-depth), a
+    // crafted key can't break out of the attribute value.
+    const safeKey = escAttr(col.key);
+    const safeLabel = esc(col.label || 'Actions');
+    return `<div class="col-check${essentialClass}" data-col-key="${safeKey}"${isEssential ? ' title="Required field — cannot be hidden"' : ''}>
       <span class="col-drag-handle" draggable="true" title="Drag to reorder">\u2630</span>
-      <input type="checkbox" ${checked} ${disabled} onchange="toggleColumn('${col.key}', this.checked)" />
-      <span>${col.label || 'Actions'}${lockBadge}</span>
+      <input type="checkbox" ${checked} ${disabled} data-col-toggle="${safeKey}" />
+      <span>${safeLabel}${lockBadge}</span>
     </div>`;
   }).join('');
+  // Replace inline onchange="toggleColumn(...)" with a delegated handler so
+  // col.key never reaches an HTML attribute as executable JS.
+  list.querySelectorAll('input[data-col-toggle]').forEach(cb => {
+    cb.addEventListener('change', () => toggleColumn(cb.dataset.colToggle, cb.checked));
+  });
 
   // Unified pointer-event reorder (works for mouse + touch + pen on all browsers).
   // We use pointer events because HTML5 drag-and-drop doesn't fire on touch
@@ -5161,8 +5289,10 @@ function switchPortfolio(name) {
   if (_deferredCommodityAbort) { _deferredCommodityAbort.abort(); _deferredCommodityAbort = null; }
   refreshInProgress = false;
   pendingRefreshAfter = false;
-  // Save current
-  savePortfolio(); saveNotes();
+  // Save current — flush immediately so a pending debounced write doesn't fire
+  // AFTER the new portfolio is loaded and clobber it with the new state saved
+  // under the old portfolio's slot (or vice versa).
+  flushPendingSaves();
   // Load new
   const all = lsGet('stonks_portfolios', '{}');
   if (!all[name]) return;
@@ -5183,7 +5313,7 @@ function switchPortfolio(name) {
   // sorted array (cache key would otherwise collide when lengths happen to match).
   bumpPortfolioVersion();
   renderTable(); updateSummary();
-  if (portfolio.length > 0) refreshAll().then(() => syncWsSubscriptions());
+  if (portfolio.length > 0) refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
   else syncWsSubscriptions();
 }
 function createPortfolioPrompt() {
@@ -5199,6 +5329,10 @@ function createPortfolioPrompt() {
 function renamePortfolioPrompt() {
   const newName = prompt('Rename "' + portfolioName + '" to:', portfolioName);
   if (!newName || !newName.trim() || newName.trim() === portfolioName) return;
+  // Flush any pending debounced save so the slot we're about to rename has
+  // the latest state — otherwise the pending write could fire after the old
+  // slot has been deleted and re-create it.
+  flushPendingSaves();
   const all = lsGet('stonks_portfolios', '{}');
   if (all[newName.trim()]) { alert('Portfolio "' + newName.trim() + '" already exists.'); return; }
   all[newName.trim()] = all[portfolioName];
@@ -5212,6 +5346,9 @@ function deletePortfolioPrompt() {
   const all = lsGet('stonks_portfolios', '{}');
   if (Object.keys(all).length <= 1) { alert('Cannot delete the last portfolio.'); return; }
   if (!confirm('Delete portfolio "' + portfolioName + '"?')) return;
+  // Flush pending writes for the soon-to-be-deleted portfolio so it isn't
+  // re-created by a timer that fires after the delete.
+  flushPendingSaves();
   delete all[portfolioName];
   safeSet('stonks_portfolios', JSON.stringify(all));
   portfolioName = Object.keys(all)[0];
@@ -5220,13 +5357,23 @@ function deletePortfolioPrompt() {
   notes = all[portfolioName].notes || {};
   safeSet('stonks_portfolio', JSON.stringify(portfolio));
   safeSet('stonks_notes', JSON.stringify(notes));
+  // Match clearAll: purge every per-symbol cache so the switched-to portfolio
+  // doesn't inherit stale error flags, prev-price flashes, or cached fundamentals.
   quoteData = {}; fundamentalsCache = {};
+  prevPrices = {}; wsLastTradeTime = {};
+  errorSymbols.clear();
+  fetchedSummary.clear();
+  fetchedFundamentals.clear();
+  fetchedPerformance.clear();
+  fetchedAfterHours.clear();
+  attemptedSymbols.clear();
   undoStack.length = 0; redoStack.length = 0;
+  updateUndoRedoButtons();
   // Fresh portfolio loaded — invalidate the sort cache.
   bumpPortfolioVersion();
   renderPortfolioSelector();
   renderTable(); updateSummary();
-  if (portfolio.length > 0) refreshAll().then(() => syncWsSubscriptions());
+  if (portfolio.length > 0) refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
 }
 
 // ==================== DRAG TO REORDER ====================
@@ -5384,7 +5531,7 @@ function loadFromURL() {
     portfolio = positions;
     savePortfolio();
     renderTable(); updateSummary();
-    refreshAll().then(() => syncWsSubscriptions());
+    refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
   }
   // Clear hash
   history.replaceState(null, '', window.location.pathname);
@@ -5706,7 +5853,7 @@ function setupAutoRefresh() {
         // (WS handles prices; REST is only needed for fundamentals, volume, after-hours)
         if (wsConnected && Date.now() - lastRestRefresh < WS_REST_THROTTLE) return;
         lastRestRefresh = Date.now();
-        refreshAll();
+        refreshAll().catch(e => console.warn('refreshAll failed:', e));
       } else {
         // Off-hours (weeknight or weekend)
         const hasAlwaysOn = portfolio.some(p => isCryptoSymbol(p.symbol) || isCommoditySymbol(p.symbol));
@@ -5715,7 +5862,7 @@ function setupAutoRefresh() {
           const now = Date.now();
           if (now - offHoursLastFullRefresh >= OFF_HOURS_FULL_INTERVAL) {
             offHoursLastFullRefresh = now;
-            refreshAll(); // full refresh covers crypto/commodity too — skip lightweight
+            refreshAll().catch(e => console.warn('refreshAll failed:', e)); // full refresh covers crypto/commodity too — skip lightweight
           } else if (hasAlwaysOn) {
             refreshAlwaysOnOnly(); // lightweight crypto/commodity only between full refreshes
           }
@@ -5841,9 +5988,9 @@ function dismissWelcome() {
       indicator.textContent = 'Refreshing...';
       indicator.className = 'pull-indicator active';
       indicator.style.height = '30px';
-      refreshAll().then(() => {
-        setTimeout(() => { indicator.style.height = '0'; }, 600);
-      });
+      refreshAll()
+        .catch(e => console.warn('refreshAll failed:', e))
+        .then(() => { setTimeout(() => { indicator.style.height = '0'; }, 600); });
     } else {
       indicator.style.height = '0';
     }
@@ -5869,7 +6016,7 @@ renderTable();
 updateSummary();
 initDragReorder();
 showWelcomeBanner();
-if (portfolio.length > 0) refreshAll().then(() => connectFinnhubWebSocket());
+if (portfolio.length > 0) refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => connectFinnhubWebSocket());
 else connectFinnhubWebSocket();
 setupAutoRefresh();
 </script>
