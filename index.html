@@ -2723,7 +2723,15 @@ function normalizeYahoo(q) {
 function normalizeYahooChart(sym, chart) {
   const meta = chart.meta || {};
   const price = meta.regularMarketPrice;
-  const prevClose = meta.chartPreviousClose || meta.previousClose;
+  // meta.previousClose is the close of the most recent prior trading day (what
+  // "day change" should compare against). meta.chartPreviousClose is the close
+  // of the trading day *before* the chart's earliest candle — i.e. range=2d
+  // makes this TWO sessions back, not one. For a stock that moved hard during
+  // the chart window (e.g. BYND ~$0.82 -> $1.15 -> $1.04 over three days),
+  // preferring chartPreviousClose yields a bogus +27% day change instead of
+  // the real -10%. Fall back to chartPreviousClose only when previousClose is
+  // missing (rare, but we still want *some* prev close for day-change display).
+  const prevClose = meta.previousClose != null ? meta.previousClose : meta.chartPreviousClose;
 
   // Yahoo occasionally returns a chart envelope for unknown symbols (e.g. a US
   // user typing "GHH" for the UK ticker Gooch & Housego, which is really GHH.L)
