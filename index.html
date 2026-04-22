@@ -1605,8 +1605,8 @@ const undoStack = [];
 const redoStack = [];
 function pushUndo() {
   undoStack.push({
-    portfolio: JSON.parse(JSON.stringify(portfolio)),
-    notes: JSON.parse(JSON.stringify(notes)),
+    portfolio: structuredClone(portfolio),
+    notes: structuredClone(notes),
   });
   if (undoStack.length > MAX_UNDO) undoStack.shift();
   redoStack.length = 0; // new action clears redo history
@@ -1615,14 +1615,16 @@ function pushUndo() {
 function undo() {
   if (undoStack.length === 0) return;
   redoStack.push({
-    portfolio: JSON.parse(JSON.stringify(portfolio)),
-    notes: JSON.parse(JSON.stringify(notes)),
+    portfolio: structuredClone(portfolio),
+    notes: structuredClone(notes),
   });
   const state = undoStack.pop();
   portfolio = state.portfolio;
   notes = state.notes;
+  // savePortfolio() writes notes into the active-portfolio slot, which is the
+  // authoritative source read by initPortfolios() on reload. The legacy
+  // stonks_notes flat key is kept in sync by switchPortfolio() / delete flows.
   savePortfolio();
-  saveNotes();
   renderTable();
   updateSummary();
   syncWsSubscriptions();
@@ -1631,14 +1633,13 @@ function undo() {
 function redo() {
   if (redoStack.length === 0) return;
   undoStack.push({
-    portfolio: JSON.parse(JSON.stringify(portfolio)),
-    notes: JSON.parse(JSON.stringify(notes)),
+    portfolio: structuredClone(portfolio),
+    notes: structuredClone(notes),
   });
   const state = redoStack.pop();
   portfolio = state.portfolio;
   notes = state.notes;
   savePortfolio();
-  saveNotes();
   renderTable();
   updateSummary();
   syncWsSubscriptions();
@@ -2179,8 +2180,6 @@ function parseImportData(text) {
 
     let symbol = (cols[symIdx] || '').toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
     if (!symbol || symbol.length > 10) continue;
-    // Skip rows where the symbol looks like a word/sentence (footer text that slipped through)
-    if (/^[A-Z]{11,}$/.test(symbol)) continue;
 
     let shares = parseNumber(cols[sharesIdx]);
     if (isNaN(shares) || shares === 0) continue;
@@ -4116,7 +4115,9 @@ function getCellHtml(col, pos, q, computed) {
     case 'symbol': {
       const _a = alerts[pos.symbol];
       const _hasAlert = _a && (_a.above != null || _a.below != null);
-      const _triggered = _hasAlert && checkAlertTriggered(pos.symbol, price);
+      // alertTriggered is precomputed per-row in renderTable and stashed on
+      // computed so we don't pay a second checkAlertTriggered call here.
+      const _triggered = _hasAlert && computed.alertTriggered;
       let _cls = 'alert-icon';
       let _ttl = 'Set price alert';
       if (_triggered) {
@@ -4325,6 +4326,8 @@ function renderTable() {
   if (mobile) { renderMobileCards(); return; }
 
   const sorted = getSortedPortfolio();
+  // Hoisted: visible columns are identical for every row, so compute once.
+  const visCols = getVisibleColumns();
   let html = '';
 
   for (const pos of sorted) {
@@ -4372,9 +4375,11 @@ function renderTable() {
       priceCell = fmt(price);
     }
 
-    const rowClass = [flashClass, isError ? 'error-row' : '', checkAlertTriggered(pos.symbol, price) ? 'alert-triggered' : ''].filter(Boolean).join(' ');
-    const computed = { price, change, changePct, mktValue, dayPL, totalPL, totalPLPct, ahDisplay, priceCell, sym, noteVal, isError };
-    const visCols = getVisibleColumns();
+    // Compute alertTriggered once per row; reused by rowClass and the bell icon
+    // inside getCellHtml via computed.alertTriggered.
+    const alertTriggered = checkAlertTriggered(pos.symbol, price);
+    const rowClass = [flashClass, isError ? 'error-row' : '', alertTriggered ? 'alert-triggered' : ''].filter(Boolean).join(' ');
+    const computed = { price, change, changePct, mktValue, dayPL, totalPL, totalPLPct, ahDisplay, priceCell, sym, noteVal, isError, alertTriggered };
 
     const draggable = !sortCol;
     html += `<tr class="${rowClass}" data-sym="${sym}" draggable="${draggable}">`;
@@ -4390,15 +4395,18 @@ function renderTable() {
 function updatePriceCells() {
   const body = document.getElementById('portfolio-body');
   if (!body) return;
+  // Hoisted once per call: visible columns are identical across rows, and
+  // the per-symbol lookup map replaces an O(n) portfolio.find() per row.
+  const visCols = getVisibleColumns();
+  const posBySym = new Map(portfolio.map(p => [p.symbol, p]));
   body.querySelectorAll('tr[data-sym]').forEach(row => {
     const sym = row.dataset.sym;
     const q = quoteData[sym] || {};
-    const pos = portfolio.find(p => p.symbol === sym);
+    const pos = posBySym.get(sym);
     if (!pos) return;
     const price = q.price;
     const change = q.change;
     const changePct = q.changePct;
-    const visCols = getVisibleColumns();
     const cells = row.querySelectorAll('td');
     visCols.forEach((col, ci) => {
       const td = cells[ci];
@@ -4483,10 +4491,12 @@ function updateMobileCardPrices() {
     el.textContent = (withPlus && value >= 0 ? '+' : '') + formatter(value);
     applySignClass(el, value);
   };
+  // Hoisted once per call: O(1) symbol lookup replaces O(n) portfolio.find().
+  const posBySym = new Map(portfolio.map(p => [p.symbol, p]));
   container.querySelectorAll('.mobile-card[data-sym]').forEach(card => {
     const sym = card.dataset.sym;
     const q = quoteData[sym] || {};
-    const pos = portfolio.find(p => p.symbol === sym);
+    const pos = posBySym.get(sym);
     if (!pos) return;
     const price = q.price;
     const change = q.change;
@@ -4643,7 +4653,9 @@ function renderMobileCards() {
     }
 
     const isExpanded = expandedSymbols.has(pos.symbol);
-    const cardClass = ['mobile-card', flashClass, isError ? 'error-row' : '', isExpanded ? 'expanded' : '', checkAlertTriggered(pos.symbol, price) ? 'alert-triggered' : ''].filter(Boolean).join(' ');
+    // Compute alertTriggered once per card; reused below in the bell icon IIFE.
+    const alertTriggered = checkAlertTriggered(pos.symbol, price);
+    const cardClass = ['mobile-card', flashClass, isError ? 'error-row' : '', isExpanded ? 'expanded' : '', alertTriggered ? 'alert-triggered' : ''].filter(Boolean).join(' ');
     const noteVal = escAttr(notes[pos.symbol] || '');
 
     // Helper: emit a mobile detail item only if its corresponding column key
@@ -4663,8 +4675,8 @@ function renderMobileCards() {
               const _ma = alerts[pos.symbol];
               const _mHas = _ma && (_ma.above != null || _ma.below != null);
               if (!_mHas) return '';
-              const _mTrig = checkAlertTriggered(pos.symbol, price);
-              return _mTrig
+              // Reuse the alertTriggered value computed above for cardClass.
+              return alertTriggered
                 ? '<span class="alert-icon triggered">&#128276;</span>'
                 : '<span class="alert-icon active">&#128276;</span>';
             })()}
@@ -5178,11 +5190,13 @@ const ALLOC_COLORS = [
   '#8aff7c', // 24 light green
 ];
 let _lastAllocSig = ''; // signature of the last drawn allocation: skips re-render when nothing changed meaningfully
+let _lastAllocCheap = ''; // cheap pre-check: integer hash of portfolio+prices, used to skip the items-build pass when nothing has moved
 let allocationVisible = localStorage.getItem('stonks_alloc_visible') === '1';
 function toggleAllocationChart() {
   allocationVisible = !allocationVisible;
   safeSet('stonks_alloc_visible', allocationVisible ? '1' : '0');
   _lastAllocSig = ''; // force re-render
+  _lastAllocCheap = '';
   renderAllocationChart();
 }
 function renderAllocationChart() {
@@ -5198,9 +5212,31 @@ function renderAllocationChart() {
     if (toggleBtn) toggleBtn.textContent = 'Show Chart';
     wrap.style.display = 'none';
     _lastAllocSig = '';
+    _lastAllocCheap = '';
     // Still show/hide toggle based on whether data exists
     if (toggleBtn) toggleBtn.style.display = (portfolio.length > 0 && portfolio.some(p => { const q = quoteData[p.symbol]; return q && q.price != null; })) ? '' : 'none';
     return;
+  }
+
+  // Cheap early-exit gate: single O(n) integer-hash pass over portfolio+prices.
+  // No object allocation, no sort, no string join — so stable WS heartbeats that
+  // don't move price × shares by at least $0.001 skip ahead of the items-build
+  // and sig-build work below. The downstream sig check is still a second defense
+  // (0.1% percentage precision) if the cheap hash differs.
+  {
+    let _ch = 0;
+    let _cn = 0;
+    for (const pos of portfolio) {
+      const q = quoteData[pos.symbol];
+      if (q && q.price != null) {
+        const scaled = ((q.price * pos.shares * 1000) | 0) ^ (pos.symbol.charCodeAt(0) << 16);
+        _ch = ((_ch * 33) ^ scaled) | 0;
+        _cn++;
+      }
+    }
+    const cheapKey = _portfolioVersion + ':' + _cn + ':' + _ch;
+    if (cheapKey === _lastAllocCheap) return;
+    _lastAllocCheap = cheapKey;
   }
 
   // Decide whether the chart is even possible (need positions with prices)
@@ -5225,6 +5261,7 @@ function renderAllocationChart() {
   if (!possible) {
     wrap.style.display = 'none';
     _lastAllocSig = '';
+    _lastAllocCheap = '';
     return;
   }
   wrap.style.display = 'flex';
