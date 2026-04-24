@@ -1498,7 +1498,7 @@ const CG_MIN_INTERVAL = 30000;           // 30s minimum between CoinGecko calls
 const YF_CRUMB_TTL = 30 * 60 * 1000;     // crumbs expire ~30 minutes
 const YF_V7_RETRY_MS = 3 * 60 * 1000;    // retry v7 after 3 minutes
 const WS_FRESH_MS = 10000;               // how recent a WS trade must be to skip REST quote
-const WS_REST_THROTTLE = 60000;           // throttle REST when WS is active (ms)
+const WS_STALE_THRESHOLD = 60000;         // flag WS as "no data" if no trades in this long during active hours
 const OFF_HOURS_FULL_INTERVAL = 60000;    // min interval between full off-hours refreshes
 const WS_RECONNECT_DELAY = 5000;
 const FLASH_TITLE_INTERVAL = 900;
@@ -1582,6 +1582,8 @@ let wsConnected = false;
 let wsReconnectTimer = null;
 let wsLastTradeTime = {}; // track last trade time per symbol for freshness
 let wsRenderPending = false; // debounce WebSocket-triggered renders
+let wsOpenedAt = 0; // time WS last opened (for stale-stream grace period)
+let wsLastAnyTrade = 0; // time any WS trade last arrived (0 = none since open)
 let fetchedSummary = new Set(); // track symbols we already fetched quoteSummary for
 let fetchedAfterHours = new Set(); // track symbols we already tried after-hours fetch for
 let fetchedFundamentals = new Set(); // track symbols with cached FinnHub fundamentals
@@ -5638,17 +5640,34 @@ function setStatus(text, type = '') {
 
 function updateWsIndicator() {
   const el = document.getElementById('ws-indicator');
+  const statusEl = document.getElementById('status-text');
   if (wsConnected) {
     el.style.display = '';
-    // Append WS status to current status bar if not already showing it
-    const statusEl = document.getElementById('status-text');
+    // Flag the stream as "no data" when market is active, stocks are actually
+    // subscribed, but no trades have arrived within WS_STALE_THRESHOLD of the
+    // last trade (or of WS open). The subscription-count guard avoids a false
+    // warning on crypto-only / empty portfolios where no trades are expected.
+    // Common cause of genuine staleness: FinnHub free plan doesn't stream realtime US equities.
+    const phase = getMarketPhase();
+    const sinceLast = wsLastAnyTrade ? Date.now() - wsLastAnyTrade : Date.now() - wsOpenedAt;
+    const stale = phase === 'active'
+      && wsOpenedAt > 0
+      && wsSubscribedSymbols.size > 0
+      && sinceLast > WS_STALE_THRESHOLD;
+    if (stale) {
+      el.style.color = '#c93';
+      el.textContent = '\u25CF Live (no data)';
+      el.title = 'WebSocket connected but no trades received \u2014 FinnHub free plan may not include realtime US stock data. REST polling continues.';
+    } else {
+      el.style.color = '#3c8';
+      el.textContent = '\u25CF Live';
+      el.title = 'FinnHub WebSocket connected \u2014 real-time trade updates active';
+    }
     if (statusEl.textContent.includes('Data via') && !statusEl.textContent.includes('WS streaming')) {
       statusEl.textContent += ' | WS streaming';
     }
   } else {
     el.style.display = 'none';
-    // Remove WS label from status bar
-    const statusEl = document.getElementById('status-text');
     statusEl.textContent = statusEl.textContent.replace(' | WS streaming', '');
   }
 }
@@ -5661,6 +5680,8 @@ function connectFinnhubWebSocket() {
     if (finnhubWs) { finnhubWs.close(); finnhubWs = null; }
     wsConnected = false;
     wsSubscribedSymbols.clear();
+    wsOpenedAt = 0;
+    wsLastAnyTrade = 0;
     return;
   }
   // Already connected or connecting
@@ -5684,6 +5705,8 @@ function connectFinnhubWebSocket() {
 
   finnhubWs.onopen = () => {
     wsConnected = true;
+    wsOpenedAt = Date.now();
+    wsLastAnyTrade = 0;
     console.log('FinnHub WebSocket connected');
     syncWsSubscriptions();
     updateWsIndicator();
@@ -5736,6 +5759,7 @@ function connectFinnhubWebSocket() {
           wsLastTradeTime[sym] = Date.now();
           updated = true;
         }
+        if (updated) wsLastAnyTrade = Date.now();
         // Debounce renders — batch all trades within one animation frame
         // Skip rendering if a full REST refresh is in progress (it will render when done)
         if (updated && !wsRenderPending && !refreshInProgress) {
@@ -5777,6 +5801,8 @@ function connectFinnhubWebSocket() {
   finnhubWs.onclose = () => {
     wsConnected = false;
     wsSubscribedSymbols.clear();
+    wsOpenedAt = 0;
+    wsLastAnyTrade = 0;
     console.log('FinnHub WebSocket closed');
     updateWsIndicator();
     // Reconnect after 5 seconds if we have a key
@@ -5804,11 +5830,20 @@ function syncWsSubscriptions() {
     wsSubscribedSymbols.delete(sym);
   }
   // Subscribe new symbols (FinnHub free tier: up to 50)
+  let subscribed = false;
   for (const sym of stockSymbols) {
     if (!wsSubscribedSymbols.has(sym) && wsSubscribedSymbols.size < MAX_WS_SYMBOLS) {
       try { finnhubWs.send(JSON.stringify({ type: 'subscribe', symbol: sym })); } catch(_){}
       wsSubscribedSymbols.add(sym);
+      subscribed = true;
     }
+  }
+  // Newly subscribed symbols restart the stale-stream grace period: a prior
+  // portfolio's `wsLastAnyTrade` shouldn't make the indicator flash "no data"
+  // before trades have had a chance to arrive for the new subscriptions.
+  if (subscribed) {
+    wsOpenedAt = Date.now();
+    wsLastAnyTrade = 0;
   }
 }
 
@@ -5839,7 +5874,6 @@ function getMarketPhase() {
 }
 
 let offHoursLastFullRefresh = 0;
-let lastRestRefresh = Date.now(); // throttle REST refreshes when WebSocket is active
 
 // Lightweight refresh for crypto and commodity positions only (no stock API calls)
 async function refreshAlwaysOnOnly() {
@@ -5909,13 +5943,17 @@ function setupAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   const userInterval = parseInt(document.getElementById('refresh-interval').value) * 1000;
   refreshTimer = setInterval(() => {
+    // Refresh the WS indicator every tick so a stalled stream flips to
+    // "Live (no data)" within one auto-refresh interval, independent of
+    // the auto-refresh checkbox.
+    updateWsIndicator();
     if (document.getElementById('auto-refresh').checked && portfolio.length > 0) {
       const phase = getMarketPhase();
       if (phase === 'active') {
-        // When WebSocket is streaming live prices, throttle full REST refreshes to 60s
-        // (WS handles prices; REST is only needed for fundamentals, volume, after-hours)
-        if (wsConnected && Date.now() - lastRestRefresh < WS_REST_THROTTLE) return;
-        lastRestRefresh = Date.now();
+        // Always run the REST refresh on the user's chosen interval — WS
+        // ticks supplement it with real-time prices when available, but
+        // never block the REST cycle (stale/restricted streams shouldn't
+        // freeze the table).
         refreshAll().catch(e => console.warn('refreshAll failed:', e));
       } else {
         // Off-hours (weeknight or weekend)
