@@ -4350,6 +4350,26 @@ async function _refreshAll(signal) {
         if (q.marketState == null && p.marketState != null) q.marketState = p.marketState;
       }
     }
+    // Real-time tokenized-commodity overlay — currently just gold via PAXG.
+    // Applied at the end of the merge so its real-time price wins over Yahoo's
+    // 10–15 min delayed futures quote. Without this, the heavy refresh would
+    // overwrite the fast-tick PAXG price with Yahoo's delayed one and the
+    // gold row would visibly snap backwards every refresh cycle.
+    const realtimeCommodityOverlay = await _overlayRealtimeCommodities(
+      symbols.filter(isCommoditySymbol)
+    );
+    if (realtimeCommodityOverlay) {
+      for (const [sym, rt] of Object.entries(realtimeCommodityOverlay)) {
+        const q = quoteData[sym];
+        if (!q) continue;
+        q.price = rt.price;
+        if (q.prevClose) {
+          q.change = rt.price - q.prevClose;
+          q.changePct = (q.change / q.prevClose) * 100;
+        }
+        q._lastUpdate = Date.now();
+      }
+    }
     // Mark tickers as unknown when any source replied successfully (even with
     // no hits for the batch) — an empty-but-non-null response means the source
     // is reachable and the symbol genuinely doesn't exist there. Previously
@@ -4391,6 +4411,10 @@ async function _refreshAll(signal) {
     // Credit Yahoo if commodity retry provided data
     if (missingCommodities.some(s => quoteData[s])) {
       sourceNames.add('Yahoo Finance');
+    }
+    // Credit Coinbase if it provided a real-time gold (PAXG) overlay
+    if (realtimeCommodityOverlay && Object.keys(realtimeCommodityOverlay).length > 0) {
+      sourceNames.add('Coinbase');
     }
     setStatus('Data via ' + [...sourceNames].join(' + '), 'live');
     updateWsIndicator();
@@ -6687,13 +6711,30 @@ async function refreshCryptoOnly() {
   _cryptoOnlyInFlight = true;
   try {
     const symbols = portfolio.map(p => p.symbol);
+    // Snapshot pre-fetch prices for accurate flash detection. The Coinbase
+    // overlay mutates _cgCache.data in place, and after the first refreshAll
+    // each crypto entry in quoteData is aliased to that cached object — so
+    // reading `existing.price` AFTER fetchCryptoQuotes returns sees the
+    // post-overlay (new) value, not the old one. Without this snapshot, the
+    // prevPrices vs quoteData comparison in renderTable always sees equal
+    // values and the flash animation never fires for crypto.
+    const preFetchPrices = {};
+    for (const sym of symbols) {
+      if (COINGECKO_IDS[sym] && quoteData[sym]) {
+        preFetchPrices[sym] = quoteData[sym].price;
+      }
+    }
     const cryptoResult = await fetchCryptoQuotes(symbols);
     if (!cryptoResult || !cryptoResult.data) return;
     let updated = false;
     for (const [sym, cData] of Object.entries(cryptoResult.data)) {
       const existing = quoteData[sym];
-      if (existing) {
+      if (preFetchPrices[sym] != null) {
+        prevPrices[sym] = preFetchPrices[sym];
+      } else if (existing) {
         prevPrices[sym] = existing.price;
+      }
+      if (existing) {
         // Preserve supplemental data the slow CG/Yahoo paths populated once
         if (cData.wk52High == null && existing.wk52High != null) cData.wk52High = existing.wk52High;
         if (cData.wk52Low == null && existing.wk52Low != null) cData.wk52Low = existing.wk52Low;
@@ -6716,6 +6757,35 @@ async function refreshCryptoOnly() {
   }
 }
 
+// Map a commodity symbol to a real-time tokenized equivalent on Coinbase
+// Exchange. Currently only gold has a clean 1:1 token: PAXG (Pax Gold) is a
+// fully-redeemable claim on 1 troy ounce of LBMA-certified gold, trading 24/7
+// against USD. Its market price tracks gold spot within a small premium
+// (typically <1%, occasionally up to ~2% during volatility), and Coinbase
+// Exchange's public ticker is real-time with no CDN caching. So for users who
+// want gold to tick like crypto instead of waiting for Yahoo's 10–15 min
+// delayed futures feed, we patch the GOLD/GC=F price with PAXG-USD between
+// heavy refreshes. Other commodities don't have equivalent tokens with
+// reliable peg + Coinbase listing, so this is gold-only.
+const COMMODITY_REALTIME_PROXY = {
+  'GC=F': 'PAXG-USD', // Gold futures → PAX Gold (1 PAXG ≡ 1 troy oz gold)
+};
+async function _overlayRealtimeCommodities(commoditySyms) {
+  // Skip Coinbase entirely if its circuit breaker is open (3 consecutive fails
+  // → 30 s cooldown). Same _cbSkipUntil signal that gates the crypto overlay.
+  if (Date.now() < _cbSkipUntil) return null;
+  const targets = commoditySyms.filter(s => COMMODITY_REALTIME_PROXY[s]);
+  if (targets.length === 0) return null;
+  const overlay = {}; // user sym → { price, change?, changePct?, prevClose? }
+  await Promise.all(targets.map(async sym => {
+    const cbProduct = COMMODITY_REALTIME_PROXY[sym];
+    const cb = await _coinbaseFetch(cbProduct); // already has caching + 1.5 s timeout
+    if (!cb) return;
+    overlay[sym] = { price: cb.price };
+  }));
+  return Object.keys(overlay).length > 0 ? overlay : null;
+}
+
 // Lightweight commodities-only refresh — same fast-tick pattern as refreshCryptoOnly.
 // Uses Stooq's batched CSV (one direct-CORS call covers all commodity futures in
 // the portfolio, ~500 ms typical). Stooq's data is delayed by roughly the same
@@ -6723,6 +6793,11 @@ async function refreshCryptoOnly() {
 // vs. the heavy refreshAll path — just dramatically faster because there's no
 // per-symbol Yahoo-via-proxy loop. Falls through silently if Stooq fails; the
 // next heavy refreshAll will catch up via Yahoo.
+//
+// On top of Stooq, we additionally overlay real-time prices for any commodity
+// that has a tokenized equivalent on Coinbase Exchange (currently gold via
+// PAXG-USD). Stooq's delayed price is replaced by the real-time token price
+// when available, which gives gold the same per-tick movement as crypto.
 let _commoditiesOnlyInFlight = false;
 async function refreshCommoditiesOnly() {
   if (_commoditiesOnlyInFlight) return;
@@ -6730,27 +6805,66 @@ async function refreshCommoditiesOnly() {
   try {
     const commoditySyms = portfolio.map(p => p.symbol).filter(isCommoditySymbol);
     if (commoditySyms.length === 0) return;
-    const result = await fetchStooqQuotes(commoditySyms);
-    if (!result || !result.data) return;
+    // Snapshot pre-fetch prices so flashes work even when sources mutate
+    // shared cached objects in place.
+    const prePrices = {};
+    for (const sym of commoditySyms) {
+      if (quoteData[sym]) prePrices[sym] = quoteData[sym].price;
+    }
+    // Fire Stooq + Coinbase real-time-token overlay in parallel.
+    const [stooqResult, realtimeOverlay] = await Promise.all([
+      fetchStooqQuotes(commoditySyms),
+      _overlayRealtimeCommodities(commoditySyms),
+    ]);
     let updated = false;
-    for (const [sym, cData] of Object.entries(result.data)) {
-      if (!isCommoditySymbol(sym)) continue;
-      const existing = quoteData[sym];
-      if (existing) {
-        prevPrices[sym] = existing.price;
-        // Preserve fields that Stooq doesn't return (52-week range, perf, marketState, etc.)
-        // so the heavy refresh's previously-fetched data isn't overwritten with nulls.
-        if (cData.wk52High == null && existing.wk52High != null) cData.wk52High = existing.wk52High;
-        if (cData.wk52Low == null && existing.wk52Low != null) cData.wk52Low = existing.wk52Low;
-        if (cData.perfYTD == null && existing.perfYTD != null) cData.perfYTD = existing.perfYTD;
-        if (cData.perf6M == null && existing.perf6M != null) cData.perf6M = existing.perf6M;
-        if (cData.perf1Y == null && existing.perf1Y != null) cData.perf1Y = existing.perf1Y;
-        if (cData.marketCap == null && existing.marketCap != null) cData.marketCap = existing.marketCap;
-        if (cData.avgVolume == null && existing.avgVolume != null) cData.avgVolume = existing.avgVolume;
+    if (stooqResult && stooqResult.data) {
+      for (const [sym, cData] of Object.entries(stooqResult.data)) {
+        if (!isCommoditySymbol(sym)) continue;
+        const existing = quoteData[sym];
+        if (prePrices[sym] != null) prevPrices[sym] = prePrices[sym];
+        else if (existing) prevPrices[sym] = existing.price;
+        if (existing) {
+          // Preserve fields that Stooq doesn't return (52-week range, perf, marketState, etc.)
+          // so the heavy refresh's previously-fetched data isn't overwritten with nulls.
+          if (cData.wk52High == null && existing.wk52High != null) cData.wk52High = existing.wk52High;
+          if (cData.wk52Low == null && existing.wk52Low != null) cData.wk52Low = existing.wk52Low;
+          if (cData.perfYTD == null && existing.perfYTD != null) cData.perfYTD = existing.perfYTD;
+          if (cData.perf6M == null && existing.perf6M != null) cData.perf6M = existing.perf6M;
+          if (cData.perf1Y == null && existing.perf1Y != null) cData.perf1Y = existing.perf1Y;
+          if (cData.marketCap == null && existing.marketCap != null) cData.marketCap = existing.marketCap;
+          if (cData.avgVolume == null && existing.avgVolume != null) cData.avgVolume = existing.avgVolume;
+        }
+        quoteData[sym] = cData;
+        errorSymbols.delete(sym);
+        updated = true;
       }
-      quoteData[sym] = cData;
-      errorSymbols.delete(sym);
-      updated = true;
+    }
+    // Apply the real-time-token overlay on top — overwrites the Stooq price
+    // with the live Coinbase price for gold (and any future tokenized
+    // commodities). Re-derives change/changePct from the previous close so
+    // the row still tints correctly.
+    if (realtimeOverlay) {
+      for (const [sym, rt] of Object.entries(realtimeOverlay)) {
+        let q = quoteData[sym];
+        if (!q) {
+          // Stooq didn't return data either (maybe symbol unsupported) but
+          // we still got a real-time token price — seed a minimal entry.
+          q = { ...makeEmptyQuote(sym), name: sym, _lastUpdate: Date.now() };
+          if (prePrices[sym] != null) prevPrices[sym] = prePrices[sym];
+          quoteData[sym] = q;
+        }
+        if (prePrices[sym] != null && prevPrices[sym] == null) {
+          prevPrices[sym] = prePrices[sym];
+        }
+        q.price = rt.price;
+        if (q.prevClose) {
+          q.change = rt.price - q.prevClose;
+          q.changePct = (q.change / q.prevClose) * 100;
+        }
+        q._lastUpdate = Date.now();
+        errorSymbols.delete(sym);
+        updated = true;
+      }
     }
     if (updated) {
       renderTable();
@@ -6773,13 +6887,26 @@ async function refreshAlwaysOnOnly() {
 
   // Crypto via CoinGecko (self-throttles to 30s internally)
   if (hasCrypto) {
+    // Snapshot pre-fetch crypto prices for accurate flash detection — same
+    // aliased-cache problem as refreshCryptoOnly. See the comment there for
+    // full context.
+    const preFetchCryptoPrices = {};
+    for (const sym of symbols) {
+      if (COINGECKO_IDS[sym] && quoteData[sym]) {
+        preFetchCryptoPrices[sym] = quoteData[sym].price;
+      }
+    }
     const cryptoResult = await fetchCryptoQuotes(symbols);
     if (cryptoResult) {
       cryptoSourceLabel = cryptoResult.source || 'CoinGecko';
       for (const [sym, cData] of Object.entries(cryptoResult.data)) {
         const existing = quoteData[sym];
-        if (existing) {
+        if (preFetchCryptoPrices[sym] != null) {
+          prevPrices[sym] = preFetchCryptoPrices[sym];
+        } else if (existing) {
           prevPrices[sym] = existing.price;
+        }
+        if (existing) {
           // Preserve supplemental data that was fetched once (52-week, performance)
           if (cData.wk52High == null && existing.wk52High != null) cData.wk52High = existing.wk52High;
           if (cData.wk52Low == null && existing.wk52Low != null) cData.wk52Low = existing.wk52Low;
@@ -6799,17 +6926,27 @@ async function refreshAlwaysOnOnly() {
   // covers everything. Replaces the previous per-symbol Yahoo v8 loop with its
   // 60-second gate, so commodity prices now tick every refresh interval
   // off-hours just like crypto. The full refreshAll path (fired once per
-  // OFF_HOURS_FULL_INTERVAL) still hits Yahoo for any fresher data.
+  // OFF_HOURS_FULL_INTERVAL) still hits Yahoo for any fresher data. Gold
+  // additionally gets a real-time PAXG-USD overlay on top of Stooq.
   let commoditySourceLabel = null;
   if (commoditySyms.length > 0) {
-    const stooqResult = await fetchStooqQuotes(commoditySyms);
+    // Snapshot pre-fetch commodity prices for flash detection
+    const preCommodityPrices = {};
+    for (const sym of commoditySyms) {
+      if (quoteData[sym]) preCommodityPrices[sym] = quoteData[sym].price;
+    }
+    const [stooqResult, realtimeOverlay] = await Promise.all([
+      fetchStooqQuotes(commoditySyms),
+      _overlayRealtimeCommodities(commoditySyms),
+    ]);
     if (stooqResult && stooqResult.data) {
       commoditySourceLabel = stooqResult.source || 'Stooq';
       for (const [sym, sData] of Object.entries(stooqResult.data)) {
         if (!isCommoditySymbol(sym)) continue;
         const existing = quoteData[sym];
+        if (preCommodityPrices[sym] != null) prevPrices[sym] = preCommodityPrices[sym];
+        else if (existing) prevPrices[sym] = existing.price;
         if (existing) {
-          prevPrices[sym] = existing.price;
           // Preserve fields Stooq doesn't return (52-week range, performance,
           // marketState) so the heavy refresh's data isn't overwritten with nulls.
           if (sData.wk52High == null && existing.wk52High != null) sData.wk52High = existing.wk52High;
@@ -6821,6 +6958,35 @@ async function refreshAlwaysOnOnly() {
         quoteData[sym] = sData;
         errorSymbols.delete(sym);
         updated = true;
+      }
+    }
+    // Real-time token overlay (PAXG for gold). Overwrites the Stooq price
+    // with the live Coinbase price; re-derives change/changePct from
+    // prevClose so cell tinting still works.
+    if (realtimeOverlay) {
+      for (const [sym, rt] of Object.entries(realtimeOverlay)) {
+        let q = quoteData[sym];
+        if (!q) {
+          q = { ...makeEmptyQuote(sym), name: sym, _lastUpdate: Date.now() };
+          if (preCommodityPrices[sym] != null) prevPrices[sym] = preCommodityPrices[sym];
+          quoteData[sym] = q;
+        }
+        if (preCommodityPrices[sym] != null && prevPrices[sym] == null) {
+          prevPrices[sym] = preCommodityPrices[sym];
+        }
+        q.price = rt.price;
+        if (q.prevClose) {
+          q.change = rt.price - q.prevClose;
+          q.changePct = (q.change / q.prevClose) * 100;
+        }
+        q._lastUpdate = Date.now();
+        errorSymbols.delete(sym);
+        updated = true;
+      }
+      if (commoditySourceLabel && !commoditySourceLabel.includes('Coinbase')) {
+        commoditySourceLabel = commoditySourceLabel + ' + Coinbase';
+      } else if (!commoditySourceLabel) {
+        commoditySourceLabel = 'Coinbase';
       }
     }
   }
