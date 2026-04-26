@@ -3286,6 +3286,103 @@ async function fetchFinnhubFreeQuotes(symbols) {
   return null;
 }
 
+// --- Stooq (free, no key, batched CSV, ~15 min delayed) for stocks + commodity futures ---
+// Stooq is a Polish data aggregator that hosts free intraday + EOD CSVs for thousands
+// of US tickers and major futures. Coverage: US equities (AAPL → aapl.us), commodity
+// futures (GC=F → gc.f), and indices. Data is roughly 15 minutes delayed during
+// market hours, but the wire format is tiny (one batched call covers the whole
+// portfolio) and the endpoint is CORS-enabled, so this gives keyless users a
+// reliable backup that doesn't depend on the public proxy fleet that Yahoo needs.
+const STOOQ_TIMEOUT = 6000;
+function _stooqSymbol(sym) {
+  if (isCryptoSymbol(sym)) return null; // CG/Coinbase already cover crypto better
+  if (isCommoditySymbol(sym)) {
+    // Yahoo-style GC=F → Stooq's gc.f
+    return sym.toLowerCase().replace('=f', '.f');
+  }
+  // US equities only — Stooq uses lowercase + .us suffix. Skip exotic
+  // tickers (BRK.B etc.) since their Stooq mapping isn't a simple 1:1.
+  if (!/^[A-Z][A-Z0-9]{0,5}$/.test(sym)) return null;
+  return sym.toLowerCase() + '.us';
+}
+async function fetchStooqQuotes(symbols) {
+  const supported = [];
+  const reverseMap = {}; // STOOQ_ID (uppercase) → user symbol
+  for (const s of symbols) {
+    const stooqId = _stooqSymbol(s);
+    if (stooqId) {
+      supported.push(stooqId);
+      reverseMap[stooqId.toUpperCase()] = s;
+    }
+  }
+  if (supported.length === 0) return null;
+
+  // Batched CSV: f=sd2t2ohlcvnp2 → Symbol, Date, Time, Open, High, Low, Close,
+  // Volume, Name, Change% — h=headers, e=csv. Stooq accepts up to ~50 symbols
+  // per call comfortably; chunk if larger.
+  const CHUNK = 50;
+  const results = {};
+  for (let i = 0; i < supported.length; i += CHUNK) {
+    const chunk = supported.slice(i, i + CHUNK);
+    const url = `https://stooq.com/q/l/?s=${encodeURIComponent(chunk.join('+'))}&f=sd2t2ohlcvnp2&h&e=csv`;
+    let text = null;
+    try {
+      // Try direct CORS first — Stooq's CSV endpoints typically allow it,
+      // which keeps us off the public proxy fleet entirely on the happy path.
+      const r = await fetch(url, { signal: AbortSignal.timeout(STOOQ_TIMEOUT) });
+      if (r.ok) text = await r.text();
+    } catch (_) { /* fall through to proxy */ }
+    if (!text) {
+      try { text = await fetchWithProxy(url); }
+      catch (e) { dbg('Stooq fetch failed:', e && e.message); continue; }
+    }
+    if (!text || !text.trim()) continue;
+
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) continue;
+    const headers = lines[0].split(',').map(h => h.trim());
+    const ix = name => headers.indexOf(name);
+    const iSym = ix('Symbol'), iOpen = ix('Open'), iHigh = ix('High'),
+          iLow = ix('Low'), iClose = ix('Close'), iVol = ix('Volume'),
+          iName = ix('Name'),
+          iChgPct = headers.findIndex(h => /change/i.test(h));
+    if (iSym < 0 || iClose < 0) continue;
+
+    for (let li = 1; li < lines.length; li++) {
+      const cells = lines[li].split(',');
+      if (cells.length < headers.length) continue;
+      const stooqSym = (cells[iSym] || '').trim().toUpperCase();
+      const userSym = reverseMap[stooqSym];
+      if (!userSym) continue;
+      const close = parseFloat(cells[iClose]);
+      if (!isFinite(close) || close <= 0) continue;
+      const open = parseFloat(cells[iOpen]); const high = parseFloat(cells[iHigh]);
+      const low = parseFloat(cells[iLow]);   const vol = parseFloat(cells[iVol]);
+      const namestr = iName >= 0 ? (cells[iName] || '').replace(/^"|"$/g, '').trim() : null;
+      const changePct = iChgPct >= 0 ? parseFloat(cells[iChgPct]) : NaN;
+      // Derive prevClose + change from close + change% so the sort/render
+      // path can color-tint the row even when this is the only source.
+      let change = null, prevClose = null;
+      if (isFinite(changePct) && changePct !== 0) {
+        prevClose = close / (1 + changePct / 100);
+        change = close - prevClose;
+      }
+      results[userSym] = { ...makeEmptyQuote(userSym),
+        name: namestr || userSym,
+        price: close,
+        open: isFinite(open) ? open : null,
+        dayHigh: isFinite(high) ? high : null,
+        dayLow:  isFinite(low)  ? low  : null,
+        change, changePct: isFinite(changePct) ? changePct : null,
+        prevClose,
+        volume: isFinite(vol) ? vol : null,
+        _lastUpdate: Date.now(),
+      };
+    }
+  }
+  return Object.keys(results).length > 0 ? { source: 'Stooq', data: results } : null;
+}
+
 // --- CoinGecko (free, no key, CORS-enabled) for crypto market cap ---
 const COINGECKO_IDS = {
   'BTC-USD': 'bitcoin', 'ETH-USD': 'ethereum', 'SOL-USD': 'solana', 'DOGE-USD': 'dogecoin',
@@ -3357,9 +3454,63 @@ async function _coinbaseFetch(sym) {
     return null;
   }
 }
+// CoinCap (free, no key, direct CORS) — secondary keyless real-time-ish source
+// used as automatic fallback when the Coinbase circuit breaker trips. CoinCap's
+// IDs mostly match CoinGecko's but a few diverge (avalanche, polygon, xrp), so
+// we maintain a separate map for the symbols Coinbase couldn't cover.
+const COINCAP_IDS = {
+  'BTC-USD': 'bitcoin', 'ETH-USD': 'ethereum', 'SOL-USD': 'solana', 'DOGE-USD': 'dogecoin',
+  'XRP-USD': 'xrp', 'ADA-USD': 'cardano', 'DOT-USD': 'polkadot', 'AVAX-USD': 'avalanche',
+  'MATIC-USD': 'polygon', 'LINK-USD': 'chainlink', 'LTC-USD': 'litecoin', 'UNI-USD': 'uniswap',
+  'SHIB-USD': 'shiba-inu', 'ATOM-USD': 'cosmos', 'XLM-USD': 'stellar',
+};
+async function _overlayCoinCapPrices(out) {
+  if (!out || !out.data) return out;
+  const userSyms = Object.keys(out.data).filter(s => COINCAP_IDS[s]);
+  if (userSyms.length === 0) return out;
+  const ids = userSyms.map(s => COINCAP_IDS[s]).join(',');
+  try {
+    const r = await fetch(`https://api.coincap.io/v2/assets?ids=${encodeURIComponent(ids)}`,
+                          { signal: AbortSignal.timeout(2500) });
+    if (!r.ok) return out;
+    const j = await r.json();
+    if (!Array.isArray(j.data)) return out;
+    const byId = {};
+    for (const d of j.data) byId[d.id] = d;
+    let patched = false;
+    for (const sym of userSyms) {
+      const d = byId[COINCAP_IDS[sym]];
+      if (!d) continue;
+      const price = parseFloat(d.priceUsd);
+      if (!isFinite(price) || price <= 0) continue;
+      const q = out.data[sym];
+      if (!q) continue;
+      q.price = price;
+      const chgPct = parseFloat(d.changePercent24Hr);
+      if (isFinite(chgPct)) {
+        q.changePct = chgPct;
+        // Re-derive change + prevClose from price + 24h change% so the cell
+        // tinting still works when CoinCap is the only fresh signal.
+        if (chgPct !== 0) {
+          q.prevClose = price / (1 + chgPct / 100);
+          q.change = price - q.prevClose;
+        }
+      }
+      q._lastUpdate = Date.now();
+      patched = true;
+    }
+    if (patched) out.source = (out.source || 'CoinGecko') + ' + CoinCap';
+  } catch (_) { /* per-call failure is silent */ }
+  return out;
+}
+
 async function _overlayCoinbasePrices(out) {
   if (!out || !out.data) return out;
-  if (Date.now() < _cbSkipUntil) return out; // circuit breaker open — skip Coinbase
+  // When Coinbase has tripped the circuit breaker (3 consecutive all-fails →
+  // 30 s cooldown), try CoinCap instead so crypto prices still update on
+  // every refresh tick. If CoinCap also fails the user falls through to the
+  // slower CoinGecko data — same pre-overlay behavior, no regression.
+  if (Date.now() < _cbSkipUntil) return await _overlayCoinCapPrices(out);
   const syms = Object.keys(out.data);
   if (syms.length === 0) return out;
   let patched = false;
@@ -4098,13 +4249,19 @@ async function _refreshAll(signal) {
   const hasAlpaca = !!(alpacaKeys.keyId && alpacaKeys.secret);
   const hasFmp = !!getFmpKey();
   const hasCrypto = symbols.some(s => COINGECKO_IDS[s]);
-  const [finnhubResult, yahooResult, alpacaResult, fmpResult, cryptoResult, freeResult] = await Promise.all([
+  // Stooq is a keyless, CORS-enabled CSV source for US stocks + commodity futures
+  // (~15 min delayed). Always run it — even when the user has FinnHub/Alpaca keys
+  // it provides cheap resilience: if the primary keyed sources hiccup, Stooq's
+  // batched single call still has the whole portfolio.
+  const hasStooqEligible = symbols.some(s => !isCryptoSymbol(s));
+  const [finnhubResult, yahooResult, alpacaResult, fmpResult, cryptoResult, freeResult, stooqResult] = await Promise.all([
     hasFinnHub ? fetchFinnhubQuotes(symbols) : Promise.resolve(null),
     fetchYahooQuotes(symbols),
     hasAlpaca ? fetchAlpacaQuotes(symbols) : Promise.resolve(null),
     hasFmp ? fetchFmpQuotes(symbols) : Promise.resolve(null),
     hasCrypto ? fetchCryptoQuotes(symbols) : Promise.resolve(null),
     !hasFinnHub ? fetchFinnhubFreeQuotes(symbols) : Promise.resolve(null),
+    hasStooqEligible ? fetchStooqQuotes(symbols) : Promise.resolve(null),
   ]);
 
   if (signal && signal.aborted) return;
@@ -4120,16 +4277,20 @@ async function _refreshAll(signal) {
 
   // Pick primary source: prefer the one with the most matching symbols
   const allResults = [
-    finnhubResult, yahooFinal, freeResult, fmpResult, alpacaResult, cryptoResult
+    finnhubResult, yahooFinal, freeResult, fmpResult, alpacaResult, cryptoResult, stooqResult
   ].filter(Boolean);
   function countHits(r) { return r ? symbols.filter(s => r.data[s]).length : 0; }
-  // Priority order for tie-breaking: FinnHub > Yahoo > FinnHub free > FMP > Alpaca > CoinGecko
+  // Priority order for tie-breaking: FinnHub > Yahoo > FinnHub free > FMP > Alpaca > CoinGecko > Stooq
+  // (Stooq is last because its data is ~15 min delayed; better to use it only when fresher sources miss the symbol)
   let result = null;
   for (const r of allResults) {
     if (!result || countHits(r) > countHits(result)) result = r;
   }
-  // Additional sources to merge missing fields from
-  const mergeSources = [alpacaResult, fmpResult, cryptoResult, freeResult, yahooFinal].filter(r => r && r !== result);
+  // Additional sources to merge missing fields from. Stooq lives in the merge
+  // pool too so it fills holes (e.g. FinnHub couldn't quote a thinly-traded
+  // ticker, but Stooq has it) without becoming the primary except when
+  // everything else fails.
+  const mergeSources = [alpacaResult, fmpResult, cryptoResult, freeResult, yahooFinal, stooqResult].filter(r => r && r !== result);
 
   // Retry commodity symbols that didn't get data — FinnHub/Alpaca/FMP don't support futures,
   // so commodities depend on Yahoo proxies which can fail under concurrent load.
