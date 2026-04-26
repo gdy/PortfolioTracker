@@ -23,7 +23,7 @@ A real-time portfolio tracker for stocks, crypto, and commodities that runs enti
 - **Smart CORS proxy rotation** — 6 proxy endpoints with automatic failover, last-working-proxy memory, and validation of proxy error responses (rejects HTML pages, rate-limit strings, and proxy-specific JSON error bodies before accepting a response).
 
 ### Portfolio Management
-- **30+ data columns** — last price, $ change, % change, after-hours, quantity, cost basis, purchase date, market value, day P&L, dividend/yield, ex-div date, next earnings, YTD/6M/1Y performance, total P&L, P&L %, previous close, open, bid, ask, day range, 52-week range, volume, avg volume, market cap, P/E, EPS, beta, **analyst rating** (Strong Buy / Buy / Hold / Sell / Strong Sell consensus from FinnHub `/stock/recommendation` with a Yahoo `financialData` fallback — color-tinted by score and showing the analyst count on hover), notes
+- **30+ data columns** — last price, $ change, % change, after-hours, quantity, cost basis, purchase date, market value, day P&L, dividend/yield, ex-div date, next earnings, YTD/6M/1Y performance, total P&L, P&L %, previous close, open, bid, ask, day range, 52-week range, volume, avg volume, market cap, P/E, EPS, beta, **analyst rating** (Strong Buy / Buy / Hold / Sell / Strong Sell consensus from FinnHub `/stock/recommendation` with a Yahoo `financialData` fallback — color-tinted by score; click the cell to open a popover showing the 1–5 score on a green-to-red scale and a stacked breakdown bar of the Strong Buy / Buy / Hold / Sell / Strong Sell counts with source attribution and reporting period), notes
 - **Multiple portfolios** — switch between unlimited named portfolios (e.g. "Long-term", "Trading", "Crypto") via the portfolio bar above the toolbar. Create, rename, and delete portfolios on the fly. Each portfolio has its own positions, notes, fetch caches, and undo history. The active portfolio is remembered across sessions.
 - **Inline editing** — click any quantity, cost basis, date, or notes field to edit directly in the table. Changes are saved instantly.
 - **Drag-to-reorder** — grab any row in the desktop table or any mobile card (via the ☰ handle) to manually rearrange positions. Switching to a sorted column disables manual order; clearing the sort restores it.
@@ -110,7 +110,9 @@ Commodity futures symbols containing `=` are handled carefully: `=` is kept raw 
 
 **`fundamentalsCache` skip** — `fillFundamentals` skips symbols whose FinnHub fundamentals cache already contains P/E, beta, and market cap, avoiding redundant quoteSummary proxy calls.
 
-**FinnHub fundamentals** — fetched once per symbol per session (profile + metrics) and cached in `fundamentalsCache`. Per-refresh calls are only the lightweight `/quote` endpoint.
+**FinnHub fundamentals** — fetched once per symbol per session (profile + metrics + earnings + dividend + recommendation) and cached in `fundamentalsCache`. Per-refresh calls are only the lightweight `/quote` endpoint.
+
+**Fast new-ticker fetch** — when a position is added, `fetchOneSymbolNow` races three independent paths in parallel and applies whichever resolves first with a valid price: FinnHub `/quote` (direct CORS, ~200–500 ms when keyed), Alpaca snapshot (direct CORS, ~300–700 ms when keyed), and Yahoo v8 chart (proxied, ~1–3 s; the only path that covers commodity futures and tickers the others miss). The new row appears in the table the same tick it's added — `bumpPortfolioVersion()` runs synchronously in `savePortfolio` so `getSortedPortfolio`'s cache invalidates immediately, ahead of the 250 ms localStorage-write debounce. Right after the price lands, a background fundamentals warmer fires the same 5 parallel FinnHub endpoints that `refreshAll` would eventually run — minus the inter-batch delays — so PE / EPS / beta / market cap / analyst rating arrive in ~700 ms–1.5 s instead of waiting for the next refresh cycle. Guarded by `_fundamentalsWarmInFlight` and an early-bail check on `fetchedFundamentals` so it can never double-fetch with the refresh path.
 
 **CoinGecko** — 30 s minimum between calls with a local cache. The `/coins/markets` bulk endpoint is used for prices + 24h data; `/coins/{id}/market_chart?days=365` is used once per crypto symbol for 52-week range and performance metrics (with 1.5 s between requests).
 
@@ -189,6 +191,19 @@ Clearing browser data resets everything.
 ## Browser Compatibility
 
 Chrome, Firefox, Edge, Safari (any modern version supporting ES2020+). Responsive on iOS and Android. No IE support.
+
+---
+
+## Debugging
+
+Per-symbol and per-proxy fetch warnings are silenced by default — a single refresh races multiple proxies × symbols and most non-winners produce expected errors that would otherwise flood the console. To turn the verbose log stream back on (proxy race losses, per-symbol Yahoo / FinnHub / Alpaca / CoinGecko fallback failures, abort traces):
+
+```js
+localStorage.setItem('stonks_debug', '1');
+location.reload();
+```
+
+Source-level events (auth failures, rate limit hits, WebSocket connect/close, localStorage quota errors, top-level refresh exceptions) always log regardless of this flag.
 
 ---
 
