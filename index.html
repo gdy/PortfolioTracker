@@ -1993,6 +1993,7 @@ function removePosition(symbol) {
   delete fundamentalsCache[symbol];
   delete prevPrices[symbol];
   delete wsLastTradeTime[symbol];
+  delete _cbCache[symbol];
   errorSymbols.delete(symbol);
   fetchedSummary.delete(symbol);
   fetchedFundamentals.delete(symbol);
@@ -2016,6 +2017,7 @@ function clearAll() {
   fetchedPerformance.clear();
   fetchedAfterHours.clear();
   attemptedSymbols.clear();
+  _resetCoinbaseOverlayState();
   savePortfolio();
   renderTable();
   updateSummary();
@@ -3323,6 +3325,16 @@ let _cbFailStreak = 0;
 let _cbSkipUntil = 0;
 const CB_FAIL_THRESHOLD = 3;
 const CB_SKIP_COOLDOWN = 30000;
+// Reset all Coinbase overlay state — called from portfolio-mutation paths
+// (clearAll, switchPortfolio, deletePortfolio) so a previous portfolio's
+// stale per-symbol cache or circuit-breaker cooldown doesn't carry across to
+// the new one. Long-running sessions that switch portfolios many times would
+// otherwise accumulate _cbCache entries indefinitely.
+function _resetCoinbaseOverlayState() {
+  for (const k of Object.keys(_cbCache)) delete _cbCache[k];
+  _cbFailStreak = 0;
+  _cbSkipUntil = 0;
+}
 async function _coinbaseFetch(sym) {
   const cached = _cbCache[sym];
   const now = Date.now();
@@ -5998,6 +6010,7 @@ function switchPortfolio(name) {
   quoteData = {}; fundamentalsCache = {}; prevPrices = {}; wsLastTradeTime = {};
   errorSymbols.clear(); fetchedSummary.clear(); fetchedFundamentals.clear();
   fetchedPerformance.clear(); fetchedAfterHours.clear(); attemptedSymbols.clear();
+  _resetCoinbaseOverlayState();
   undoStack.length = 0; redoStack.length = 0;
   // New portfolio means a different set of symbols — invalidate the sort cache
   // so the first render of the new portfolio doesn't reuse the previous one's
@@ -6058,6 +6071,7 @@ function deletePortfolioPrompt() {
   fetchedPerformance.clear();
   fetchedAfterHours.clear();
   attemptedSymbols.clear();
+  _resetCoinbaseOverlayState();
   undoStack.length = 0; redoStack.length = 0;
   updateUndoRedoButtons();
   // Fresh portfolio loaded — invalidate the sort cache.
