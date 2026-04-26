@@ -1572,7 +1572,9 @@ const FILL_FUND_BATCH = 3;
 // Limits
 const MAX_WS_SYMBOLS = 50;
 const MAX_UNDO = 50;
-const CG_MIN_INTERVAL = 30000;           // 30s minimum between CoinGecko calls
+const CG_MIN_INTERVAL = 30000;           // default cache TTL between CoinGecko calls (large portfolios)
+const CG_MIN_INTERVAL_SMALL = 5000;      // hard floor when scaling cache down for small portfolios
+const CG_SMALL_PORTFOLIO_THRESHOLD = 5;  // ≤ this many cryptos = "small" → cache TTL tracks the user's refresh interval
 const YF_CRUMB_TTL = 30 * 60 * 1000;     // crumbs expire ~30 minutes
 const YF_V7_RETRY_MS = 3 * 60 * 1000;    // retry v7 after 3 minutes
 const WS_FRESH_MS = 10000;               // how recent a WS trade must be to skip REST quote
@@ -3294,11 +3296,23 @@ async function fetchCryptoQuotes(symbols) {
   const cryptoSyms = symbols.filter(s => COINGECKO_IDS[s]);
   if (cryptoSyms.length === 0) return null;
 
-  // Rate-limit: return cached data if last fetch was < 30s ago AND it covers
-  // every requested symbol. Otherwise we'd return stale data missing the new
-  // symbol when the user adds a crypto right after a refresh.
+  // Rate-limit: return cached data if last fetch was within the cache TTL AND
+  // covers every requested symbol. Otherwise we'd return stale data missing
+  // the new symbol when the user adds a crypto right after a refresh.
+  //
+  // Cache TTL scales with portfolio size: with ≤5 cryptos a single call
+  // updates everything, so we let the cache turn over as fast as the user's
+  // chosen refresh interval (with a 5 s hard floor) — well under CoinGecko's
+  // ~30 req/min free limit. Larger portfolios stay on the conservative 30 s
+  // TTL since they're more likely to be combined with other API pressure.
   const now = Date.now();
-  if (_cgCache.data && now - _cgCache.time < CG_MIN_INTERVAL) {
+  let ttl = CG_MIN_INTERVAL;
+  if (cryptoSyms.length <= CG_SMALL_PORTFOLIO_THRESHOLD) {
+    const refreshSec = parseInt(localStorage.getItem('stonks_refresh_interval') || '30', 10);
+    const refreshMs = isFinite(refreshSec) && refreshSec > 0 ? refreshSec * 1000 : CG_MIN_INTERVAL;
+    ttl = Math.max(CG_MIN_INTERVAL_SMALL, Math.min(CG_MIN_INTERVAL, refreshMs));
+  }
+  if (_cgCache.data && now - _cgCache.time < ttl) {
     const cached = _cgCache.data.data || {};
     if (cryptoSyms.every(s => cached[s])) return _cgCache.data;
     // Otherwise fall through and hit CoinGecko for the new symbol
@@ -4114,9 +4128,14 @@ async function _refreshAll(signal) {
     // guard (above) should mark errors, since that means a source worked but didn't
     // recognise this specific ticker. Schedule a deferred retry instead.
     if (!hasCommodityData) {
+      // Add ±2 s of jitter so that if "all sources failed" was actually a
+      // proxy-fleet outage hitting many users at once, every client doesn't
+      // retry on the same 8-second tick — that would just stack a thundering
+      // herd back onto the recovering proxies.
+      const jitter = Math.floor(Math.random() * 4000) - 2000; // -2000..+2000 ms
       setTimeout(() => {
         if (!refreshInProgress) refreshAll().catch(e => console.warn('refreshAll failed:', e));
-      }, 8000);
+      }, 8000 + jitter);
     }
     renderTable();
     updateSummary();
@@ -4384,8 +4403,11 @@ async function _refreshAll(signal) {
     if (_deferredCommodityAbort) _deferredCommodityAbort.abort();
     const deferAbort = _deferredCommodityAbort = new AbortController();
     (async () => {
-      // Short initial delay to let any in-flight proxy rate limits relax
-      await new Promise(r => setTimeout(r, COMMODITY_RETRY_DELAY));
+      // Short initial delay (with ±400 ms jitter) to let any in-flight proxy
+      // rate limits relax. Jitter desynchronizes concurrent users so we don't
+      // stack a thundering herd back onto the proxies after a fleet hiccup.
+      const _delayJitter = Math.floor(Math.random() * 800) - 400;
+      await new Promise(r => setTimeout(r, COMMODITY_RETRY_DELAY + _delayJitter));
       for (const sym of stillMissingCommodities) {
         if (deferAbort.signal.aborted || refreshInProgress || (quoteData[sym] && quoteData[sym].price != null)) continue;
         try {
