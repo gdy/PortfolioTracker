@@ -1134,6 +1134,8 @@
       <input type="checkbox" id="auto-refresh" checked /> Auto
     </label>
     <select id="refresh-interval" onchange="setupAutoRefresh()">
+      <option value="2">2s</option>
+      <option value="3">3s</option>
       <option value="5">5s</option>
       <option value="10">10s</option>
       <option value="15">15s</option>
@@ -1573,7 +1575,10 @@ const FILL_FUND_BATCH = 3;
 const MAX_WS_SYMBOLS = 50;
 const MAX_UNDO = 50;
 const CG_MIN_INTERVAL = 30000;           // default cache TTL between CoinGecko calls (large portfolios)
-const CG_MIN_INTERVAL_SMALL = 5000;      // hard floor when scaling cache down for small portfolios
+// CoinGecko free tier is 30 req/min. /coins/markets is one batched call regardless
+// of token count, so a 3 s floor gives at most 20 calls/min — comfortably under
+// the limit with ~33% headroom for the occasional supplemental call.
+const CG_MIN_INTERVAL_SMALL = 3000;
 const CG_SMALL_PORTFOLIO_THRESHOLD = 5;  // ≤ this many cryptos = "small" → cache TTL tracks the user's refresh interval
 const YF_CRUMB_TTL = 30 * 60 * 1000;     // crumbs expire ~30 minutes
 const YF_V7_RETRY_MS = 3 * 60 * 1000;    // retry v7 after 3 minutes
