@@ -3320,11 +3320,17 @@ async function fetchStooqQuotes(symbols) {
   // Batched CSV: f=sd2t2ohlcvnp2 → Symbol, Date, Time, Open, High, Low, Close,
   // Volume, Name, Change% — h=headers, e=csv. Stooq accepts up to ~50 symbols
   // per call comfortably; chunk if larger.
+  //
+  // Symbols are separated by commas. We previously used '+' URL-encoded to
+  // '%2B', which Stooq's CGI parses inconsistently — for some batches it
+  // returned only the first symbol, leaving SI=F/HG=F/etc. silently dropped
+  // and stuck on "retrying..." in the table. Comma is unambiguous in a query
+  // string and matches Stooq's documented usage.
   const CHUNK = 50;
   const results = {};
   for (let i = 0; i < supported.length; i += CHUNK) {
     const chunk = supported.slice(i, i + CHUNK);
-    const url = `https://stooq.com/q/l/?s=${encodeURIComponent(chunk.join('+'))}&f=sd2t2ohlcvnp2&h&e=csv`;
+    const url = `https://stooq.com/q/l/?s=${chunk.join(',')}&f=sd2t2ohlcvnp2&h&e=csv`;
     let text = null;
     try {
       // Try direct CORS first — Stooq's CSV endpoints typically allow it,
@@ -3359,13 +3365,31 @@ async function fetchStooqQuotes(symbols) {
       const open = parseFloat(cells[iOpen]); const high = parseFloat(cells[iHigh]);
       const low = parseFloat(cells[iLow]);   const vol = parseFloat(cells[iVol]);
       const namestr = iName >= 0 ? (cells[iName] || '').replace(/^"|"$/g, '').trim() : null;
-      const changePct = iChgPct >= 0 ? parseFloat(cells[iChgPct]) : NaN;
+      const rawChangePct = iChgPct >= 0 ? parseFloat(cells[iChgPct]) : NaN;
+      // Stooq sometimes returns "0" for Change% as a missing-data placeholder
+      // (especially for thinly-traded futures like SI=F/HG=F). If OHLC clearly
+      // shows the day moved, a 0% can't be real — treat it as missing so other
+      // sources (Yahoo's normalized chart) can backfill via the merge step.
+      let changePct = null;
+      if (isFinite(rawChangePct)) {
+        const ohlcMoved = isFinite(open) && isFinite(close) && open !== close;
+        const ohlcRangeMoved = isFinite(high) && isFinite(low) && high !== low;
+        if (rawChangePct === 0 && (ohlcMoved || ohlcRangeMoved)) {
+          // Bogus 0% — discard
+        } else {
+          changePct = rawChangePct;
+        }
+      }
       // Derive prevClose + change from close + change% so the sort/render
       // path can color-tint the row even when this is the only source.
       let change = null, prevClose = null;
-      if (isFinite(changePct) && changePct !== 0) {
+      if (changePct != null && changePct !== 0) {
         prevClose = close / (1 + changePct / 100);
         change = close - prevClose;
+      } else if (changePct === 0) {
+        // Genuine 0% (open == close == high == low) — change is meaningfully 0
+        change = 0;
+        prevClose = close;
       }
       results[userSym] = { ...makeEmptyQuote(userSym),
         name: namestr || userSym,
@@ -3373,7 +3397,7 @@ async function fetchStooqQuotes(symbols) {
         open: isFinite(open) ? open : null,
         dayHigh: isFinite(high) ? high : null,
         dayLow:  isFinite(low)  ? low  : null,
-        change, changePct: isFinite(changePct) ? changePct : null,
+        change, changePct,
         prevClose,
         volume: isFinite(vol) ? vol : null,
         _lastUpdate: Date.now(),
@@ -4318,6 +4342,15 @@ async function _refreshAll(signal) {
     await Promise.all(retryPromises);
   }
 
+  // Fetch the real-time tokenized-commodity overlay (currently PAXG for gold)
+  // up front so the source attribution below can credit Coinbase. The actual
+  // patch into quoteData happens AFTER the secondary mergeSources loop has
+  // filled prevClose — without that, the overlay can't re-derive change /
+  // changePct when the primary source returned a price-only quote.
+  const realtimeCommodityOverlay = await _overlayRealtimeCommodities(
+    symbols.filter(isCommoditySymbol)
+  );
+
   if (result) {
     // Preserve existing bid/ask (including estimates) before overwriting
     const preserved = {};
@@ -4348,26 +4381,6 @@ async function _refreshAll(signal) {
         if (q.postMarketPrice == null && p.postMarketPrice != null) { q.postMarketPrice = p.postMarketPrice; q.postMarketChange = p.postMarketChange; }
         if (q.preMarketPrice == null && p.preMarketPrice != null) { q.preMarketPrice = p.preMarketPrice; q.preMarketChange = p.preMarketChange; }
         if (q.marketState == null && p.marketState != null) q.marketState = p.marketState;
-      }
-    }
-    // Real-time tokenized-commodity overlay — currently just gold via PAXG.
-    // Applied at the end of the merge so its real-time price wins over Yahoo's
-    // 10–15 min delayed futures quote. Without this, the heavy refresh would
-    // overwrite the fast-tick PAXG price with Yahoo's delayed one and the
-    // gold row would visibly snap backwards every refresh cycle.
-    const realtimeCommodityOverlay = await _overlayRealtimeCommodities(
-      symbols.filter(isCommoditySymbol)
-    );
-    if (realtimeCommodityOverlay) {
-      for (const [sym, rt] of Object.entries(realtimeCommodityOverlay)) {
-        const q = quoteData[sym];
-        if (!q) continue;
-        q.price = rt.price;
-        if (q.prevClose) {
-          q.change = rt.price - q.prevClose;
-          q.changePct = (q.change / q.prevClose) * 100;
-        }
-        q._lastUpdate = Date.now();
       }
     }
     // Mark tickers as unknown when any source replied successfully (even with
@@ -4471,6 +4484,14 @@ async function _refreshAll(signal) {
         }
         // Fill missing fields from any source
         if (q.name === sym && sData.name && sData.name !== sym) q.name = sData.name;
+        // change / changePct / prevClose can be missing when the primary
+        // source returned price-only data (e.g. Stooq's bogus 0% placeholder
+        // for thinly-traded futures). Fill from secondary sources so the
+        // change column doesn't sit at "+0" / "—" while another source has
+        // the real day-over-day delta.
+        if (q.change == null && sData.change != null) q.change = sData.change;
+        if (q.changePct == null && sData.changePct != null) q.changePct = sData.changePct;
+        if (q.prevClose == null && sData.prevClose != null) q.prevClose = sData.prevClose;
         if (q.postMarketPrice == null && sData.postMarketPrice != null) { q.postMarketPrice = sData.postMarketPrice; q.postMarketChange = sData.postMarketChange; }
         if (q.preMarketPrice == null && sData.preMarketPrice != null) { q.preMarketPrice = sData.preMarketPrice; q.preMarketChange = sData.preMarketChange; }
         if (q.marketState == null && sData.marketState != null) q.marketState = sData.marketState;
@@ -4496,6 +4517,24 @@ async function _refreshAll(signal) {
       } else if (!errorSymbols.has(sym)) {
         quoteData[sym] = sData;
       }
+    }
+  }
+
+  // Apply real-time tokenized-commodity overlay (PAXG → GC=F) after the
+  // mergeSources loop so prevClose is filled. Without this ordering, primary
+  // sources that return price-only data (Stooq's bogus 0% change for thinly-
+  // traded futures) would leave prevClose null and the overlay couldn't
+  // re-derive change/changePct.
+  if (realtimeCommodityOverlay) {
+    for (const [sym, rt] of Object.entries(realtimeCommodityOverlay)) {
+      const q = quoteData[sym];
+      if (!q) continue;
+      q.price = rt.price;
+      if (q.prevClose) {
+        q.change = rt.price - q.prevClose;
+        q.changePct = (q.change / q.prevClose) * 100;
+      }
+      q._lastUpdate = Date.now();
     }
   }
 
