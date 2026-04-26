@@ -6716,6 +6716,52 @@ async function refreshCryptoOnly() {
   }
 }
 
+// Lightweight commodities-only refresh — same fast-tick pattern as refreshCryptoOnly.
+// Uses Stooq's batched CSV (one direct-CORS call covers all commodity futures in
+// the portfolio, ~500 ms typical). Stooq's data is delayed by roughly the same
+// margin as Yahoo's free retail futures feed, so this isn't a freshness regression
+// vs. the heavy refreshAll path — just dramatically faster because there's no
+// per-symbol Yahoo-via-proxy loop. Falls through silently if Stooq fails; the
+// next heavy refreshAll will catch up via Yahoo.
+let _commoditiesOnlyInFlight = false;
+async function refreshCommoditiesOnly() {
+  if (_commoditiesOnlyInFlight) return;
+  _commoditiesOnlyInFlight = true;
+  try {
+    const commoditySyms = portfolio.map(p => p.symbol).filter(isCommoditySymbol);
+    if (commoditySyms.length === 0) return;
+    const result = await fetchStooqQuotes(commoditySyms);
+    if (!result || !result.data) return;
+    let updated = false;
+    for (const [sym, cData] of Object.entries(result.data)) {
+      if (!isCommoditySymbol(sym)) continue;
+      const existing = quoteData[sym];
+      if (existing) {
+        prevPrices[sym] = existing.price;
+        // Preserve fields that Stooq doesn't return (52-week range, perf, marketState, etc.)
+        // so the heavy refresh's previously-fetched data isn't overwritten with nulls.
+        if (cData.wk52High == null && existing.wk52High != null) cData.wk52High = existing.wk52High;
+        if (cData.wk52Low == null && existing.wk52Low != null) cData.wk52Low = existing.wk52Low;
+        if (cData.perfYTD == null && existing.perfYTD != null) cData.perfYTD = existing.perfYTD;
+        if (cData.perf6M == null && existing.perf6M != null) cData.perf6M = existing.perf6M;
+        if (cData.perf1Y == null && existing.perf1Y != null) cData.perf1Y = existing.perf1Y;
+        if (cData.marketCap == null && existing.marketCap != null) cData.marketCap = existing.marketCap;
+        if (cData.avgVolume == null && existing.avgVolume != null) cData.avgVolume = existing.avgVolume;
+      }
+      quoteData[sym] = cData;
+      errorSymbols.delete(sym);
+      updated = true;
+    }
+    if (updated) {
+      renderTable();
+      updateSummary();
+      document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+    }
+  } finally {
+    _commoditiesOnlyInFlight = false;
+  }
+}
+
 // Lightweight refresh for crypto and commodity positions only (no stock API calls)
 async function refreshAlwaysOnOnly() {
   const symbols = portfolio.map(p => p.symbol);
@@ -6749,24 +6795,33 @@ async function refreshAlwaysOnOnly() {
     }
   }
 
-  // Commodities via Yahoo v8 (only if not fetched recently via full refresh)
-  if (commoditySyms.length > 0 && Date.now() - offHoursLastFullRefresh >= OFF_HOURS_FULL_INTERVAL) {
-    for (let ci = 0; ci < commoditySyms.length; ci++) {
-      if (ci > 0) await new Promise(r => setTimeout(r, FILL_FUND_BATCH_DELAY));
-      const sym = commoditySyms[ci];
-      try {
-        const text = await fetchWithProxy('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true');
-        const data = JSON.parse(text);
-        if (data.chart && data.chart.result && data.chart.result[0]) {
-          const q = normalizeYahooChart(sym, data.chart.result[0]);
-          if (q) {
-            if (quoteData[sym]) prevPrices[sym] = quoteData[sym].price;
-            quoteData[sym] = q;
-            errorSymbols.delete(sym);
-            updated = true;
-          }
+  // Commodities via Stooq's batched CSV — direct CORS preferred, one call
+  // covers everything. Replaces the previous per-symbol Yahoo v8 loop with its
+  // 60-second gate, so commodity prices now tick every refresh interval
+  // off-hours just like crypto. The full refreshAll path (fired once per
+  // OFF_HOURS_FULL_INTERVAL) still hits Yahoo for any fresher data.
+  let commoditySourceLabel = null;
+  if (commoditySyms.length > 0) {
+    const stooqResult = await fetchStooqQuotes(commoditySyms);
+    if (stooqResult && stooqResult.data) {
+      commoditySourceLabel = stooqResult.source || 'Stooq';
+      for (const [sym, sData] of Object.entries(stooqResult.data)) {
+        if (!isCommoditySymbol(sym)) continue;
+        const existing = quoteData[sym];
+        if (existing) {
+          prevPrices[sym] = existing.price;
+          // Preserve fields Stooq doesn't return (52-week range, performance,
+          // marketState) so the heavy refresh's data isn't overwritten with nulls.
+          if (sData.wk52High == null && existing.wk52High != null) sData.wk52High = existing.wk52High;
+          if (sData.wk52Low == null && existing.wk52Low != null) sData.wk52Low = existing.wk52Low;
+          if (sData.perfYTD == null && existing.perfYTD != null) sData.perfYTD = existing.perfYTD;
+          if (sData.perf6M == null && existing.perf6M != null) sData.perf6M = existing.perf6M;
+          if (sData.perf1Y == null && existing.perf1Y != null) sData.perf1Y = existing.perf1Y;
         }
-      } catch (e) { /* commodity fetch failed, will retry next cycle */ }
+        quoteData[sym] = sData;
+        errorSymbols.delete(sym);
+        updated = true;
+      }
     }
   }
 
@@ -6775,7 +6830,7 @@ async function refreshAlwaysOnOnly() {
     updateSummary();
     const sources = [];
     if (cryptoSourceLabel) sources.push(cryptoSourceLabel);
-    if (commoditySyms.length > 0) sources.push('Yahoo Finance');
+    if (commoditySourceLabel) sources.push(commoditySourceLabel);
     setStatus('Data via ' + sources.join(' + ') + ' (off-hours)', 'live');
     updateWsIndicator();
     document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
@@ -6799,12 +6854,17 @@ function setupAutoRefresh() {
         // freeze the table).
         if (refreshInProgress) {
           // Main refresh is mid-flight (heavy stock fan-out can take 2–4 s on
-          // slow proxies). Don't stack a second one — but do fire a lightweight
-          // crypto-only tick so BTC/ETH stay on the user's interval instead of
-          // stalling at the slowest stock source's pace. No-op if there's no
-          // crypto in the portfolio.
+          // slow proxies). Don't stack a second one — but do fire lightweight
+          // crypto + commodities-only ticks so BTC/ETH and gold/oil stay on
+          // the user's interval instead of stalling at the slowest stock
+          // source's pace. Each is a no-op if its asset class isn't in the
+          // portfolio. Both go through fast direct-CORS sources (Coinbase
+          // for crypto, Stooq for commodities) so neither hits the proxy fleet.
           if (portfolio.some(p => COINGECKO_IDS[p.symbol])) {
             refreshCryptoOnly().catch(e => dbg('crypto-only refresh failed:', e.message));
+          }
+          if (portfolio.some(p => isCommoditySymbol(p.symbol))) {
+            refreshCommoditiesOnly().catch(e => dbg('commodities-only refresh failed:', e.message));
           }
         } else {
           refreshAll().catch(e => console.warn('refreshAll failed:', e));
