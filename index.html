@@ -1580,6 +1580,7 @@ const CG_MIN_INTERVAL = 30000;           // default cache TTL between CoinGecko 
 // the limit with ~33% headroom for the occasional supplemental call.
 const CG_MIN_INTERVAL_SMALL = 3000;
 const CG_SMALL_PORTFOLIO_THRESHOLD = 5;  // ≤ this many cryptos = "small" → cache TTL tracks the user's refresh interval
+const CG_TICK_ALIGN_BUFFER = 1000;       // shave 1s off TTL so cache expires before the next tick fires
 const YF_CRUMB_TTL = 30 * 60 * 1000;     // crumbs expire ~30 minutes
 const YF_V7_RETRY_MS = 3 * 60 * 1000;    // retry v7 after 3 minutes
 const WS_FRESH_MS = 10000;               // how recent a WS trade must be to skip REST quote
@@ -3307,15 +3308,22 @@ async function fetchCryptoQuotes(symbols) {
   //
   // Cache TTL scales with portfolio size: with ≤5 cryptos a single call
   // updates everything, so we let the cache turn over as fast as the user's
-  // chosen refresh interval (with a 5 s hard floor) — well under CoinGecko's
+  // chosen refresh interval (with a 3 s hard floor) — well under CoinGecko's
   // ~30 req/min free limit. Larger portfolios stay on the conservative 30 s
   // TTL since they're more likely to be combined with other API pressure.
+  //
+  // We subtract a 1 s alignment buffer from the TTL so the cache reliably
+  // expires *before* the next refresh tick fires. Without it, _cgCache.time
+  // is set when the response lands (e.g. T+0.3 s) so on the next tick at T+5 s
+  // only 4.7 s have elapsed — under a 5 s TTL — and the fetch is skipped,
+  // making BTC effectively refresh every 10 s on a 5 s interval setting.
   const now = Date.now();
   let ttl = CG_MIN_INTERVAL;
   if (cryptoSyms.length <= CG_SMALL_PORTFOLIO_THRESHOLD) {
     const refreshSec = parseInt(localStorage.getItem('stonks_refresh_interval') || '30', 10);
     const refreshMs = isFinite(refreshSec) && refreshSec > 0 ? refreshSec * 1000 : CG_MIN_INTERVAL;
-    ttl = Math.max(CG_MIN_INTERVAL_SMALL, Math.min(CG_MIN_INTERVAL, refreshMs));
+    const alignedTtl = refreshMs - CG_TICK_ALIGN_BUFFER;
+    ttl = Math.max(CG_MIN_INTERVAL_SMALL, Math.min(CG_MIN_INTERVAL, alignedTtl));
   }
   if (_cgCache.data && now - _cgCache.time < ttl) {
     const cached = _cgCache.data.data || {};
@@ -3325,9 +3333,11 @@ async function fetchCryptoQuotes(symbols) {
 
   const ids = cryptoSyms.map(s => COINGECKO_IDS[s]).join(',');
   try {
-    // Use /coins/markets for reliable high_24h/low_24h (simple/price doesn't support these on free tier)
+    // Use /coins/markets for reliable high_24h/low_24h (simple/price doesn't support these on free tier).
+    // precision=full preserves cents on high-value coins like BTC — the default "appropriate" precision
+    // rounds BTC to whole dollars, which loses information we'd otherwise display.
     const resp = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=' + ids +
-      '&order=market_cap_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h', {
+      '&order=market_cap_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h&precision=full', {
       signal: AbortSignal.timeout(COINGECKO_TIMEOUT)
     });
     if (resp.status === 429) {
