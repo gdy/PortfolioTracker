@@ -3306,37 +3306,80 @@ let _cgCache = { data: null, time: 0 };
 // IDs match our 'BTC-USD' format. Per-symbol failures (coin not listed on
 // Coinbase Exchange, transient network blip) silently leave the existing price
 // in place so we never regress data.
+//
+// At 2 s refresh with many stocks, the wider Promise.all in refreshAll is
+// already gated by the slowest source. We tighten the per-fetch timeout to
+// 1.5 s so a hung Coinbase call can't push fetchCryptoQuotes past the next
+// refresh tick. A short per-symbol cache absorbs duplicate calls when both
+// the main refresh path and a parallel fetchOneSymbolNow hit the same symbol
+// within one tick.
+const CB_CACHE_TTL = 1000;
+const CB_FETCH_TIMEOUT = 1500;
+const _cbCache = {}; // sym -> { data: {price, bid, ask}, time: ms }
+// Circuit breaker: after this many consecutive overlay attempts where every
+// symbol failed, skip Coinbase entirely for the cooldown so a Coinbase outage
+// can't permanently add 1.5 s of latency to every crypto refresh tick.
+let _cbFailStreak = 0;
+let _cbSkipUntil = 0;
+const CB_FAIL_THRESHOLD = 3;
+const CB_SKIP_COOLDOWN = 30000;
+async function _coinbaseFetch(sym) {
+  const cached = _cbCache[sym];
+  const now = Date.now();
+  if (cached && now - cached.time < CB_CACHE_TTL) return cached.data;
+  try {
+    const r = await fetch(`https://api.exchange.coinbase.com/products/${encodeURIComponent(sym)}/ticker`,
+                          { signal: AbortSignal.timeout(CB_FETCH_TIMEOUT) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const price = parseFloat(j.price);
+    if (!isFinite(price) || price <= 0) return null;
+    const data = {
+      price,
+      bid: j.bid != null && isFinite(parseFloat(j.bid)) && parseFloat(j.bid) > 0 ? parseFloat(j.bid) : null,
+      ask: j.ask != null && isFinite(parseFloat(j.ask)) && parseFloat(j.ask) > 0 ? parseFloat(j.ask) : null,
+    };
+    _cbCache[sym] = { data, time: now };
+    return data;
+  } catch (_) {
+    return null;
+  }
+}
 async function _overlayCoinbasePrices(out) {
   if (!out || !out.data) return out;
+  if (Date.now() < _cbSkipUntil) return out; // circuit breaker open — skip Coinbase
   const syms = Object.keys(out.data);
   if (syms.length === 0) return out;
   let patched = false;
-  await Promise.all(syms.map(async sym => {
-    try {
-      const r = await fetch(`https://api.exchange.coinbase.com/products/${encodeURIComponent(sym)}/ticker`,
-                            { signal: AbortSignal.timeout(4000) });
-      if (!r.ok) return;
-      const j = await r.json();
-      const price = parseFloat(j.price);
-      if (!isFinite(price) || price <= 0) return;
-      const q = out.data[sym];
-      if (!q) return;
-      q.price = price;
-      const bid = j.bid != null ? parseFloat(j.bid) : null;
-      const ask = j.ask != null ? parseFloat(j.ask) : null;
-      if (bid != null && isFinite(bid) && bid > 0) q.bid = bid;
-      if (ask != null && isFinite(ask) && ask > 0) q.ask = ask;
-      // Recompute change / changePct from the new price using CoinGecko's
-      // 24h-old prevClose so the % stays anchored to a real reference point.
-      if (q.prevClose) {
-        q.change = price - q.prevClose;
-        q.changePct = (q.change / q.prevClose) * 100;
-      }
-      q._lastUpdate = Date.now();
-      patched = true;
-    } catch (_) { /* per-symbol failure is silent — leave CoinGecko price */ }
-  }));
-  if (patched) out.source = 'CoinGecko + Coinbase';
+  const results = await Promise.all(syms.map(_coinbaseFetch));
+  for (let i = 0; i < syms.length; i++) {
+    const sym = syms[i], cb = results[i];
+    if (!cb) continue;
+    const q = out.data[sym];
+    if (!q) continue;
+    q.price = cb.price;
+    if (cb.bid != null) q.bid = cb.bid;
+    if (cb.ask != null) q.ask = cb.ask;
+    // Recompute change / changePct from the new price using CoinGecko's
+    // 24h-old prevClose so the % stays anchored to a real reference point.
+    if (q.prevClose) {
+      q.change = cb.price - q.prevClose;
+      q.changePct = (q.change / q.prevClose) * 100;
+    }
+    q._lastUpdate = Date.now();
+    patched = true;
+  }
+  if (patched) {
+    _cbFailStreak = 0;
+    out.source = 'CoinGecko + Coinbase';
+  } else {
+    _cbFailStreak++;
+    if (_cbFailStreak >= CB_FAIL_THRESHOLD) {
+      _cbSkipUntil = Date.now() + CB_SKIP_COOLDOWN;
+      _cbFailStreak = 0;
+      dbg('Coinbase overlay temporarily disabled (cooldown ' + (CB_SKIP_COOLDOWN/1000) + 's)');
+    }
+  }
   return out;
 }
 
@@ -6458,6 +6501,46 @@ function getMarketPhase() {
 
 let offHoursLastFullRefresh = 0;
 
+// Lightweight crypto-only refresh — used during active hours when the heavy
+// refreshAll is mid-flight, so BTC/ETH still update on the user's chosen tick
+// rate instead of being gated by the slowest stock source. fetchCryptoQuotes
+// already overlays Coinbase for real-time prices and self-throttles via the
+// CG cache, so this is just a thin "fetch + apply + render" wrapper.
+let _cryptoOnlyInFlight = false;
+async function refreshCryptoOnly() {
+  if (_cryptoOnlyInFlight) return;
+  _cryptoOnlyInFlight = true;
+  try {
+    const symbols = portfolio.map(p => p.symbol);
+    const cryptoResult = await fetchCryptoQuotes(symbols);
+    if (!cryptoResult || !cryptoResult.data) return;
+    let updated = false;
+    for (const [sym, cData] of Object.entries(cryptoResult.data)) {
+      const existing = quoteData[sym];
+      if (existing) {
+        prevPrices[sym] = existing.price;
+        // Preserve supplemental data the slow CG/Yahoo paths populated once
+        if (cData.wk52High == null && existing.wk52High != null) cData.wk52High = existing.wk52High;
+        if (cData.wk52Low == null && existing.wk52Low != null) cData.wk52Low = existing.wk52Low;
+        if (cData.perfYTD == null && existing.perfYTD != null) cData.perfYTD = existing.perfYTD;
+        if (cData.perf6M == null && existing.perf6M != null) cData.perf6M = existing.perf6M;
+        if (cData.perf1Y == null && existing.perf1Y != null) cData.perf1Y = existing.perf1Y;
+        if (cData.dayHigh == null && existing.dayHigh != null) cData.dayHigh = existing.dayHigh;
+        if (cData.dayLow == null && existing.dayLow != null) cData.dayLow = existing.dayLow;
+      }
+      quoteData[sym] = cData;
+      updated = true;
+    }
+    if (updated) {
+      renderTable();
+      updateSummary();
+      document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+    }
+  } finally {
+    _cryptoOnlyInFlight = false;
+  }
+}
+
 // Lightweight refresh for crypto and commodity positions only (no stock API calls)
 async function refreshAlwaysOnOnly() {
   const symbols = portfolio.map(p => p.symbol);
@@ -6539,7 +6622,18 @@ function setupAutoRefresh() {
         // ticks supplement it with real-time prices when available, but
         // never block the REST cycle (stale/restricted streams shouldn't
         // freeze the table).
-        refreshAll().catch(e => console.warn('refreshAll failed:', e));
+        if (refreshInProgress) {
+          // Main refresh is mid-flight (heavy stock fan-out can take 2–4 s on
+          // slow proxies). Don't stack a second one — but do fire a lightweight
+          // crypto-only tick so BTC/ETH stay on the user's interval instead of
+          // stalling at the slowest stock source's pace. No-op if there's no
+          // crypto in the portfolio.
+          if (portfolio.some(p => COINGECKO_IDS[p.symbol])) {
+            refreshCryptoOnly().catch(e => dbg('crypto-only refresh failed:', e.message));
+          }
+        } else {
+          refreshAll().catch(e => console.warn('refreshAll failed:', e));
+        }
       } else {
         // Off-hours (weeknight or weekend)
         const hasAlwaysOn = portfolio.some(p => isCryptoSymbol(p.symbol) || isCommoditySymbol(p.symbol));
