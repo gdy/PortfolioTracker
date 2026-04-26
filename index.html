@@ -3298,6 +3298,48 @@ const CRYPTO_NAMES = {
   'SHIB-USD': 'Shiba Inu', 'ATOM-USD': 'Cosmos', 'XLM-USD': 'Stellar',
 };
 let _cgCache = { data: null, time: 0 };
+
+// Coinbase Exchange public ticker — direct CORS, no CDN caching, real-time
+// price/bid/ask. Used as an overlay on top of CoinGecko's slower /coins/markets
+// payload so BTC/ETH/etc. actually move on every refresh tick instead of waiting
+// for CoinGecko's free-tier 30–60 s server-side update cycle. Coinbase product
+// IDs match our 'BTC-USD' format. Per-symbol failures (coin not listed on
+// Coinbase Exchange, transient network blip) silently leave the existing price
+// in place so we never regress data.
+async function _overlayCoinbasePrices(out) {
+  if (!out || !out.data) return out;
+  const syms = Object.keys(out.data);
+  if (syms.length === 0) return out;
+  let patched = false;
+  await Promise.all(syms.map(async sym => {
+    try {
+      const r = await fetch(`https://api.exchange.coinbase.com/products/${encodeURIComponent(sym)}/ticker`,
+                            { signal: AbortSignal.timeout(4000) });
+      if (!r.ok) return;
+      const j = await r.json();
+      const price = parseFloat(j.price);
+      if (!isFinite(price) || price <= 0) return;
+      const q = out.data[sym];
+      if (!q) return;
+      q.price = price;
+      const bid = j.bid != null ? parseFloat(j.bid) : null;
+      const ask = j.ask != null ? parseFloat(j.ask) : null;
+      if (bid != null && isFinite(bid) && bid > 0) q.bid = bid;
+      if (ask != null && isFinite(ask) && ask > 0) q.ask = ask;
+      // Recompute change / changePct from the new price using CoinGecko's
+      // 24h-old prevClose so the % stays anchored to a real reference point.
+      if (q.prevClose) {
+        q.change = price - q.prevClose;
+        q.changePct = (q.change / q.prevClose) * 100;
+      }
+      q._lastUpdate = Date.now();
+      patched = true;
+    } catch (_) { /* per-symbol failure is silent — leave CoinGecko price */ }
+  }));
+  if (patched) out.source = 'CoinGecko + Coinbase';
+  return out;
+}
+
 async function fetchCryptoQuotes(symbols) {
   const cryptoSyms = symbols.filter(s => COINGECKO_IDS[s]);
   if (cryptoSyms.length === 0) return null;
@@ -3327,7 +3369,13 @@ async function fetchCryptoQuotes(symbols) {
   }
   if (_cgCache.data && now - _cgCache.time < ttl) {
     const cached = _cgCache.data.data || {};
-    if (cryptoSyms.every(s => cached[s])) return _cgCache.data;
+    if (cryptoSyms.every(s => cached[s])) {
+      // Cache hit on CoinGecko — but still overlay Coinbase so the price moves.
+      // CoinGecko's TTL only governs how often we re-fetch the slow supplemental
+      // fields (24h high/low, market cap, volume); Coinbase fires every call so
+      // the price reflects the latest tick.
+      return await _overlayCoinbasePrices(_cgCache.data);
+    }
     // Otherwise fall through and hit CoinGecko for the new symbol
   }
 
@@ -3370,11 +3418,11 @@ async function fetchCryptoQuotes(symbols) {
     if (Object.keys(results).length > 0) {
       const out = { source: 'CoinGecko', data: results };
       _cgCache = { data: out, time: now };
-      return out;
+      return await _overlayCoinbasePrices(out);
     }
   } catch (e) {
     console.warn('CoinGecko fetch failed:', e.message);
-    if (_cgCache.data) return _cgCache.data;
+    if (_cgCache.data) return await _overlayCoinbasePrices(_cgCache.data);
   }
   return null;
 }
@@ -4117,9 +4165,12 @@ async function _refreshAll(signal) {
         }
       }
     }
-    // Always credit CoinGecko if it provided crypto data (applied directly, not via merge)
+    // Always credit the crypto source (CoinGecko, possibly with a Coinbase
+    // real-time price overlay) if it provided data. cryptoResult.source can be
+    // 'CoinGecko' or 'CoinGecko + Coinbase' depending on whether the overlay
+    // patched at least one symbol.
     if (cryptoResult && symbols.some(s => cryptoResult.data[s])) {
-      sourceNames.add('CoinGecko');
+      sourceNames.add(cryptoResult.source || 'CoinGecko');
     }
     // Credit Yahoo if commodity retry provided data
     if (missingCommodities.some(s => quoteData[s])) {
@@ -6414,11 +6465,13 @@ async function refreshAlwaysOnOnly() {
   const commoditySyms = symbols.filter(s => isCommoditySymbol(s));
 
   let updated = false;
+  let cryptoSourceLabel = null;
 
   // Crypto via CoinGecko (self-throttles to 30s internally)
   if (hasCrypto) {
     const cryptoResult = await fetchCryptoQuotes(symbols);
     if (cryptoResult) {
+      cryptoSourceLabel = cryptoResult.source || 'CoinGecko';
       for (const [sym, cData] of Object.entries(cryptoResult.data)) {
         const existing = quoteData[sym];
         if (existing) {
@@ -6463,7 +6516,7 @@ async function refreshAlwaysOnOnly() {
     renderTable();
     updateSummary();
     const sources = [];
-    if (hasCrypto) sources.push('CoinGecko');
+    if (cryptoSourceLabel) sources.push(cryptoSourceLabel);
     if (commoditySyms.length > 0) sources.push('Yahoo Finance');
     setStatus('Data via ' + sources.join(' + ') + ' (off-hours)', 'live');
     updateWsIndicator();
