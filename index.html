@@ -660,6 +660,63 @@
     border-radius: 6px; padding: 12px; z-index: 6000; width: 220px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.5);
   }
+  /* Analyst rating popover — wider than the alert popover so the breakdown bar reads cleanly */
+  .analyst-popover {
+    position: fixed; background: #12122a; border: 1px solid #444;
+    border-radius: 6px; padding: 14px; z-index: 6000; width: 280px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    color: #ccc; font-size: 12px;
+  }
+  /* padding-right reserves space for the absolute-positioned close button so the
+     period text on the right never crowds the × icon */
+  .analyst-popover .ap-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; padding-right: 18px; }
+  .analyst-popover .ap-sym { color: #fff; font-size: 14px; font-weight: bold; }
+  .analyst-popover .ap-period { color: #666; font-size: 10px; }
+  .analyst-popover .ap-rating-line { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .analyst-popover .ap-rating-label { font-size: 16px; font-weight: bold; }
+  .analyst-popover .ap-rating-label.pos { color: #6f6; }
+  .analyst-popover .ap-rating-label.neg { color: #f66; }
+  .analyst-popover .ap-rating-label.neutral { color: #ddd; }
+  .analyst-popover .ap-score { font-size: 11px; color: #888; }
+  /* Score scale bar — 1 (left, green) to 5 (right, red), with marker for the symbol's mean */
+  .analyst-popover .ap-scale {
+    position: relative; height: 8px; border-radius: 4px;
+    background: linear-gradient(to right, #2a8a48 0%, #6a8a2a 25%, #999 50%, #aa6a2a 75%, #b04040 100%);
+    margin-bottom: 4px;
+  }
+  .analyst-popover .ap-scale-marker {
+    position: absolute; top: -3px; width: 2px; height: 14px;
+    background: #fff; box-shadow: 0 0 4px rgba(255,255,255,0.8);
+  }
+  .analyst-popover .ap-scale-ticks { display: flex; justify-content: space-between; font-size: 9px; color: #666; margin-bottom: 12px; }
+  /* Stacked breakdown bar — each segment width proportional to that bucket's share */
+  .analyst-popover .ap-breakdown-bar {
+    display: flex; height: 14px; border-radius: 3px; overflow: hidden; margin-bottom: 6px;
+    background: #1a1a30;
+  }
+  .analyst-popover .ap-breakdown-bar > span {
+    display: block; min-width: 0;
+    transition: filter 0.15s;
+  }
+  .analyst-popover .ap-breakdown-bar > span:hover { filter: brightness(1.3); }
+  .analyst-popover .ap-bucket-strongbuy { background: #2a9a4c; }
+  .analyst-popover .ap-bucket-buy       { background: #6fc04a; }
+  .analyst-popover .ap-bucket-hold      { background: #888; }
+  .analyst-popover .ap-bucket-sell      { background: #d07a2a; }
+  .analyst-popover .ap-bucket-strongsell{ background: #c04040; }
+  .analyst-popover .ap-breakdown-list {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 2px 10px;
+    font-size: 11px; margin-top: 6px;
+  }
+  .analyst-popover .ap-breakdown-list .ap-bucket-name { color: #aaa; }
+  .analyst-popover .ap-breakdown-list .ap-bucket-count { color: #fff; text-align: right; min-width: 28px; }
+  .analyst-popover .ap-breakdown-list .ap-bucket-pct { color: #666; text-align: right; min-width: 36px; }
+  .analyst-popover .ap-meta { font-size: 10px; color: #666; margin-top: 8px; padding-top: 8px; border-top: 1px solid #2a2a44; }
+  .analyst-popover .ap-close {
+    position: absolute; top: 6px; right: 8px;
+    background: none; border: none; color: #666; font-size: 16px; cursor: pointer; padding: 0; line-height: 1;
+  }
+  .analyst-popover .ap-close:hover { color: #fff; }
   @keyframes alertPulse { 0%,100% { box-shadow: none; } 50% { box-shadow: inset 0 0 12px rgba(255,200,0,0.15); } }
   .alert-triggered {
     background: rgba(255,200,0,0.06) !important;
@@ -1165,6 +1222,26 @@
   </div>
 </div>
 
+<!-- Analyst Rating Popover -->
+<div class="analyst-popover" id="analyst-popover" style="display:none;" onclick="event.stopPropagation()">
+  <button class="ap-close" onclick="_closeAnalystPopover()" title="Close">&#215;</button>
+  <div class="ap-header">
+    <span class="ap-sym" id="ap-sym"></span>
+    <span class="ap-period" id="ap-period"></span>
+  </div>
+  <div class="ap-rating-line">
+    <span class="ap-rating-label" id="ap-rating-label"></span>
+    <span class="ap-score" id="ap-score"></span>
+  </div>
+  <div class="ap-scale"><div class="ap-scale-marker" id="ap-scale-marker"></div></div>
+  <div class="ap-scale-ticks"><span>Strong Buy</span><span>Hold</span><span>Strong Sell</span></div>
+  <div id="ap-breakdown-section">
+    <div class="ap-breakdown-bar" id="ap-breakdown-bar"></div>
+    <div class="ap-breakdown-list" id="ap-breakdown-list"></div>
+  </div>
+  <div class="ap-meta" id="ap-meta"></div>
+</div>
+
 <!-- Alert Popover -->
 <div class="alert-popover" id="alert-popover" style="display:none;" onclick="event.stopPropagation()">
   <div style="font-size:11px; color:#888; margin-bottom:6px;">Price Alerts for <strong id="alert-popover-sym" style="color:#fff;"></strong></div>
@@ -1451,6 +1528,7 @@ const COLUMNS = [
   { key: 'pe',        label: 'P/E',           align: 'right', sortable: true,  w: 60  },
   { key: 'eps',       label: 'EPS',           align: 'right', sortable: true,  w: 60  },
   { key: 'beta',      label: 'Beta',          align: 'right', sortable: true,  w: 60  },
+  { key: 'analystRating', label: 'Analyst',   align: 'right', sortable: true,  w: 100 },
   { key: 'notes',     label: 'Notes',         align: 'left',  sortable: false, w: 150 },
   { key: 'delete',    label: '',              align: 'right', sortable: false, w: 40  },
 ];
@@ -1521,6 +1599,11 @@ function makeEmptyQuote(sym) {
     postMarketPrice: null, postMarketChange: null,
     preMarketPrice: null, preMarketChange: null, marketState: null,
     perfYTD: null, perf6M: null, perf1Y: null,
+    analystRating: null, // display label: "Strong Buy" / "Buy" / "Hold" / "Sell" / "Strong Sell"
+    analystScore: null,  // 1.0 (strong buy) to 5.0 (strong sell), used for sort + tint
+    analystCount: null,  // number of analysts contributing to the consensus
+    analystBreakdown: null, // FinnHub raw counts {strongBuy, buy, hold, sell, strongSell} or null (Yahoo source has no breakdown)
+    analystPeriod: null,    // FinnHub reporting period (YYYY-MM-DD) or null
     _lastUpdate: null, // timestamp of last data update for this symbol
   };
 }
@@ -1572,6 +1655,15 @@ let portfolio = lsGet('stonks_portfolio', '[]');
 let notes = lsGet('stonks_notes', '{}');
 let quoteData = {};
 let errorSymbols = new Set(); // track symbols that failed to resolve
+// Debug logger for noisy per-symbol fetch warnings. Off by default so the
+// console stays quiet during normal operation (a single refresh can race
+// dozens of proxies × symbols, and most non-winners produce expected errors).
+// To enable verbose logging:  localStorage.setItem('stonks_debug','1')  then reload.
+const _DEBUG = (() => {
+  try { return localStorage.getItem('stonks_debug') === '1'; } catch (_) { return false; }
+})();
+function dbg(...args) { if (_DEBUG) console.warn(...args); }
+
 let prevPrices = {};
 let sortCol = null;
 let sortAsc = true;
@@ -1676,7 +1768,6 @@ let _savePortfolioTimer = null;
 let _saveNotesTimer = null;
 function _savePortfolioNow() {
   _savePortfolioTimer = null;
-  bumpPortfolioVersion();
   safeSet('stonks_portfolio', JSON.stringify(portfolio));
   const all = lsGet('stonks_portfolios', '{}');
   const name = localStorage.getItem('stonks_active_portfolio') || 'Default';
@@ -1695,6 +1786,10 @@ function _saveNotesNow() {
   safeSet('stonks_portfolios', JSON.stringify(all));
 }
 function savePortfolio() {
+  // Bump synchronously so getSortedPortfolio's cache invalidates immediately —
+  // otherwise a freshly-added position is missing from the sorted view until
+  // the 250ms debounce fires (visible as "no row appears until later").
+  bumpPortfolioVersion();
   if (_savePortfolioTimer) clearTimeout(_savePortfolioTimer);
   _savePortfolioTimer = setTimeout(_savePortfolioNow, SAVE_DEBOUNCE_MS);
   updateUndoRedoButtons();
@@ -1860,12 +1955,22 @@ function addPosition() {
   tickerEl.value = ''; sharesEl.value = ''; costEl.value = ''; dateEl.value = '';
   updateDateLabel();
   tickerEl.focus();
-  setStatus('Fetching data for ' + symbol + '...', 'loading');
+  const fetchingMsg = 'Fetching data for ' + symbol + '...';
+  setStatus(fetchingMsg, 'loading');
   // Fire a targeted single-symbol fetch immediately so the new symbol's price
   // shows up without waiting for the in-progress refresh to complete. This is
   // the difference between "gold appears in 2 seconds" and "gold appears in 30
   // seconds after all 20 stocks finish their fundamentals fetch".
-  fetchOneSymbolNow(symbol);
+  // Once the targeted fetch lands a price, clear the status if no other path
+  // has overwritten it yet — otherwise "Fetching data for MU..." can sit
+  // there for several seconds while an in-progress refresh finishes its run.
+  fetchOneSymbolNow(symbol).then(() => {
+    const el = document.getElementById('status-text');
+    if (!el || el.textContent !== fetchingMsg) return;
+    if (quoteData[symbol] && quoteData[symbol].price != null) {
+      setStatus(symbol + ' loaded', 'live');
+    }
+  });
   // Also queue a full refresh so fundamentals/perf/etc fill in
   if (refreshInProgress) {
     pendingRefreshAfter = true;
@@ -2391,7 +2496,7 @@ async function fetchWithProxy(url, proxyIndex = -1, timeout = PROXY_FETCH_TIMEOU
       lastWorkingProxy = idx;
       return text;
     } catch (err) {
-      console.warn(`Proxy ${idx} failed for ${url}:`, err.message);
+      dbg(`Proxy ${idx} failed for ${url}:`, err.message);
       return attempt((idx + 1) % PROXIES.length);
     }
   }
@@ -2526,7 +2631,7 @@ async function fetchYahooQuotes(symbols) {
         return { sym, chart: normalizeYahooChart(sym, data.chart.result[0]) };
       }
     } catch (e) {
-      console.warn('v8 chart failed for', sym, e.message);
+      dbg('v8 chart failed for', sym, e.message);
     }
     return { sym, chart: null };
   });
@@ -2597,7 +2702,7 @@ async function fetchYahooQuotes(symbols) {
           }
         }
       } catch (e) {
-        console.warn('v8 chart failed for', sym, e.message);
+        dbg('v8 chart failed for', sym, e.message);
       }
     }));
   }
@@ -2611,7 +2716,7 @@ async function fetchYahooQuotes(symbols) {
 
 // --- Yahoo quoteSummary per symbol (gets fundamentals) ---
 async function fetchYahooSummary(sym) {
-  const modules = 'price,summaryDetail,defaultKeyStatistics,calendarEvents';
+  const modules = 'price,summaryDetail,defaultKeyStatistics,calendarEvents,financialData';
   const crumb = await getYahooCrumb();
 
   // Build URL variants. Try crumb-bearing URLs FIRST since they're more reliable —
@@ -2648,6 +2753,11 @@ async function fetchYahooSummary(sym) {
     const sd = r.summaryDetail || {};
     const ks = r.defaultKeyStatistics || {};
     const cal = r.calendarEvents || {};
+    const fd = r.financialData || {};
+    const recMean = getVal(fd.recommendationMean);
+    const recCount = getVal(fd.numberOfAnalystOpinions);
+    const recKeyLabel = ratingLabelFromYahooKey(fd.recommendationKey);
+    const recScoreLabel = ratingLabelFromScore(recMean);
     return {
       pe: getVal(sd.trailingPE) || getVal(ks.trailingPE),
       eps: getVal(ks.trailingEps),
@@ -2668,6 +2778,9 @@ async function fetchYahooSummary(sym) {
       preMarketPrice: getVal(price.preMarketPrice),
       preMarketChange: getVal(price.preMarketChange),
       marketState: price.marketState,
+      analystRating: recScoreLabel || recKeyLabel,
+      analystScore: recMean,
+      analystCount: recCount,
     };
   }
 
@@ -2687,7 +2800,7 @@ async function fetchYahooSummary(sym) {
       if (result) return result;
     } catch (e) { /* exhausted */ }
   }
-  console.warn('quoteSummary failed for', sym);
+  dbg('quoteSummary failed for', sym);
   return null;
 }
 
@@ -2824,10 +2937,50 @@ function normalizeYahooChart(sym, chart) {
   };
 }
 
+// --- Analyst rating helpers (shared by FinnHub + Yahoo paths) ---
+// Map a 1-5 mean recommendation score to a display label. The cutoffs match
+// the Yahoo Finance / FinnHub convention (1=strong buy, 3=hold, 5=strong sell).
+function ratingLabelFromScore(score) {
+  if (score == null || isNaN(score)) return null;
+  if (score < 1.5) return 'Strong Buy';
+  if (score < 2.5) return 'Buy';
+  if (score < 3.5) return 'Hold';
+  if (score < 4.5) return 'Sell';
+  return 'Strong Sell';
+}
+// Compute analyst consensus from FinnHub /stock/recommendation latest entry.
+// Input shape: { strongBuy, buy, hold, sell, strongSell, period }. Returns
+// { rating, score, count } or null when there are no analysts.
+function ratingFromFinnhubRow(row) {
+  if (!row) return null;
+  const sb = row.strongBuy || 0, b = row.buy || 0, h = row.hold || 0, s = row.sell || 0, ss = row.strongSell || 0;
+  const total = sb + b + h + s + ss;
+  if (total === 0) return null;
+  const score = (1 * sb + 2 * b + 3 * h + 4 * s + 5 * ss) / total;
+  return {
+    rating: ratingLabelFromScore(score),
+    score,
+    count: total,
+    breakdown: { strongBuy: sb, buy: b, hold: h, sell: s, strongSell: ss },
+    period: row.period || null,
+  };
+}
+// Yahoo `recommendationKey` is a snake_case string — map to our display label.
+function ratingLabelFromYahooKey(key) {
+  if (!key) return null;
+  const k = String(key).toLowerCase();
+  if (k === 'strong_buy') return 'Strong Buy';
+  if (k === 'buy') return 'Buy';
+  if (k === 'hold' || k === 'neutral') return 'Hold';
+  if (k === 'underperform' || k === 'sell') return 'Sell';
+  if (k === 'strong_sell') return 'Strong Sell';
+  return null;
+}
+
 // --- FinnHub API (reliable, free key required) ---
 // Fetches only /quote each refresh (1 call/symbol). Fundamentals (profile, metrics,
-// earnings, dividends) are cached and only fetched once per session per symbol.
-// This keeps usage well under the 60 calls/min free tier limit.
+// earnings, dividends, analyst recommendations) are cached and only fetched once per
+// session per symbol. This keeps usage well under the 60 calls/min free tier limit.
 async function fetchFinnhubQuotes(symbols) {
   const key = getApiKey();
   if (!key) return null;
@@ -2849,11 +3002,12 @@ async function fetchFinnhubQuotes(symbols) {
       // process batch
       const fundPromises = batch.map(async sym => {
         try {
-          const [profileResp, metricsResp, earningsResp, dividendResp] = await Promise.all([
+          const [profileResp, metricsResp, earningsResp, dividendResp, recResp] = await Promise.all([
             fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${key}`),
             fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${key}`),
             fetch(`https://finnhub.io/api/v1/calendar/earnings?symbol=${yfEnc(sym)}&from=${fromDate}&to=${toDate}&token=${key}`),
             fetch(`https://finnhub.io/api/v1/stock/dividend?symbol=${yfEnc(sym)}&from=2024-01-01&to=${toDate}&token=${key}`),
+            fetch(`https://finnhub.io/api/v1/stock/recommendation?symbol=${yfEnc(sym)}&token=${key}`),
           ]);
           if (metricsResp.status === 429 || profileResp.status === 429) {
             console.warn('FinnHub rate limited for', sym, '- will retry next refresh');
@@ -2863,6 +3017,16 @@ async function fetchFinnhubQuotes(symbols) {
           const metrics = metricsResp.ok ? await metricsResp.json() : {};
           const earnings = earningsResp.ok ? await earningsResp.json() : {};
           const dividends = dividendResp.ok ? await dividendResp.json() : [];
+          // Recommendation endpoint returns an array sorted newest-first; we
+          // only need the most recent month's consensus. A 429 / non-OK here
+          // shouldn't fail the whole symbol — ratings are supplemental.
+          let rec = null;
+          if (recResp.ok) {
+            try {
+              const recArr = await recResp.json();
+              if (Array.isArray(recArr) && recArr.length > 0) rec = ratingFromFinnhubRow(recArr[0]);
+            } catch (_) { /* malformed JSON — leave rating null */ }
+          }
           const m = metrics.metric || {};
 
           let earningsDate = null;
@@ -2891,6 +3055,11 @@ async function fetchFinnhubQuotes(symbols) {
             perfYTD: m.yearToDatePriceReturnDaily || null,
             perf6M: m['6MonthPriceReturnDaily'] || m['26WeekPriceReturnDaily'] || null,
             perf1Y: m['52WeekPriceReturnDaily'] || null,
+            analystRating: rec ? rec.rating : null,
+            analystScore: rec ? rec.score : null,
+            analystCount: rec ? rec.count : null,
+            analystBreakdown: rec ? rec.breakdown : null,
+            analystPeriod: rec ? rec.period : null,
           };
           fetchedFundamentals.add(sym);
           // Mark as summary-fetched too so fillFundamentals skips this symbol
@@ -2900,7 +3069,7 @@ async function fetchFinnhubQuotes(symbols) {
             fetchedSummary.add(sym);
           }
         } catch (e) {
-          console.warn('FinnHub fundamentals failed for', sym, e.message);
+          dbg('FinnHub fundamentals failed for', sym, e.message);
         }
       });
       await Promise.all(fundPromises);
@@ -2935,11 +3104,13 @@ async function fetchFinnhubQuotes(symbols) {
             dividend: cached.dividend, dividendYield: cached.dividendYield,
             exDivDate: cached.exDivDate, earningsDate: cached.earningsDate,
             perfYTD: cached.perfYTD, perf6M: cached.perf6M, perf1Y: cached.perf1Y,
+            analystRating: cached.analystRating, analystScore: cached.analystScore, analystCount: cached.analystCount,
+            analystBreakdown: cached.analystBreakdown, analystPeriod: cached.analystPeriod,
             _lastUpdate: Date.now(),
           };
         }
       } catch (e) {
-        console.warn('FinnHub quote failed for', sym, e.message);
+        dbg('FinnHub quote failed for', sym, e.message);
       }
     });
     await Promise.all(quotePromises);
@@ -3230,7 +3401,7 @@ async function fetchPerformanceData(symbols) {
         gotPerf = true;
       }
     } catch (e) {
-      console.warn('Yahoo perf failed for', sym, e.message);
+      dbg('Yahoo perf failed for', sym, e.message);
     }
     if (gotPerf) continue;
 
@@ -3255,7 +3426,7 @@ async function fetchPerformanceData(symbols) {
           }
           break;
         } catch (e) {
-          console.warn('Alpaca perf failed for', sym, e.message);
+          dbg('Alpaca perf failed for', sym, e.message);
         }
       }
     }
@@ -3309,7 +3480,7 @@ async function fetchCryptoSupplemental(symbols) {
         if (q.perf1Y == null && oneYPrice) q.perf1Y = ((currentPrice - oneYPrice) / oneYPrice) * 100;
       }
     } catch (e) {
-      console.warn('CoinGecko supplemental failed for', sym, e.message);
+      dbg('CoinGecko supplemental failed for', sym, e.message);
     }
     // Small delay between requests to stay under CoinGecko rate limit
     await new Promise(r => setTimeout(r, CG_SUPPLEMENTAL_DELAY));
@@ -3433,6 +3604,12 @@ async function fillFundamentals(symbols) {
           q.preMarketChange = summary.preMarketChange;
         }
         if (q.marketState == null && summary.marketState != null) q.marketState = summary.marketState;
+        if (q.analystRating == null && summary.analystRating != null) {
+          q.analystRating = summary.analystRating;
+          q.analystScore = summary.analystScore;
+          q.analystCount = summary.analystCount;
+          // Yahoo financialData has no per-bucket breakdown; leave as null
+        }
         // Only block the AH retry pass if we actually have a price
         if (summary.postMarketPrice != null || summary.preMarketPrice != null) {
           fetchedAfterHours.add(sym);
@@ -3473,10 +3650,10 @@ async function fillFundamentals(symbols) {
               fetchedSummary.add(sym);
             }
           } else {
-            console.warn('FinnHub metrics HTTP', metricsResp.status, 'for', sym);
+            dbg('FinnHub metrics HTTP', metricsResp.status, 'for', sym);
           }
         } catch (e) {
-          console.warn('FinnHub metrics fallback failed for', sym, e.message);
+          dbg('FinnHub metrics fallback failed for', sym, e.message);
         }
       }
     });
@@ -3526,18 +3703,72 @@ async function fetchOneSymbolNow(sym) {
         return;
       }
 
-      // Stocks AND commodities: race a small set of proxies × Yahoo CDN domains.
-      // v8 chart works for both, so just use that — v7 needs a crumb to be reliable
-      // and adding crumb fetch in this hot path would defeat the purpose.
-      // Cap at 6 parallel attempts: 3 proxies × 2 CDN domains. Higher counts just
-      // queue at the browser's per-origin connection limit and add contention against
-      // the in-progress refresh that's competing for the same proxies.
-      const urls = [
-        'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true',
-        'https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true',
-      ];
+      // Stocks AND commodities: race three independent paths in parallel and
+      // apply whichever resolves first with a valid price. Direct-CORS sources
+      // (FinnHub, Alpaca) typically return in 200–500 ms vs. 1–3 s for the
+      // proxied Yahoo path, so racing them shaves visible "loading..." time
+      // when the user has those keys configured. The proxied Yahoo race is
+      // still always included as a fallback for symbols those APIs don't cover
+      // (commodities, low-volume tickers, free-tier IEX gaps).
+      const isCommodity = isCommoditySymbol(sym);
+      const finnhubKey = getApiKey();
+      const alpacaKeys = getAlpacaKeys();
+      const racers = [];
 
-      try {
+      // FinnHub /quote — direct CORS. Skips commodities (FinnHub stock endpoint
+      // doesn't cover futures). One call, ~200–500 ms typical latency.
+      if (finnhubKey && !isCommodity) {
+        racers.push((async () => {
+          const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${yfEnc(sym)}&token=${finnhubKey}`,
+                                { signal: AbortSignal.timeout(5000) });
+          if (!r.ok) throw new Error('finnhub ' + r.status);
+          const j = await r.json();
+          if (!(j.c && j.c > 0)) throw new Error('finnhub no price');
+          return { ...makeEmptyQuote(sym),
+            name: sym, price: j.c, change: j.d, changePct: j.dp,
+            prevClose: j.pc, open: j.o, dayHigh: j.h, dayLow: j.l,
+            _lastUpdate: Date.now(),
+          };
+        })());
+      }
+
+      // Alpaca snapshot — direct CORS. Skips crypto/commodities.
+      if (alpacaKeys.keyId && alpacaKeys.secret && !isCommodity) {
+        racers.push((async () => {
+          const feed = alpacaWorkingFeed != null ? alpacaWorkingFeed : 'iex';
+          const url = `https://data.alpaca.markets/v2/stocks/${encodeURIComponent(sym)}/snapshot${feed ? '?feed=' + feed : ''}`;
+          const r = await fetch(url, {
+            headers: { 'APCA-API-KEY-ID': alpacaKeys.keyId, 'APCA-API-SECRET-KEY': alpacaKeys.secret },
+            signal: AbortSignal.timeout(5000)
+          });
+          if (!r.ok) throw new Error('alpaca ' + r.status);
+          const snap = await r.json();
+          const trade = snap.latestTrade || snap.trade || {};
+          const quote = snap.latestQuote || snap.quote || {};
+          const bar = snap.dailyBar || snap.bar || {};
+          const prevBar = snap.prevDailyBar || {};
+          const price = trade.p || bar.c;
+          if (!price) throw new Error('alpaca no price');
+          const prevClose = prevBar.c || null;
+          return { ...makeEmptyQuote(sym),
+            name: sym, price,
+            change: prevClose ? price - prevClose : null,
+            changePct: prevClose ? ((price - prevClose) / prevClose) * 100 : null,
+            prevClose, open: bar.o || null, dayHigh: bar.h || null, dayLow: bar.l || null,
+            volume: bar.v || null,
+            bid: quote.bp || null, ask: quote.ap || null,
+            _lastUpdate: Date.now(),
+          };
+        })());
+      }
+
+      // Yahoo v8 chart via proxy race — always included; only path that covers
+      // commodities + symbols missing from the other two sources.
+      racers.push((async () => {
+        const urls = [
+          'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true',
+          'https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true',
+        ];
         const text = await fetchAnyVariantRace(urls, 9000, 6);
         const data = JSON.parse(text);
         let q = null;
@@ -3547,17 +3778,145 @@ async function fetchOneSymbolNow(sym) {
         if (!q && data.chart && data.chart.result && data.chart.result[0]) {
           q = normalizeYahooChart(sym, data.chart.result[0]);
         }
+        if (!q || q.price == null) throw new Error('yahoo no quote');
+        return q;
+      })());
+
+      try {
+        // Promise.any resolves on the first success; rejections from slower
+        // racers are silently absorbed unless ALL of them fail, in which case
+        // an AggregateError propagates and the catch logs it.
+        const q = await Promise.any(racers);
         _applyOneSymbolQuote(sym, q);
+        // Kick off a background fundamentals warmer so PE/EPS/beta/marketCap
+        // and the analyst rating start filling in immediately, instead of
+        // waiting for the upcoming refreshAll batch (which can be 1–3s into
+        // its slowest source). Fire-and-forget — the warmer no-ops if a
+        // refresh has already populated fundamentalsCache.
+        if (finnhubKey && !isCommodity && !isCryptoSymbol(sym)) {
+          _warmFinnhubFundamentals(sym, finnhubKey);
+        }
       } catch (e) {
-        console.warn('fetchOneSymbolNow race failed for', sym, e.message);
+        const reason = e && e.errors ? e.errors.map(x => x && x.message).filter(Boolean).join('; ') : (e && e.message);
+        dbg('fetchOneSymbolNow race failed for', sym, reason);
       }
     } catch (e) {
-      console.warn('fetchOneSymbolNow failed for', sym, e.message);
+      dbg('fetchOneSymbolNow failed for', sym, e.message);
     }
   })();
   _oneSymbolInFlight.set(sym, p);
   p.finally(() => { _oneSymbolInFlight.delete(sym); });
   return p;
+}
+
+// Fire-and-forget single-symbol FinnHub fundamentals fetch. Used by
+// fetchOneSymbolNow after a successful price race so PE/EPS/beta/marketCap/
+// analyst rating start filling without waiting for the next refreshAll batch.
+// Mirrors the per-symbol fetch in fetchFinnhubQuotes — when both run, whichever
+// finishes first sets fetchedFundamentals, and the other becomes a no-op.
+const _fundamentalsWarmInFlight = new Set();
+async function _warmFinnhubFundamentals(sym, key) {
+  if (fetchedFundamentals.has(sym) || _fundamentalsWarmInFlight.has(sym)) return;
+  _fundamentalsWarmInFlight.add(sym);
+  try {
+    const now = new Date();
+    const fromDate = new Date(now.getTime() - 7 * 86400000).toISOString().split('T')[0];
+    const toDate = new Date(now.getTime() + 90 * 86400000).toISOString().split('T')[0];
+    const T = 8000;
+    const [profileResp, metricsResp, earningsResp, dividendResp, recResp] = await Promise.all([
+      fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${key}`, { signal: AbortSignal.timeout(T) }),
+      fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${key}`, { signal: AbortSignal.timeout(T) }),
+      fetch(`https://finnhub.io/api/v1/calendar/earnings?symbol=${yfEnc(sym)}&from=${fromDate}&to=${toDate}&token=${key}`, { signal: AbortSignal.timeout(T) }),
+      fetch(`https://finnhub.io/api/v1/stock/dividend?symbol=${yfEnc(sym)}&from=2024-01-01&to=${toDate}&token=${key}`, { signal: AbortSignal.timeout(T) }),
+      fetch(`https://finnhub.io/api/v1/stock/recommendation?symbol=${yfEnc(sym)}&token=${key}`, { signal: AbortSignal.timeout(T) }),
+    ]);
+    if (metricsResp.status === 429 || profileResp.status === 429) return;
+    // The refresh path may have populated fundamentals between when we queued
+    // and now — bail out so we don't clobber its data.
+    if (fetchedFundamentals.has(sym)) return;
+    const profile = profileResp.ok ? await profileResp.json() : {};
+    const metrics = metricsResp.ok ? await metricsResp.json() : {};
+    const earnings = earningsResp.ok ? await earningsResp.json() : {};
+    const dividends = dividendResp.ok ? await dividendResp.json() : [];
+    let rec = null;
+    if (recResp.ok) {
+      try {
+        const recArr = await recResp.json();
+        if (Array.isArray(recArr) && recArr.length > 0) rec = ratingFromFinnhubRow(recArr[0]);
+      } catch (_) { /* malformed JSON — leave rating null */ }
+    }
+    const m = metrics.metric || {};
+    let earningsDate = null;
+    if (earnings.earningsCalendar && earnings.earningsCalendar.length > 0) {
+      const upcoming = earnings.earningsCalendar.find(e => new Date(e.date) >= now);
+      if (upcoming) earningsDate = upcoming.date;
+    }
+    let exDivDate = null;
+    if (Array.isArray(dividends) && dividends.length > 0) {
+      const sorted = dividends.sort((a, b) => new Date(b.exDate) - new Date(a.exDate));
+      exDivDate = sorted[0].exDate || null;
+    }
+    fundamentalsCache[sym] = {
+      name: profile.name || sym,
+      wk52High: m['52WeekHigh'] || null, wk52Low: m['52WeekLow'] || null,
+      avgVolume: m['10DayAverageTradingVolume'] != null ? m['10DayAverageTradingVolume'] * 1e6 : null,
+      marketCap: profile.marketCapitalization ? profile.marketCapitalization * 1e6 : null,
+      pe: m.peBasicExclExtraTTM || m.peTTM || m.peNormalizedAnnual || null,
+      eps: m.epsBasicExclExtraItemsTTM || m.epsNormalizedAnnual || null,
+      beta: m.beta || null,
+      dividend: m.dividendPerShareAnnual || null,
+      dividendYield: m.dividendYieldIndicatedAnnual || null,
+      exDivDate: exDivDate || m.exDividendDate || null,
+      earningsDate,
+      perfYTD: m.yearToDatePriceReturnDaily || null,
+      perf6M: m['6MonthPriceReturnDaily'] || m['26WeekPriceReturnDaily'] || null,
+      perf1Y: m['52WeekPriceReturnDaily'] || null,
+      analystRating: rec ? rec.rating : null,
+      analystScore: rec ? rec.score : null,
+      analystCount: rec ? rec.count : null,
+      analystBreakdown: rec ? rec.breakdown : null,
+      analystPeriod: rec ? rec.period : null,
+    };
+    fetchedFundamentals.add(sym);
+    if (fundamentalsCache[sym].marketCap != null && fundamentalsCache[sym].pe != null &&
+        fundamentalsCache[sym].beta != null && fundamentalsCache[sym].eps != null) {
+      fetchedSummary.add(sym);
+    }
+    // Apply the warmed cache to the live quoteData and re-render so the new
+    // fields show up before the in-flight refreshAll merges its results.
+    const q = quoteData[sym];
+    if (q) {
+      const fc = fundamentalsCache[sym];
+      if (q.name === sym && fc.name) q.name = fc.name;
+      if (q.avgVolume == null) q.avgVolume = fc.avgVolume;
+      if (q.marketCap == null) q.marketCap = fc.marketCap;
+      if (q.pe == null) q.pe = fc.pe;
+      if (q.eps == null) q.eps = fc.eps;
+      if (q.beta == null) q.beta = fc.beta;
+      if (q.dividend == null) q.dividend = fc.dividend;
+      if (q.dividendYield == null) q.dividendYield = fc.dividendYield;
+      if (q.exDivDate == null) q.exDivDate = fc.exDivDate;
+      if (q.earningsDate == null) q.earningsDate = fc.earningsDate;
+      if (q.wk52High == null) q.wk52High = fc.wk52High;
+      if (q.wk52Low == null) q.wk52Low = fc.wk52Low;
+      if (q.perfYTD == null) q.perfYTD = fc.perfYTD;
+      if (q.perf6M == null) q.perf6M = fc.perf6M;
+      if (q.perf1Y == null) q.perf1Y = fc.perf1Y;
+      if (q.analystRating == null && fc.analystRating != null) {
+        q.analystRating = fc.analystRating;
+        q.analystScore = fc.analystScore;
+        q.analystCount = fc.analystCount;
+        q.analystBreakdown = fc.analystBreakdown;
+        q.analystPeriod = fc.analystPeriod;
+      }
+      renderTable();
+      updateSummary();
+    }
+  } catch (e) {
+    dbg('Fundamentals warmer failed for', sym, e.message);
+  } finally {
+    _fundamentalsWarmInFlight.delete(sym);
+  }
 }
 
 // ==================== MAIN REFRESH ====================
@@ -3574,7 +3933,7 @@ async function refreshAll() {
   refreshAbort = new AbortController();
   refreshInProgress = true;
   try { await _refreshAll(refreshAbort.signal); } catch (e) {
-    if (e.name === 'AbortError') { console.log('Refresh aborted'); return; }
+    if (e.name === 'AbortError') { dbg('Refresh aborted'); return; }
     throw e;
   } finally {
     refreshInProgress = false;
@@ -3835,6 +4194,13 @@ async function _refreshAll(signal) {
     if (q.perfYTD == null && fc.perfYTD != null) q.perfYTD = fc.perfYTD;
     if (q.perf6M == null && fc.perf6M != null) q.perf6M = fc.perf6M;
     if (q.perf1Y == null && fc.perf1Y != null) q.perf1Y = fc.perf1Y;
+    if (q.analystRating == null && fc.analystRating != null) {
+      q.analystRating = fc.analystRating;
+      q.analystScore = fc.analystScore;
+      q.analystCount = fc.analystCount;
+      q.analystBreakdown = fc.analystBreakdown;
+      q.analystPeriod = fc.analystPeriod;
+    }
   }
 
   // Mark after-hours as fetched for symbols that already have a price from initial sources
@@ -3998,7 +4364,7 @@ async function _refreshAll(signal) {
               }
             }
           } catch (e) {
-            console.warn('AH v8 chart fallback failed for', sym, e.message);
+            dbg('AH v8 chart fallback failed for', sym, e.message);
           }
         })();
       }
@@ -4174,6 +4540,18 @@ function getCellHtml(col, pos, q, computed) {
     case 'pe': return `<td>${q.pe != null ? fmt(q.pe, 1) : '\u2014'}</td>`;
     case 'eps': return `<td>${q.eps != null ? fmt(q.eps) : '\u2014'}</td>`;
     case 'beta': return `<td>${q.beta != null ? fmt(q.beta) : '\u2014'}</td>`;
+    case 'analystRating': {
+      if (!q.analystRating) return `<td>\u2014</td>`;
+      const sc = q.analystScore;
+      let cls = 'neutral';
+      if (sc != null) {
+        if (sc < 2.5) cls = 'pos';
+        else if (sc >= 3.5) cls = 'neg';
+      }
+      const cnt = q.analystCount ? ` (${q.analystCount})` : '';
+      const ttl = sc != null ? `Consensus ${sc.toFixed(2)}/5${q.analystCount ? ' from ' + q.analystCount + ' analysts' : ''} \u2014 click for breakdown` : esc(q.analystRating) + ' \u2014 click for breakdown';
+      return `<td class="${cls} analyst-cell" style="font-size:11px; cursor:pointer; text-decoration:underline; text-decoration-style:dotted; text-decoration-color:#555; text-underline-offset:2px;" title="${escAttr(ttl)}" onclick="event.stopPropagation();openAnalystPopover('${sym}',this)">${esc(q.analystRating)}${cnt}</td>`;
+    }
     case 'notes': return `<td><input class="cell-input notes" type="text" value="${noteVal}" onchange="updateNotes('${sym}', this.value)" placeholder="..." /></td>`;
     case 'delete': return `<td><button class="delete-btn" onclick="removePosition('${sym}')" title="Remove">\u2715</button></td>`;
     default: return '<td>\u2014</td>';
@@ -4277,6 +4655,7 @@ function getSortValue(pos, q) {
     case 'pe': return q.pe || 0;
     case 'eps': return q.eps || 0;
     case 'beta': return q.beta || 0;
+    case 'analystRating': return q.analystScore != null ? q.analystScore : 99;
     case 'divYield': return q.dividendYield || 0;
     case 'exDiv': return q.exDivDate || '';
     case 'earnings': return q.earningsDate || '';
@@ -4662,6 +5041,17 @@ function renderMobileCards() {
       ahHtml = `<span class="after-hours">PM: ${fmt(q.preMarketPrice)} <span class="${cc(pmChg)}">${pmChg >= 0 ? '+' : ''}${fmt(pmChg)}</span></span>`;
     }
 
+    // Analyst rating — precomputed so the template stays a flat ternary (no IIFE alloc per card)
+    let analystInner = '\u2014';
+    let analystCls = '';
+    let analystTap = ''; // tap-to-open-popover attrs, empty until we have a rating
+    if (q.analystRating) {
+      const sc = q.analystScore;
+      analystCls = (sc != null && sc < 2.5) ? 'pos' : (sc != null && sc >= 3.5) ? 'neg' : 'neutral';
+      analystInner = esc(q.analystRating) + (q.analystCount ? ' (' + q.analystCount + ')' : '');
+      analystTap = ` onclick="event.stopPropagation();openAnalystPopover('${sym}',this)" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; text-decoration-color:#555; text-underline-offset:2px;"`;
+    }
+
     const isExpanded = expandedSymbols.has(pos.symbol);
     // Compute alertTriggered once per card; reused below in the bell icon IIFE.
     const alertTriggered = checkAlertTriggered(pos.symbol, price);
@@ -4722,6 +5112,7 @@ function renderMobileCards() {
           ${item('pe',         'P/E',        q.pe != null ? fmt(q.pe, 1) : '\u2014')}
           ${item('eps',        'EPS',        q.eps != null ? fmt(q.eps) : '\u2014')}
           ${item('beta',       'Beta',       q.beta != null ? fmt(q.beta) : '\u2014')}
+          ${showItem('analystRating') ? `<div class="mobile-detail-item" data-col="analystRating"><span class="mobile-detail-label">Analyst</span><span class="mobile-detail-value ${analystCls}"${analystTap}>${analystInner}</span></div>` : ''}
           ${item('divYield',   'Div/Yield',  fmtDivYield(q.dividend, q.dividendYield))}
           ${item('exDiv',      'Ex-Div',     q.exDivDate || '\u2014')}
           ${item('earnings',   'Earnings',   q.earningsDate || '\u2014')}
@@ -4984,6 +5375,8 @@ function checkAlertTriggered(symbol, price) {
   return (a.above != null && price >= a.above) || (a.below != null && price <= a.below);
 }
 function openAlertPopover(symbol, el) {
+  // Close the analyst popover if it's open so we don't stack popovers
+  _closeAnalystPopover();
   const pop = document.getElementById('alert-popover');
   _alertPopoverSym = symbol;
   document.getElementById('alert-popover-sym').textContent = symbol;
@@ -5005,6 +5398,108 @@ function openAlertPopover(symbol, el) {
 }
 function _closeAlertPopover() {
   document.getElementById('alert-popover').style.display = 'none';
+}
+
+// ==================== ANALYST RATING POPOVER ====================
+// Click an analyst rating cell to open a richer detail panel: scale bar with
+// the symbol's mean position, FinnHub breakdown bar (Strong Buy / Buy / Hold /
+// Sell / Strong Sell counts), and source/period metadata. Falls back gracefully
+// when the data came from Yahoo (no per-bucket breakdown available).
+function openAnalystPopover(symbol, el) {
+  const q = quoteData[symbol];
+  if (!q || !q.analystRating) return; // nothing to show
+  // Close any other popover first so we don't end up with both visible at once
+  _closeAlertPopover();
+  const pop = document.getElementById('analyst-popover');
+  document.getElementById('ap-sym').textContent = symbol;
+  // Period is FinnHub-only; format as "Apr 2026" if present
+  const periodEl = document.getElementById('ap-period');
+  if (q.analystPeriod) {
+    const d = new Date(q.analystPeriod);
+    periodEl.textContent = isNaN(d.getTime()) ? q.analystPeriod
+      : d.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+  } else {
+    periodEl.textContent = '';
+  }
+  // Rating label + score
+  const sc = q.analystScore;
+  const labelEl = document.getElementById('ap-rating-label');
+  labelEl.textContent = q.analystRating;
+  labelEl.classList.remove('pos','neg','neutral');
+  let lblCls = 'neutral';
+  if (sc != null) {
+    if (sc < 2.5) lblCls = 'pos';
+    else if (sc >= 3.5) lblCls = 'neg';
+  }
+  labelEl.classList.add(lblCls);
+  document.getElementById('ap-score').textContent = sc != null ? sc.toFixed(2) + ' / 5' : '';
+  // Scale marker — clamp to [0,100]% mapping (1=0%, 5=100%)
+  const marker = document.getElementById('ap-scale-marker');
+  if (sc != null) {
+    const pct = Math.max(0, Math.min(100, ((sc - 1) / 4) * 100));
+    marker.style.left = `calc(${pct}% - 1px)`;
+    marker.style.display = 'block';
+  } else {
+    marker.style.display = 'none';
+  }
+  // Breakdown — FinnHub only. When absent, show analyst count alone.
+  const breakdownSection = document.getElementById('ap-breakdown-section');
+  const bar = document.getElementById('ap-breakdown-bar');
+  const list = document.getElementById('ap-breakdown-list');
+  if (q.analystBreakdown) {
+    const bd = q.analystBreakdown;
+    const total = (bd.strongBuy || 0) + (bd.buy || 0) + (bd.hold || 0) + (bd.sell || 0) + (bd.strongSell || 0);
+    const buckets = [
+      { key: 'strongbuy',  label: 'Strong Buy',  count: bd.strongBuy  || 0 },
+      { key: 'buy',        label: 'Buy',         count: bd.buy        || 0 },
+      { key: 'hold',       label: 'Hold',        count: bd.hold       || 0 },
+      { key: 'sell',       label: 'Sell',        count: bd.sell       || 0 },
+      { key: 'strongsell', label: 'Strong Sell', count: bd.strongSell || 0 },
+    ];
+    bar.innerHTML = buckets.map(b => {
+      if (!b.count) return '';
+      const w = total > 0 ? (b.count / total) * 100 : 0;
+      return `<span class="ap-bucket-${b.key}" style="width:${w.toFixed(2)}%" title="${b.label}: ${b.count}"></span>`;
+    }).join('');
+    list.innerHTML = buckets.map(b => {
+      if (!b.count) return '';
+      const pct = total > 0 ? (b.count / total) * 100 : 0;
+      return `<div class="ap-bucket-name">${b.label}</div><div class="ap-bucket-count">${b.count}</div><div class="ap-bucket-pct">${pct.toFixed(0)}%</div>`;
+    }).join('');
+    breakdownSection.style.display = 'block';
+  } else {
+    breakdownSection.style.display = 'none';
+  }
+  // Meta line — source attribution + analyst count
+  const meta = document.getElementById('ap-meta');
+  const cnt = q.analystCount;
+  const source = q.analystBreakdown ? 'FinnHub' : 'Yahoo Finance';
+  meta.textContent = `${cnt ? cnt + ' analyst' + (cnt === 1 ? '' : 's') + ' • ' : ''}via ${source}`;
+  // Position: pin near the clicked element, but clamp to viewport so the
+  // wider analyst popover doesn't run off the right edge of the screen.
+  const rect = el.getBoundingClientRect();
+  pop.style.display = 'block';
+  const pw = 280;
+  const pad = 8;
+  let left = rect.left;
+  if (left + pw > window.innerWidth - pad) left = window.innerWidth - pw - pad;
+  if (left < pad) left = pad;
+  pop.style.left = left + 'px';
+  // Place below the cell normally, but flip above if there's no room
+  let top = rect.bottom + 4;
+  // Estimate popover height (will measure after first paint, but a rough cap is fine)
+  const estH = breakdownSection.style.display === 'none' ? 130 : 220;
+  if (top + estH > window.innerHeight - pad) {
+    const above = rect.top - estH - 4;
+    if (above >= pad) top = above;
+  }
+  pop.style.top = top + 'px';
+  // Close on outside click, same pattern as alert popover
+  setTimeout(() => document.addEventListener('click', _closeAnalystPopover, { once: true }), 0);
+}
+function _closeAnalystPopover() {
+  const pop = document.getElementById('analyst-popover');
+  if (pop) pop.style.display = 'none';
 }
 // Track whether we've already prompted for notification permission this session.
 // Some browsers (esp. on file://) keep permission at 'default' forever if the

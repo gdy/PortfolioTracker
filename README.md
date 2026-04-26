@@ -23,7 +23,7 @@ A real-time portfolio tracker for stocks, crypto, and commodities that runs enti
 - **Smart CORS proxy rotation** — 6 proxy endpoints with automatic failover, last-working-proxy memory, and validation of proxy error responses (rejects HTML pages, rate-limit strings, and proxy-specific JSON error bodies before accepting a response).
 
 ### Portfolio Management
-- **30+ data columns** — last price, $ change, % change, after-hours, quantity, cost basis, purchase date, market value, day P&L, dividend/yield, ex-div date, next earnings, YTD/6M/1Y performance, total P&L, P&L %, previous close, open, bid, ask, day range, 52-week range, volume, avg volume, market cap, P/E, EPS, beta, notes
+- **30+ data columns** — last price, $ change, % change, after-hours, quantity, cost basis, purchase date, market value, day P&L, dividend/yield, ex-div date, next earnings, YTD/6M/1Y performance, total P&L, P&L %, previous close, open, bid, ask, day range, 52-week range, volume, avg volume, market cap, P/E, EPS, beta, **analyst rating** (Strong Buy / Buy / Hold / Sell / Strong Sell consensus from FinnHub `/stock/recommendation` with a Yahoo `financialData` fallback — color-tinted by score and showing the analyst count on hover), notes
 - **Multiple portfolios** — switch between unlimited named portfolios (e.g. "Long-term", "Trading", "Crypto") via the portfolio bar above the toolbar. Create, rename, and delete portfolios on the fly. Each portfolio has its own positions, notes, fetch caches, and undo history. The active portfolio is remembered across sessions.
 - **Inline editing** — click any quantity, cost basis, date, or notes field to edit directly in the table. Changes are saved instantly.
 - **Drag-to-reorder** — grab any row in the desktop table or any mobile card (via the ☰ handle) to manually rearrange positions. Switching to a sorted column disables manual order; clearing the sort restores it.
@@ -92,7 +92,7 @@ Commodity futures symbols containing `=` are handled carefully: `=` is kept raw 
 | Source | Key required | Rate limit | What it provides |
 |--------|-------------|-----------|-----------------|
 | Yahoo Finance | No | Via CORS proxies | Quotes (v7 batch → v8 chart → v6 fallback), quoteSummary fundamentals, after-hours/pre-market, historical performance (YTD/6M/1Y) |
-| FinnHub | Free key (required for WS) | 60 req/min REST + WebSocket | Real-time WebSocket streaming (stocks only), REST quotes, profiles, P/E, EPS, beta, dividends, earnings dates, 52-week performance |
+| FinnHub | Free key (required for WS) | 60 req/min REST + WebSocket | Real-time WebSocket streaming (stocks only), REST quotes, profiles, P/E, EPS, beta, dividends, earnings dates, 52-week performance, analyst recommendations |
 | Alpaca Markets | Free key | 200 req/min | Real-time IEX snapshots, real bid/ask, avg volume, 52-week range from historical bars |
 | Financial Modeling Prep | Free key | 250 req/day | Quotes with after-hours data, fundamentals |
 | CoinGecko | No | ~30 req/min | Crypto prices, 24h high/low, market cap, volume; 1-year chart for 52-week range and YTD/6M/1Y performance |
