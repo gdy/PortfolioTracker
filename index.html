@@ -4069,8 +4069,37 @@ async function fetchOneSymbolNow(sym) {
         })());
       }
 
-      // Yahoo v8 chart via proxy race — always included; only path that covers
-      // commodities + symbols missing from the other two sources.
+      // Stooq direct-CORS CSV — covers US equities and major commodity futures
+      // (gc.f, cl.f, si.f, hg.f, …). For commodities specifically this is the
+      // biggest win: the previous racer pool was Yahoo-via-proxy only, so adding
+      // gold/silver/copper meant 1–3 s of "retrying..." while waiting on the
+      // proxy fleet. Stooq's batched CSV typically returns in 200–500 ms via
+      // direct CORS, with proxy fallback inside fetchStooqQuotes if needed.
+      // ~15 min delayed — that's the wire-format limitation, not a fetch-speed
+      // one — but the row appears immediately and the next heavy refresh
+      // catches up to the live Yahoo (or PAXG) price.
+      racers.push((async () => {
+        const r = await fetchStooqQuotes([sym]);
+        if (!r || !r.data || !r.data[sym]) throw new Error('stooq no data');
+        return r.data[sym];
+      })());
+
+      // PAXG real-time gold overlay — for GC=F only, Coinbase Exchange's
+      // tokenized-gold ticker is direct CORS, real-time, no auth, ~1% premium
+      // to spot. Tracks gold spot more closely than Yahoo's 10–15 min delayed
+      // futures feed and arrives in ~200 ms when reachable. Skipped when the
+      // Coinbase circuit breaker is open (handled inside _coinbaseFetch).
+      if (isCommodity && COMMODITY_REALTIME_PROXY[sym] && Date.now() >= _cbSkipUntil) {
+        racers.push((async () => {
+          const cb = await _coinbaseFetch(COMMODITY_REALTIME_PROXY[sym]);
+          if (!cb || !cb.price) throw new Error('paxg unavailable');
+          return { ...makeEmptyQuote(sym), name: sym, price: cb.price, _lastUpdate: Date.now() };
+        })());
+      }
+
+      // Yahoo v8 chart via proxy race — always included as the authoritative
+      // source. For commodities it's now the slowest racer but provides the
+      // freshest price + previousClose so change/changePct render correctly.
       racers.push((async () => {
         const urls = [
           'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true',
