@@ -6787,6 +6787,11 @@ async function refreshCryptoOnly() {
       updated = true;
     }
     if (updated) {
+      // If the user is sorted by a price-dependent column, the row order must
+      // be recomputed; otherwise getSortedPortfolio's cache returns the prior
+      // order with stale positions. Bumping the version is the same trigger
+      // the WS path uses for the same scenario.
+      if (_currentSortNeedsFullRender()) bumpPortfolioVersion();
       renderTable();
       updateSummary();
       document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
@@ -6906,6 +6911,10 @@ async function refreshCommoditiesOnly() {
       }
     }
     if (updated) {
+      // Same sort-cache invalidation as refreshCryptoOnly: if sorted by a
+      // live-price column, recompute order; otherwise the cached sort would
+      // ignore commodities that have moved this tick.
+      if (_currentSortNeedsFullRender()) bumpPortfolioVersion();
       renderTable();
       updateSummary();
       document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
@@ -7031,6 +7040,8 @@ async function refreshAlwaysOnOnly() {
   }
 
   if (updated) {
+    // Sort-cache invalidation when sorted by a price-dependent column
+    if (_currentSortNeedsFullRender()) bumpPortfolioVersion();
     renderTable();
     updateSummary();
     const sources = [];
