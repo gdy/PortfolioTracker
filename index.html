@@ -2999,11 +2999,17 @@ async function fetchFinnhubQuotes(symbols) {
   if (needFundamentals.length > 0) {
     const fromDate = new Date(now.getTime() - 7 * 86400000).toISOString().split('T')[0];
     const toDate = new Date(now.getTime() + 90 * 86400000).toISOString().split('T')[0];
-    for (let i = 0; i < needFundamentals.length; i += FINNHUB_FUND_BATCH) {
+    // Bail out of remaining fundamentals batches on the first 429 — the free
+    // 60/min cap is global per key, so the rest will fail too. Symbols stay out
+    // of fetchedFundamentals so the next refresh retries them. Mirrors the
+    // /quote loop's early-exit.
+    let fundRateLimited = false;
+    for (let i = 0; i < needFundamentals.length && !fundRateLimited; i += FINNHUB_FUND_BATCH) {
       if (i > 0) await new Promise(r => setTimeout(r, FINNHUB_BATCH_DELAY)); // rate limit pause
       const batch = needFundamentals.slice(i, i + FINNHUB_FUND_BATCH);
       // process batch
       const fundPromises = batch.map(async sym => {
+        if (fundRateLimited) return;
         try {
           const [profileResp, metricsResp, earningsResp, dividendResp, recResp] = await Promise.all([
             fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${key}`),
@@ -3013,7 +3019,8 @@ async function fetchFinnhubQuotes(symbols) {
             fetch(`https://finnhub.io/api/v1/stock/recommendation?symbol=${yfEnc(sym)}&token=${key}`),
           ]);
           if (metricsResp.status === 429 || profileResp.status === 429) {
-            console.warn('FinnHub rate limited for', sym, '- will retry next refresh');
+            fundRateLimited = true;
+            dbg('FinnHub fundamentals rate limited — bailing out, will retry next refresh');
             return;
           }
           const profile = profileResp.ok ? await profileResp.json() : {};
