@@ -1908,6 +1908,27 @@ function stepInput(btn, delta, symbol, field) {
   if (field === 'shares') updateShares(symbol, val);
   else updateCost(symbol, val);
 }
+
+// Merge a new lot into an existing position and return the resulting cost basis.
+// Same-side lots (long+long, short+short) get a weighted average. Opposite-side
+// lots represent a partial or full close, so the surviving side keeps its basis —
+// mixing the closing price into the average would produce a nonsense basis and
+// bogus P&L. Math.sign handles the zombie-row case where existingShares === 0
+// from a prior full close (sign 0 never matches ±1, so the new lot wins).
+// Shared by addPosition (manual) and executeImport (CSV) so the two paths can't
+// diverge.
+function mergedCostBasis(existingShares, existingCost, addShares, addCost) {
+  const totalShares = existingShares + addShares;
+  if (totalShares === 0) return 0;
+  const sameSide = (existingShares >= 0) === (addShares >= 0);
+  if (sameSide) {
+    const aW = Math.abs(existingShares), bW = Math.abs(addShares);
+    const denom = aW + bW;
+    return denom > 0 ? (existingCost * aW + addCost * bW) / denom : existingCost;
+  }
+  if (Math.sign(existingShares) !== Math.sign(totalShares)) return addCost;
+  return existingCost;
+}
 function addPosition() {
   const tickerEl = document.getElementById('ticker-input');
   const sharesEl = document.getElementById('shares-input');
@@ -1938,14 +1959,12 @@ function addPosition() {
 
   const existing = portfolio.find(p => p.symbol === symbol);
   if (existing) {
-    const totalShares = existing.shares + shares;
-    if (totalShares !== 0) {
-      existing.costBasis = ((existing.costBasis * existing.shares) + (costBasis * shares)) / totalShares;
-    } else {
-      // Fully closed position — reset cost basis so reopening later starts fresh
-      existing.costBasis = 0;
-    }
-    existing.shares = totalShares;
+    // Use the shared lot-merge helper so manual adds handle opposite-side
+    // (partial-close) lots correctly — the old inline weighted average mixed
+    // the closing price into the basis and produced bogus P&L on the surviving
+    // shares (e.g. adding -5 @ $120 onto 10 long @ $100 wrongly yielded $80).
+    existing.costBasis = mergedCostBasis(existing.shares, existing.costBasis, shares, costBasis);
+    existing.shares = existing.shares + shares;
     if (purchaseDate && !existing.purchaseDate) existing.purchaseDate = purchaseDate;
   } else {
     portfolio.push({ symbol, shares, costBasis, purchaseDate });
@@ -2404,37 +2423,11 @@ function executeImport() {
   for (const pos of pendingImport) {
     const existing = portfolio.find(p => p.symbol === pos.symbol);
     if (existing) {
-      const totalShares = existing.shares + pos.shares;
-      // Weighted-average cost basis is only meaningful when both lots are on
-      // the same side. If one is long and the other short (signs differ), the
-      // merge represents closing part of a position — we keep the remaining
-      // side's cost basis instead of mixing them, which would produce a
-      // nonsense basis and bogus P&L.
-      const sameSide = (existing.shares >= 0) === (pos.shares >= 0);
-      if (totalShares === 0) {
-        existing.costBasis = 0;
-      } else if (sameSide) {
-        // Use absolute shares in the weights so long + long and short + short
-        // both produce a positive weighted average.
-        const aW = Math.abs(existing.shares);
-        const bW = Math.abs(pos.shares);
-        const denom = aW + bW;
-        existing.costBasis = denom > 0
-          ? (existing.costBasis * aW + pos.costBasis * bW) / denom
-          : existing.costBasis;
-      } else {
-        // Opposite sides: the surviving side (whose sign matches totalShares)
-        // keeps its cost basis. Using Math.sign handles the zombie-row edge
-        // case where existing.shares === 0 from a prior full close —
-        // Math.sign(0) is 0, which never matches ±1, so the new lot correctly
-        // wins. (The older `> 0` predicate treated zero as "negative side"
-        // and kept the stale $0 basis against short imports.)
-        if (Math.sign(existing.shares) !== Math.sign(totalShares)) {
-          existing.costBasis = pos.costBasis;
-        }
-        // else existing side wins; keep existing.costBasis untouched.
-      }
-      existing.shares = totalShares;
+      // Shared lot-merge helper: same-side → weighted average; opposite-side
+      // (partial/full close) → surviving side keeps its basis. See
+      // mergedCostBasis for the full rationale, including the zombie-row case.
+      existing.costBasis = mergedCostBasis(existing.shares, existing.costBasis, pos.shares, pos.costBasis);
+      existing.shares = existing.shares + pos.shares;
       if (pos.purchaseDate && !existing.purchaseDate) existing.purchaseDate = pos.purchaseDate;
     } else {
       portfolio.push({ symbol: pos.symbol, shares: pos.shares, costBasis: pos.costBasis, purchaseDate: pos.purchaseDate });
@@ -4274,22 +4267,33 @@ function abortRefresh() {
 async function refreshAll() {
   if (refreshInProgress) return Promise.resolve(); // prevent overlapping refreshes
   abortRefresh();
-  refreshAbort = new AbortController();
+  // Capture our own controller locally. switchPortfolio aborts the in-flight
+  // refresh, manually resets refreshInProgress, and synchronously starts a NEW
+  // refreshAll — so by the time our aborted fetch rejects and this finally
+  // runs, the module-level refreshAbort may already point at the newer
+  // refresh's controller. Without the ownership check below, our stale finally
+  // would clobber the new refresh's refreshInProgress (→ allow overlap) and
+  // null its refreshAbort (→ can't be aborted).
+  const myAbort = new AbortController();
+  refreshAbort = myAbort;
   refreshInProgress = true;
-  try { await _refreshAll(refreshAbort.signal); } catch (e) {
+  try { await _refreshAll(myAbort.signal); } catch (e) {
     if (e.name === 'AbortError') { dbg('Refresh aborted'); return; }
     throw e;
   } finally {
-    refreshInProgress = false;
-    refreshAbort = null;
-    // Quote data likely changed during the refresh — invalidate the sort cache
-    // so live-price sorts (e.g. sorted by Last) pick up the new order on the
-    // next renderTable without needing per-symbol-list recomputation.
-    bumpPortfolioVersion();
-    // If a symbol was added while refresh was running, run again to pick it up
-    if (pendingRefreshAfter) {
-      pendingRefreshAfter = false;
-      refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
+    // Only tear down shared state if a newer refresh hasn't taken ownership.
+    if (refreshAbort === myAbort) {
+      refreshInProgress = false;
+      refreshAbort = null;
+      // Quote data likely changed during the refresh — invalidate the sort cache
+      // so live-price sorts (e.g. sorted by Last) pick up the new order on the
+      // next renderTable without needing per-symbol-list recomputation.
+      bumpPortfolioVersion();
+      // If a symbol was added while refresh was running, run again to pick it up
+      if (pendingRefreshAfter) {
+        pendingRefreshAfter = false;
+        refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
+      }
     }
   }
 }
@@ -4821,6 +4825,23 @@ function fmt(n, d = 2) {
   if (n == null || isNaN(n)) return '\u2014';
   return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 }
+// Adaptive per-share price formatter. A fixed 2-decimal display renders
+// sub-penny crypto (SHIB ~$0.00002, PEPE, BONK) as "$0.00" and their day
+// change as "+0.00", which is useless. Scale decimal places to the magnitude:
+// normal prices stay at 2, sub-dollar gets 4, sub-cent 6, and microcaps up to
+// 8 \u2014 with a 2-decimal floor so $1.50 never shows as "$1.5". Used for the
+// price/change/bid/ask/open/prev-close/range cells, NOT for dollar aggregates
+// (market value, P&L) which are always normal magnitude and use fmtDollar.
+function fmtPrice(n) {
+  if (n == null || isNaN(n)) return '\u2014';
+  const abs = Math.abs(n);
+  if (abs >= 1 || abs === 0) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  let maxD;
+  if (abs >= 0.01) maxD = 4;
+  else if (abs >= 0.0001) maxD = 6;
+  else maxD = 8;
+  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: maxD });
+}
 function fmtDollar(n) {
   if (n == null || isNaN(n)) return '\u2014';
   return (n < 0 ? '-' : '') + '$' + fmt(Math.abs(n));
@@ -4852,7 +4873,7 @@ function cc(n) {
 function rangeBar(low, high, current) {
   if (!low || !high || !current || high <= low) return '\u2014';
   const pct = Math.max(0, Math.min(100, ((current - low) / (high - low)) * 100));
-  return `${fmt(low)}<span class="range-bar"><span class="marker" style="left:${pct}%"></span></span>${fmt(high)}`;
+  return `${fmtPrice(low)}<span class="range-bar"><span class="marker" style="left:${pct}%"></span></span>${fmtPrice(high)}`;
 }
 function fmtDivYield(div, yld) {
   if (div == null && yld == null) return '\u2014';
@@ -4916,7 +4937,7 @@ function getCellHtml(col, pos, q, computed) {
     }
     case 'name': return `<td class="left" style="color:#888; max-width:140px; overflow:hidden; text-overflow:ellipsis;" title="${escAttr(q.name || '')}">${computed.isError ? '<span class="error-text">Not found</span>' : esc(q.name || '')}</td>`;
     case 'last': return `<td class="${cc(change)}">${priceCell}</td>`;
-    case 'change': return `<td class="${cc(change)}">${change != null ? (change >= 0 ? '+' : '') + fmt(change) : '\u2014'}</td>`;
+    case 'change': return `<td class="${cc(change)}">${change != null ? (change >= 0 ? '+' : '') + fmtPrice(change) : '\u2014'}</td>`;
     case 'changePct': return `<td class="${cc(changePct)}">${changePct != null ? fmtPct(changePct) : '\u2014'}</td>`;
     case 'afterHours': return `<td>${ahDisplay}</td>`;
     case 'shares': return `<td><div class="num-wrap"><input class="cell-input" type="number" value="${pos.shares}" onchange="updateShares('${sym}', this.value)" /><div class="num-spin"><button onclick="stepInput(this,1,'${sym}','shares')">&#9650;</button><button onclick="stepInput(this,-1,'${sym}','shares')">&#9660;</button></div></div></td>`;
@@ -4932,10 +4953,10 @@ function getCellHtml(col, pos, q, computed) {
     case 'perf1Y': return `<td class="${cc(q.perf1Y)}">${q.perf1Y != null ? fmtPct(q.perf1Y) : '\u2014'}</td>`;
     case 'totalPL': return `<td class="${cc(totalPL)}">${totalPL != null ? fmtDollar(totalPL) : '\u2014'}</td>`;
     case 'totalPLPct': return `<td class="${cc(totalPLPct)}">${totalPLPct != null ? fmtPct(totalPLPct) : '\u2014'}</td>`;
-    case 'prevClose': return `<td>${q.prevClose != null ? fmt(q.prevClose) : '\u2014'}</td>`;
-    case 'open': return `<td>${q.open != null ? fmt(q.open) : '\u2014'}</td>`;
-    case 'bid': return `<td${q.bidEstimated ? ' style="color:#666" title="Estimated from last trade"' : ''}>${q.bid != null ? (q.bidEstimated ? '~' : '') + fmt(q.bid) : '\u2014'}</td>`;
-    case 'ask': return `<td${q.askEstimated ? ' style="color:#666" title="Estimated from last trade"' : ''}>${q.ask != null ? (q.askEstimated ? '~' : '') + fmt(q.ask) : '\u2014'}</td>`;
+    case 'prevClose': return `<td>${q.prevClose != null ? fmtPrice(q.prevClose) : '\u2014'}</td>`;
+    case 'open': return `<td>${q.open != null ? fmtPrice(q.open) : '\u2014'}</td>`;
+    case 'bid': return `<td${q.bidEstimated ? ' style="color:#666" title="Estimated from last trade"' : ''}>${q.bid != null ? (q.bidEstimated ? '~' : '') + fmtPrice(q.bid) : '\u2014'}</td>`;
+    case 'ask': return `<td${q.askEstimated ? ' style="color:#666" title="Estimated from last trade"' : ''}>${q.ask != null ? (q.askEstimated ? '~' : '') + fmtPrice(q.ask) : '\u2014'}</td>`;
     case 'dayRange': return `<td style="font-size:11px;">${rangeBar(q.dayLow, q.dayHigh, price)}</td>`;
     case 'wk52Range': return `<td style="font-size:11px;">${rangeBar(q.wk52Low, q.wk52High, price)}</td>`;
     case 'volume': return `<td>${fmtVol(q.volume)}</td>`;
@@ -5144,10 +5165,10 @@ function renderTable() {
     let ahDisplay = '\u2014';
     if (q.postMarketPrice != null) {
       const ahChg = q.postMarketChange != null ? q.postMarketChange : (q.postMarketPrice - (price || 0));
-      ahDisplay = `<span class="after-hours">${fmt(q.postMarketPrice)} <span class="${cc(ahChg)}">${ahChg >= 0 ? '+' : ''}${fmt(ahChg)}</span></span>`;
+      ahDisplay = `<span class="after-hours">${fmtPrice(q.postMarketPrice)} <span class="${cc(ahChg)}">${ahChg >= 0 ? '+' : ''}${fmtPrice(ahChg)}</span></span>`;
     } else if (q.preMarketPrice != null) {
       const pmChg = q.preMarketChange != null ? q.preMarketChange : (q.preMarketPrice - (q.prevClose || price || 0));
-      ahDisplay = `<span class="after-hours">${fmt(q.preMarketPrice)} <span class="${cc(pmChg)}">${pmChg >= 0 ? '+' : ''}${fmt(pmChg)}</span></span>`;
+      ahDisplay = `<span class="after-hours">${fmtPrice(q.preMarketPrice)} <span class="${cc(pmChg)}">${pmChg >= 0 ? '+' : ''}${fmtPrice(pmChg)}</span></span>`;
     }
 
     const sym = escAttr(pos.symbol);
@@ -5165,7 +5186,7 @@ function renderTable() {
         priceCell = '<span style="color:#4a9eff">loading...</span>';
       }
     } else {
-      priceCell = fmt(price);
+      priceCell = fmtPrice(price);
     }
 
     // Compute alertTriggered once per row; reused by rowClass and the bell icon
@@ -5208,11 +5229,11 @@ function updatePriceCells() {
       switch (col.key) {
         case 'last':
           td.className = cc(change);
-          td.textContent = price != null ? fmt(price) : '\u2014';
+          td.textContent = price != null ? fmtPrice(price) : '\u2014';
           break;
         case 'change':
           td.className = cc(change);
-          td.textContent = change != null ? (change >= 0 ? '+' : '') + fmt(change) : '\u2014';
+          td.textContent = change != null ? (change >= 0 ? '+' : '') + fmtPrice(change) : '\u2014';
           break;
         case 'changePct':
           td.className = cc(changePct);
@@ -5243,10 +5264,10 @@ function updatePriceCells() {
           break;
         }
         case 'bid':
-          td.textContent = q.bid != null ? (q.bidEstimated ? '~' : '') + fmt(q.bid) : '\u2014';
+          td.textContent = q.bid != null ? (q.bidEstimated ? '~' : '') + fmtPrice(q.bid) : '\u2014';
           break;
         case 'ask':
-          td.textContent = q.ask != null ? (q.askEstimated ? '~' : '') + fmt(q.ask) : '\u2014';
+          td.textContent = q.ask != null ? (q.askEstimated ? '~' : '') + fmtPrice(q.ask) : '\u2014';
           break;
         // Skip input cells (shares, costBasis, date, notes) and non-price cells
       }
@@ -5299,7 +5320,7 @@ function updateMobileCardPrices() {
     // whatever placeholder renderMobileCards drew (loading/retrying/unknown).
     const priceEl = card.querySelector('.mobile-card-price');
     if (priceEl && price != null) {
-      priceEl.textContent = '$' + fmt(price);
+      priceEl.textContent = '$' + fmtPrice(price);
       applySignClass(priceEl, change);
     }
 
@@ -5307,7 +5328,7 @@ function updateMobileCardPrices() {
     const changeEl = card.querySelector('.mobile-card-change');
     if (changeEl) {
       let txt = '';
-      if (change != null) txt += (change >= 0 ? '+' : '') + fmt(change);
+      if (change != null) txt += (change >= 0 ? '+' : '') + fmtPrice(change);
       if (changePct != null) txt += (txt ? ' ' : '') + '(' + fmtPct(changePct) + ')';
       changeEl.textContent = txt;
       applySignClass(changeEl, changePct);
@@ -5327,9 +5348,9 @@ function updateMobileCardPrices() {
     setTextWithSign(card.querySelector('.mobile-detail-item[data-col="totalPLPct"] .mobile-detail-value'), totalPLPct, fmtPct, false);
 
     const bidEl = card.querySelector('.mobile-detail-item[data-col="bid"] .mobile-detail-value');
-    if (bidEl) bidEl.textContent = q.bid != null ? (q.bidEstimated ? '~' : '') + fmt(q.bid) : '\u2014';
+    if (bidEl) bidEl.textContent = q.bid != null ? (q.bidEstimated ? '~' : '') + fmtPrice(q.bid) : '\u2014';
     const askEl = card.querySelector('.mobile-detail-item[data-col="ask"] .mobile-detail-value');
-    if (askEl) askEl.textContent = q.ask != null ? (q.askEstimated ? '~' : '') + fmt(q.ask) : '\u2014';
+    if (askEl) askEl.textContent = q.ask != null ? (q.askEstimated ? '~' : '') + fmtPrice(q.ask) : '\u2014';
 
     // Flash class
     if (prevPrices[sym] != null && price != null) {
@@ -5432,17 +5453,17 @@ function renderMobileCards() {
         priceHtml = '<span style="color:#4a9eff">loading...</span>';
       }
     } else {
-      priceHtml = '$' + fmt(price);
+      priceHtml = '$' + fmtPrice(price);
     }
 
     // After hours
     let ahHtml = '';
     if (q.postMarketPrice != null) {
       const ahChg = q.postMarketChange != null ? q.postMarketChange : (q.postMarketPrice - (price || 0));
-      ahHtml = `<span class="after-hours">AH: ${fmt(q.postMarketPrice)} <span class="${cc(ahChg)}">${ahChg >= 0 ? '+' : ''}${fmt(ahChg)}</span></span>`;
+      ahHtml = `<span class="after-hours">AH: ${fmtPrice(q.postMarketPrice)} <span class="${cc(ahChg)}">${ahChg >= 0 ? '+' : ''}${fmtPrice(ahChg)}</span></span>`;
     } else if (q.preMarketPrice != null) {
       const pmChg = q.preMarketChange != null ? q.preMarketChange : (q.preMarketPrice - (q.prevClose || price || 0));
-      ahHtml = `<span class="after-hours">PM: ${fmt(q.preMarketPrice)} <span class="${cc(pmChg)}">${pmChg >= 0 ? '+' : ''}${fmt(pmChg)}</span></span>`;
+      ahHtml = `<span class="after-hours">PM: ${fmtPrice(q.preMarketPrice)} <span class="${cc(pmChg)}">${pmChg >= 0 ? '+' : ''}${fmtPrice(pmChg)}</span></span>`;
     }
 
     // Analyst rating — precomputed so the template stays a flat ternary (no IIFE alloc per card)
@@ -5494,7 +5515,7 @@ function renderMobileCards() {
         <div class="mobile-card-right">
           <div class="mobile-card-price ${cc(change)}">${priceHtml}</div>
           <div class="mobile-card-change ${cc(changePct)}">
-            ${change != null ? (change >= 0 ? '+' : '') + fmt(change) : ''}
+            ${change != null ? (change >= 0 ? '+' : '') + fmtPrice(change) : ''}
             ${changePct != null ? '(' + fmtPct(changePct) + ')' : ''}
           </div>
         </div>
@@ -5506,10 +5527,10 @@ function renderMobileCards() {
           ${showItem('dayPL') ? `<div class="mobile-detail-item" data-col="dayPL"><span class="mobile-detail-label">Day P&L</span><span class="mobile-detail-value ${cc(dayPL)}">${dayPL != null ? fmtDollar(dayPL) : '\u2014'}</span></div>` : ''}
           ${showItem('totalPL') ? `<div class="mobile-detail-item" data-col="totalPL"><span class="mobile-detail-label">Total P&L</span><span class="mobile-detail-value ${cc(totalPL)}">${totalPL != null ? fmtDollar(totalPL) : '\u2014'}</span></div>` : ''}
           ${showItem('totalPLPct') ? `<div class="mobile-detail-item" data-col="totalPLPct"><span class="mobile-detail-label">P&L %</span><span class="mobile-detail-value ${cc(totalPLPct)}">${totalPLPct != null ? fmtPct(totalPLPct) : '\u2014'}</span></div>` : ''}
-          ${item('prevClose',  'Prev Close', q.prevClose != null ? fmt(q.prevClose) : '\u2014')}
-          ${item('open',       'Open',       q.open != null ? fmt(q.open) : '\u2014')}
-          ${item('dayRange',   'Day Range',  q.dayLow && q.dayHigh ? fmt(q.dayLow) + ' - ' + fmt(q.dayHigh) : '\u2014')}
-          ${item('wk52Range',  '52-Wk',      q.wk52Low && q.wk52High ? fmt(q.wk52Low) + ' - ' + fmt(q.wk52High) : '\u2014')}
+          ${item('prevClose',  'Prev Close', q.prevClose != null ? fmtPrice(q.prevClose) : '\u2014')}
+          ${item('open',       'Open',       q.open != null ? fmtPrice(q.open) : '\u2014')}
+          ${item('dayRange',   'Day Range',  q.dayLow && q.dayHigh ? fmtPrice(q.dayLow) + ' - ' + fmtPrice(q.dayHigh) : '\u2014')}
+          ${item('wk52Range',  '52-Wk',      q.wk52Low && q.wk52High ? fmtPrice(q.wk52Low) + ' - ' + fmtPrice(q.wk52High) : '\u2014')}
           ${item('volume',     'Volume',     fmtVol(q.volume))}
           ${item('avgVol',     'Avg Vol',    fmtVol(q.avgVolume))}
           ${item('mktCap',     'Mkt Cap',    q.marketCap != null ? fmtBig(q.marketCap) : '\u2014')}
@@ -5523,8 +5544,8 @@ function renderMobileCards() {
           ${showItem('perfYTD') ? `<div class="mobile-detail-item" data-col="perfYTD"><span class="mobile-detail-label">YTD</span><span class="mobile-detail-value ${cc(q.perfYTD)}">${q.perfYTD != null ? fmtPct(q.perfYTD) : '\u2014'}</span></div>` : ''}
           ${showItem('perf6M') ? `<div class="mobile-detail-item" data-col="perf6M"><span class="mobile-detail-label">6M</span><span class="mobile-detail-value ${cc(q.perf6M)}">${q.perf6M != null ? fmtPct(q.perf6M) : '\u2014'}</span></div>` : ''}
           ${showItem('perf1Y') ? `<div class="mobile-detail-item" data-col="perf1Y"><span class="mobile-detail-label">1Y</span><span class="mobile-detail-value ${cc(q.perf1Y)}">${q.perf1Y != null ? fmtPct(q.perf1Y) : '\u2014'}</span></div>` : ''}
-          ${showItem('bid') ? `<div class="mobile-detail-item" data-col="bid"><span class="mobile-detail-label">Bid</span><span class="mobile-detail-value"${q.bidEstimated ? ' style="color:#666"' : ''}>${q.bid != null ? (q.bidEstimated ? '~' : '') + fmt(q.bid) : '\u2014'}</span></div>` : ''}
-          ${showItem('ask') ? `<div class="mobile-detail-item" data-col="ask"><span class="mobile-detail-label">Ask</span><span class="mobile-detail-value"${q.askEstimated ? ' style="color:#666"' : ''}>${q.ask != null ? (q.askEstimated ? '~' : '') + fmt(q.ask) : '\u2014'}</span></div>` : ''}
+          ${showItem('bid') ? `<div class="mobile-detail-item" data-col="bid"><span class="mobile-detail-label">Bid</span><span class="mobile-detail-value"${q.bidEstimated ? ' style="color:#666"' : ''}>${q.bid != null ? (q.bidEstimated ? '~' : '') + fmtPrice(q.bid) : '\u2014'}</span></div>` : ''}
+          ${showItem('ask') ? `<div class="mobile-detail-item" data-col="ask"><span class="mobile-detail-label">Ask</span><span class="mobile-detail-value"${q.askEstimated ? ' style="color:#666"' : ''}>${q.ask != null ? (q.askEstimated ? '~' : '') + fmtPrice(q.ask) : '\u2014'}</span></div>` : ''}
           ${item('date',       'Purchased',  esc(pos.purchaseDate) || '\u2014')}
           ${showItem('notes') ? `<div class="mobile-detail-item" data-col="notes"><span class="mobile-detail-label">Notes</span><span class="mobile-detail-value" style="color:#ff9">${esc(notes[pos.symbol] || '') || '\u2014'}</span></div>` : ''}
         </div>
@@ -6055,11 +6076,11 @@ function checkAllAlerts() {
       const arrow = aboveHit ? '\u25B2' : '\u25BC'; // ▲ / ▼
       if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try {
-          new Notification(arrow + ' Price Alert: ' + pos.symbol, { body: pos.symbol + ' is now $' + fmt(q.price) });
+          new Notification(arrow + ' Price Alert: ' + pos.symbol, { body: pos.symbol + ' is now $' + fmtPrice(q.price) });
         } catch (_) { /* browser may block notifications from file:// */ }
       }
       playAlertSound(direction);
-      flashTabTitle(arrow + ' ' + pos.symbol + ' $' + fmt(q.price));
+      flashTabTitle(arrow + ' ' + pos.symbol + ' $' + fmtPrice(q.price));
     } else if (!triggered) {
       a._notified = false;
     }

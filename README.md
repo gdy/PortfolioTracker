@@ -35,7 +35,9 @@ A real-time portfolio tracker for stocks, crypto, and commodities that runs enti
 - **Export / Import settings** — save and restore your API keys, column visibility, column order, price alerts, and refresh preferences as a JSON file. Found in the Settings panel.
 - **Share via URL** — generate a shareable URL containing your portfolio (symbols, shares, cost basis, dates) encoded in the hash (up to 99 positions). Recipients are prompted before any positions replace their current portfolio. Shared symbols are sanitized and length-validated on import.
 - **Undo / Redo** — `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) undoes and redoes any portfolio change: add, remove, edit shares/cost/date, import, reorder, or clear all. Up to 50 levels of history. Visible **Undo** and **Redo** buttons in the toolbar auto-enable/disable as the stacks change, so the feature is discoverable without needing the shortcut.
-- **Short selling** — negative share quantities track short positions with correct P&L math.
+- **Short selling** — negative share quantities track short positions with correct P&L math (gains when price falls, market value carried as a negative/liability in the summary).
+- **Smart lot merging** — adding to an existing position (manually or via import) averages same-side lots by a share-weighted cost basis, while an opposite-side lot is treated as a partial/full close: the surviving side keeps its cost basis instead of blending the closing price into a meaningless average. Manual adds and CSV imports share one merge routine so they can't drift apart.
+- **Adaptive price precision** — per-share prices scale their decimal places to magnitude: normal prices show 2 decimals, sub-dollar 4, sub-cent 6, and microcap tokens up to 8 — so a sub-penny coin like SHIB displays `0.00002341` instead of being rounded to `$0.00`. Dollar aggregates (market value, P&L) stay at 2 decimals.
 - **Per-position notes** — free-text notes column for each ticker.
 - **Purchase date tracking** — records when each position was opened, sortable and editable inline.
 - **Summary bar** — total market value, day P&L, total P&L, total P&L %, and position count across the whole portfolio.
@@ -225,7 +227,7 @@ All user-visible strings that originate outside the app are escaped before being
 - Column picker entries do not use inline `onclick`/`onchange` with interpolated keys — the change handler is attached via `addEventListener` and reads the key from a `data-` attribute.
 - External links open with `target="_blank" rel="noopener noreferrer"`.
 
-Portfolio imports from shared URLs are parsed with a symbol whitelist (`[A-Z0-9.\-=]`), a length cap of 10 characters, and numeric coercion for shares and cost, and are always gated behind a confirmation dialog. Positions that don't pass validation are dropped before any state is replaced.
+Portfolio imports from shared URLs are parsed with a symbol whitelist (`[A-Z0-9.\-=]`), a length cap of 10 characters, numeric coercion for shares and cost, and a strict `YYYY-MM-DD` date validation (the date field flows into an HTML `value=""` attribute, so an unvalidated value could otherwise break out of the attribute), and are always gated behind a confirmation dialog. Positions that don't pass validation are dropped before any state is replaced. As defense-in-depth, date values are also `escAttr`-escaped at every render site regardless of ingestion path.
 
 Corrupt `localStorage` entries are detected on load: the bad key is removed and the app boots with an empty fallback instead of crashing.
 
