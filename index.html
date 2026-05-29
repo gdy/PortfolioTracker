@@ -1879,6 +1879,15 @@ const CRYPTO_MAP = {
   'XRP': 'XRP-USD', 'ADA': 'ADA-USD', 'DOT': 'DOT-USD', 'AVAX': 'AVAX-USD',
   'MATIC': 'MATIC-USD', 'LINK': 'LINK-USD', 'LTC': 'LTC-USD', 'UNI': 'UNI-USD',
   'SHIB': 'SHIB-USD', 'ATOM': 'ATOM-USD', 'XLM': 'XLM-USD',
+  // Meme / newer-listing coins users commonly type by bare ticker
+  'BONK': 'BONK-USD', 'PEPE': 'PEPE-USD', 'WIF': 'WIF-USD', 'FLOKI': 'FLOKI-USD',
+  'PENGU': 'PENGU-USD',
+  // Additional top-market-cap coins
+  'TRX': 'TRX-USD', 'BCH': 'BCH-USD', 'NEAR': 'NEAR-USD', 'APT': 'APT-USD',
+  'ARB': 'ARB-USD', 'OP': 'OP-USD', 'SUI': 'SUI-USD', 'ETC': 'ETC-USD',
+  'FIL': 'FIL-USD', 'AAVE': 'AAVE-USD', 'ALGO': 'ALGO-USD', 'ICP': 'ICP-USD',
+  'HBAR': 'HBAR-USD', 'VET': 'VET-USD', 'INJ': 'INJ-USD', 'RNDR': 'RNDR-USD',
+  'TON': 'TON-USD',
 };
 // Commodity shorthand -> Yahoo Finance futures symbol
 const COMMODITY_MAP = {
@@ -3421,12 +3430,24 @@ const COINGECKO_IDS = {
   'XRP-USD': 'ripple', 'ADA-USD': 'cardano', 'DOT-USD': 'polkadot', 'AVAX-USD': 'avalanche-2',
   'MATIC-USD': 'matic-network', 'LINK-USD': 'chainlink', 'LTC-USD': 'litecoin', 'UNI-USD': 'uniswap',
   'SHIB-USD': 'shiba-inu', 'ATOM-USD': 'cosmos', 'XLM-USD': 'stellar',
+  'BONK-USD': 'bonk', 'PEPE-USD': 'pepe', 'WIF-USD': 'dogwifcoin', 'FLOKI-USD': 'floki',
+  'PENGU-USD': 'pudgy-penguins', 'TRX-USD': 'tron', 'BCH-USD': 'bitcoin-cash', 'NEAR-USD': 'near',
+  'APT-USD': 'aptos', 'ARB-USD': 'arbitrum', 'OP-USD': 'optimism', 'SUI-USD': 'sui',
+  'ETC-USD': 'ethereum-classic', 'FIL-USD': 'filecoin', 'AAVE-USD': 'aave', 'ALGO-USD': 'algorand',
+  'ICP-USD': 'internet-computer', 'HBAR-USD': 'hedera-hashgraph', 'VET-USD': 'vechain',
+  'INJ-USD': 'injective-protocol', 'RNDR-USD': 'render-token', 'TON-USD': 'the-open-network',
 };
 const CRYPTO_NAMES = {
   'BTC-USD': 'Bitcoin', 'ETH-USD': 'Ethereum', 'SOL-USD': 'Solana', 'DOGE-USD': 'Dogecoin',
   'XRP-USD': 'XRP', 'ADA-USD': 'Cardano', 'DOT-USD': 'Polkadot', 'AVAX-USD': 'Avalanche',
   'MATIC-USD': 'Polygon', 'LINK-USD': 'Chainlink', 'LTC-USD': 'Litecoin', 'UNI-USD': 'Uniswap',
   'SHIB-USD': 'Shiba Inu', 'ATOM-USD': 'Cosmos', 'XLM-USD': 'Stellar',
+  'BONK-USD': 'Bonk', 'PEPE-USD': 'Pepe', 'WIF-USD': 'dogwifhat', 'FLOKI-USD': 'Floki',
+  'PENGU-USD': 'Pudgy Penguins', 'TRX-USD': 'TRON', 'BCH-USD': 'Bitcoin Cash', 'NEAR-USD': 'NEAR Protocol',
+  'APT-USD': 'Aptos', 'ARB-USD': 'Arbitrum', 'OP-USD': 'Optimism', 'SUI-USD': 'Sui',
+  'ETC-USD': 'Ethereum Classic', 'FIL-USD': 'Filecoin', 'AAVE-USD': 'Aave', 'ALGO-USD': 'Algorand',
+  'ICP-USD': 'Internet Computer', 'HBAR-USD': 'Hedera', 'VET-USD': 'VeChain',
+  'INJ-USD': 'Injective', 'RNDR-USD': 'Render', 'TON-USD': 'Toncoin',
 };
 let _cgCache = { data: null, time: 0 };
 
@@ -3486,63 +3507,56 @@ async function _coinbaseFetch(sym) {
     return null;
   }
 }
-// CoinCap (free, no key, direct CORS) — secondary keyless real-time-ish source
-// used as automatic fallback when the Coinbase circuit breaker trips. CoinCap's
-// IDs mostly match CoinGecko's but a few diverge (avalanche, polygon, xrp), so
-// we maintain a separate map for the symbols Coinbase couldn't cover.
-const COINCAP_IDS = {
-  'BTC-USD': 'bitcoin', 'ETH-USD': 'ethereum', 'SOL-USD': 'solana', 'DOGE-USD': 'dogecoin',
-  'XRP-USD': 'xrp', 'ADA-USD': 'cardano', 'DOT-USD': 'polkadot', 'AVAX-USD': 'avalanche',
-  'MATIC-USD': 'polygon', 'LINK-USD': 'chainlink', 'LTC-USD': 'litecoin', 'UNI-USD': 'uniswap',
-  'SHIB-USD': 'shiba-inu', 'ATOM-USD': 'cosmos', 'XLM-USD': 'stellar',
-};
-async function _overlayCoinCapPrices(out) {
+// CryptoCompare (free, no key, CORS wildcard) — secondary keyless real-time
+// price source used as an automatic fallback when the Coinbase circuit breaker
+// trips. Replaces the former CoinCap v2 overlay: api.coincap.io was
+// decommissioned — its free v2 host no longer resolves (NXDOMAIN) and the v3
+// endpoint at rest.coincap.io requires an API key, which would break the
+// keyless design. CryptoCompare's pricemulti takes bare tickers (we just strip
+// the '-USD' suffix) and returns spot USD prices for every coin in our maps. It
+// returns price only (no 24h change), so we re-anchor change/changePct to
+// CoinGecko's 24h-old prevClose exactly like the Coinbase overlay does.
+async function _overlayCryptoComparePrices(out) {
   if (!out || !out.data) return out;
-  const userSyms = Object.keys(out.data).filter(s => COINCAP_IDS[s]);
+  const userSyms = Object.keys(out.data).filter(s => s.endsWith('-USD'));
   if (userSyms.length === 0) return out;
-  const ids = userSyms.map(s => COINCAP_IDS[s]).join(',');
+  const fsyms = userSyms.map(s => s.slice(0, -4)); // strip '-USD'
   try {
-    const r = await fetch(`https://api.coincap.io/v2/assets?ids=${encodeURIComponent(ids)}`,
+    const r = await fetch(`https://min-api.cryptocompare.com/data/pricemulti?fsyms=${encodeURIComponent(fsyms.join(','))}&tsyms=USD`,
                           { signal: AbortSignal.timeout(2500) });
     if (!r.ok) return out;
     const j = await r.json();
-    if (!Array.isArray(j.data)) return out;
-    const byId = {};
-    for (const d of j.data) byId[d.id] = d;
+    if (!j || typeof j !== 'object' || j.Response === 'Error') return out;
     let patched = false;
-    for (const sym of userSyms) {
-      const d = byId[COINCAP_IDS[sym]];
-      if (!d) continue;
-      const price = parseFloat(d.priceUsd);
+    for (let i = 0; i < userSyms.length; i++) {
+      const sym = userSyms[i], entry = j[fsyms[i]];
+      if (!entry || typeof entry !== 'object') continue;
+      const price = parseFloat(entry.USD);
       if (!isFinite(price) || price <= 0) continue;
       const q = out.data[sym];
       if (!q) continue;
       q.price = price;
-      const chgPct = parseFloat(d.changePercent24Hr);
-      if (isFinite(chgPct)) {
-        q.changePct = chgPct;
-        // Re-derive change + prevClose from price + 24h change% so the cell
-        // tinting still works when CoinCap is the only fresh signal.
-        if (chgPct !== 0) {
-          q.prevClose = price / (1 + chgPct / 100);
-          q.change = price - q.prevClose;
-        }
+      // Re-anchor change + changePct to CoinGecko's 24h-old prevClose so the
+      // cell tinting still works when CryptoCompare is the only fresh signal.
+      if (q.prevClose) {
+        q.change = price - q.prevClose;
+        q.changePct = (q.change / q.prevClose) * 100;
       }
       q._lastUpdate = Date.now();
       patched = true;
     }
-    if (patched) out.source = (out.source || 'CoinGecko') + ' + CoinCap';
-  } catch (_) { /* per-call failure is silent */ }
+    if (patched) out.source = (out.source || 'CoinGecko') + ' + CryptoCompare';
+  } catch (_) { /* per-call failure is silent — falls through to CoinGecko data */ }
   return out;
 }
 
 async function _overlayCoinbasePrices(out) {
   if (!out || !out.data) return out;
   // When Coinbase has tripped the circuit breaker (3 consecutive all-fails →
-  // 30 s cooldown), try CoinCap instead so crypto prices still update on
-  // every refresh tick. If CoinCap also fails the user falls through to the
-  // slower CoinGecko data — same pre-overlay behavior, no regression.
-  if (Date.now() < _cbSkipUntil) return await _overlayCoinCapPrices(out);
+  // 30 s cooldown), try CryptoCompare instead so crypto prices still update on
+  // every refresh tick. If CryptoCompare also fails the user falls through to
+  // the slower CoinGecko data — same pre-overlay behavior, no regression.
+  if (Date.now() < _cbSkipUntil) return await _overlayCryptoComparePrices(out);
   const syms = Object.keys(out.data);
   if (syms.length === 0) return out;
   let patched = false;
@@ -4973,7 +4987,20 @@ function getCellHtml(col, pos, q, computed) {
     case 'eps': return `<td>${q.eps != null ? fmt(q.eps) : '\u2014'}</td>`;
     case 'beta': return `<td>${q.beta != null ? fmt(q.beta) : '\u2014'}</td>`;
     case 'analystRating': {
-      if (!q.analystRating) return `<td>\u2014</td>`;
+      if (!q.analystRating) {
+        // Turn the silent "\u2014" into a discoverable hint. Analyst consensus is an
+        // equity-only concept (sell-side stock analysts), so crypto/commodities
+        // never have it. For stocks, the only reliable source is a FinnHub key \u2014
+        // so when none is set, point the user at it; otherwise the symbol simply
+        // isn't covered. dotted underline + cursor:help invites the hover.
+        if (isCryptoSymbol(sym) || isCommoditySymbol(sym)) {
+          return `<td title="Analyst ratings are not available for crypto or commodities" style="cursor:help; color:#555;">\u2014</td>`;
+        }
+        const _at = getApiKey()
+          ? 'No analyst coverage for this symbol'
+          : 'Add a free FinnHub API key in Settings to show analyst ratings';
+        return `<td title="${escAttr(_at)}" style="cursor:help; ${getApiKey() ? '' : 'text-decoration:underline; text-decoration-style:dotted; text-decoration-color:#555; text-underline-offset:2px;'}">\u2014</td>`;
+      }
       const sc = q.analystScore;
       let cls = 'neutral';
       if (sc != null) {
@@ -5482,6 +5509,12 @@ function renderMobileCards() {
       analystCls = (sc != null && sc < 2.5) ? 'pos' : (sc != null && sc >= 3.5) ? 'neg' : 'neutral';
       analystInner = esc(q.analystRating) + (q.analystCount ? ' (' + q.analystCount + ')' : '');
       analystTap = ` onclick="event.stopPropagation();openAnalystPopover('${sym}',this)" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; text-decoration-color:#555; text-underline-offset:2px;"`;
+    } else {
+      // Same discoverability hint as the desktop cell (see getCellHtml).
+      const _at = (isCryptoSymbol(pos.symbol) || isCommoditySymbol(pos.symbol))
+        ? 'Not available for crypto or commodities'
+        : (getApiKey() ? 'No analyst coverage for this symbol' : 'Add a free FinnHub API key in Settings to show analyst ratings');
+      analystTap = ` title="${escAttr(_at)}"`;
     }
 
     const isExpanded = expandedSymbols.has(pos.symbol);
