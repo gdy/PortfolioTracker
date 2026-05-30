@@ -1673,6 +1673,10 @@ const _DEBUG = (() => {
 function dbg(...args) { if (_DEBUG) console.warn(...args); }
 
 let prevPrices = {};
+// One-shot flag: set when boot hydrates cached quotes (stale-while-revalidate)
+// so the first refresh after load doesn't flash every price that drifted while
+// the tab was closed. Consumed (and cleared) by _refreshAll's prevPrices seed.
+let _suppressNextSeedFlash = false;
 let sortCol = null;
 let sortAsc = true;
 let refreshTimer = null;
@@ -1774,6 +1778,7 @@ document.addEventListener('keydown', e => {
 const SAVE_DEBOUNCE_MS = 250;
 let _savePortfolioTimer = null;
 let _saveNotesTimer = null;
+let _saveQuotesTimer = null;
 function _savePortfolioNow() {
   _savePortfolioTimer = null;
   safeSet('stonks_portfolio', JSON.stringify(portfolio));
@@ -1806,9 +1811,62 @@ function saveNotes() {
   if (_saveNotesTimer) clearTimeout(_saveNotesTimer);
   _saveNotesTimer = setTimeout(_saveNotesNow, SAVE_DEBOUNCE_MS);
 }
+// ---- Quote cache (stale-while-revalidate) ----
+// Persist the latest quotes so a page reload paints the table instantly with
+// last-known prices instead of a wall of "loading…" until the first refresh
+// (which is gated by the slowest source). Pruned to the active portfolio's
+// symbols so the blob stays small; the immediately-following refresh overwrites
+// these with live data. Saved least-critical-last (after portfolio/notes) so a
+// quota error can't block the writes that actually matter.
+function _saveQuotesNow() {
+  _saveQuotesTimer = null;
+  const syms = portfolio.map(p => p.symbol);
+  const slim = {};
+  for (const s of syms) {
+    const q = quoteData[s];
+    if (q && q.price != null) slim[s] = q;
+  }
+  if (Object.keys(slim).length > 0) safeSet('stonks_quotes', JSON.stringify(slim));
+  else { try { localStorage.removeItem('stonks_quotes'); } catch (_) {} }
+}
+function saveQuotes() {
+  if (_saveQuotesTimer) clearTimeout(_saveQuotesTimer);
+  _saveQuotesTimer = setTimeout(_saveQuotesNow, SAVE_DEBOUNCE_MS);
+}
+// Restore persisted quotes into quoteData before the first render. Only symbols
+// in the current portfolio are hydrated; anything stale is ignored. Sets the
+// one-shot flash-suppression flag and surfaces the cached timestamp so the user
+// can tell the prices aren't live yet (the imminent refresh replaces them).
+function hydrateQuotes() {
+  let cached;
+  try { cached = lsGet('stonks_quotes', '{}'); } catch (_) { return; }
+  if (!cached || typeof cached !== 'object') return;
+  const syms = new Set(portfolio.map(p => p.symbol));
+  let newest = 0, n = 0;
+  for (const s of Object.keys(cached)) {
+    if (!syms.has(s)) continue;
+    const q = cached[s];
+    if (!q || typeof q !== 'object' || q.price == null) continue;
+    quoteData[s] = q;
+    if (typeof q._lastUpdate === 'number' && q._lastUpdate > newest) newest = q._lastUpdate;
+    n++;
+  }
+  if (n > 0) {
+    _suppressNextSeedFlash = true;
+    if (newest) {
+      const lu = document.getElementById('last-update');
+      if (lu) lu.textContent = 'Updated: ' + new Date(newest).toLocaleTimeString() + ' (cached)';
+    }
+  }
+}
 function flushPendingSaves() {
   if (_savePortfolioTimer) { clearTimeout(_savePortfolioTimer); _savePortfolioNow(); }
   if (_saveNotesTimer) { clearTimeout(_saveNotesTimer); _saveNotesNow(); }
+  // Always capture the latest quotes on unload: WS and refresh ticks mutate
+  // quoteData without scheduling a quote save every time, so a pending timer
+  // isn't a reliable signal that there's nothing new to persist.
+  if (_saveQuotesTimer) clearTimeout(_saveQuotesTimer);
+  _saveQuotesNow();
 }
 window.addEventListener('beforeunload', flushPendingSaves);
 function updateUndoRedoButtons() {
@@ -2046,6 +2104,7 @@ function clearAll() {
   fetchedAfterHours.clear();
   attemptedSymbols.clear();
   _resetCoinbaseOverlayState();
+  try { localStorage.removeItem('stonks_quotes'); } catch (_) {}
   savePortfolio();
   renderTable();
   updateSummary();
@@ -2596,20 +2655,30 @@ async function fetchAnyVariantRace(urls, timeout = 9000, maxAttempts = 8) {
 // --- Yahoo Finance: Get crumb ---
 let yfCrumb = null;
 let yfCrumbTime = 0;
+let _crumbInFlight = null; // dedupe concurrent crumb fetches (boot prewarm + first v7)
 async function getYahooCrumb() {
   if (yfCrumb && Date.now() - yfCrumbTime < YF_CRUMB_TTL) return yfCrumb;
+  // Coalesce concurrent callers onto a single fetch. Without this, prewarming
+  // the crumb at boot and the first refresh's v7 batch would each issue their
+  // own request (yfCrumb is still null until the first resolves) — doubling the
+  // proxy load and racing to set yfCrumb.
+  if (_crumbInFlight) return _crumbInFlight;
   yfCrumb = null; // force re-fetch if expired
-  try {
-    const text = await fetchWithProxy('https://query2.finance.yahoo.com/v1/test/getcrumb');
-    if (text && text.length < 50 && !text.includes('<')) {
-      yfCrumb = text.trim();
-      yfCrumbTime = Date.now();
-      return yfCrumb;
+  _crumbInFlight = (async () => {
+    try {
+      const text = await fetchWithProxy('https://query2.finance.yahoo.com/v1/test/getcrumb');
+      if (text && text.length < 50 && !text.includes('<')) {
+        yfCrumb = text.trim();
+        yfCrumbTime = Date.now();
+        return yfCrumb;
+      }
+    } catch (e) {
+      console.warn('Could not get Yahoo crumb:', e.message);
     }
-  } catch (e) {
-    console.warn('Could not get Yahoo crumb:', e.message);
-  }
-  return null;
+    return null;
+  })();
+  try { return await _crumbInFlight; }
+  finally { _crumbInFlight = null; }
 }
 
 // Encode symbol for query string parameters — handles futures (GC=F → GC%3DF)
@@ -4323,8 +4392,15 @@ async function _refreshAll(signal) {
   const symbols = portfolio.map(p => p.symbol);
   if (symbols.length === 0) { renderTable(); updateSummary(); return; }
 
-  for (const s of symbols) {
-    if (quoteData[s]) prevPrices[s] = quoteData[s].price;
+  if (_suppressNextSeedFlash) {
+    // First refresh after boot hydrated cached quotes: skip seeding prevPrices
+    // so prices that drifted while the tab was closed don't flash the whole
+    // table green/red on the first live update.
+    _suppressNextSeedFlash = false;
+  } else {
+    for (const s of symbols) {
+      if (quoteData[s]) prevPrices[s] = quoteData[s].price;
+    }
   }
 
   setStatus('Fetching quotes...', 'loading');
@@ -4654,6 +4730,7 @@ async function _refreshAll(signal) {
   // Single render after all primary data + merges + bid/ask estimates
   renderTable();
   updateSummary();
+  saveQuotes(); // persist for instant stale paint on next reload
 
   if (signal && signal.aborted) return;
 
@@ -4701,6 +4778,7 @@ async function _refreshAll(signal) {
     await Promise.all(allTasks);
     renderTable();
     updateSummary();
+    saveQuotes(); // re-persist now that fundamentals/perf have filled in
   }
 
   if (signal && signal.aborted) return;
@@ -6902,6 +6980,7 @@ async function refreshCryptoOnly() {
       renderTable();
       updateSummary();
       document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+      saveQuotes();
     }
   } finally {
     _cryptoOnlyInFlight = false;
@@ -7025,6 +7104,7 @@ async function refreshCommoditiesOnly() {
       renderTable();
       updateSummary();
       document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+      saveQuotes();
     }
   } finally {
     _commoditiesOnlyInFlight = false;
@@ -7157,6 +7237,7 @@ async function refreshAlwaysOnOnly() {
     setStatus('Data via ' + sources.join(' + ') + ' (off-hours)', 'live');
     updateWsIndicator();
     document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+    saveQuotes();
   }
 }
 
@@ -7349,6 +7430,16 @@ function dismissWelcome() {
 
 initPortfolios();
 loadFromURL();
+// Stale-while-revalidate: paint last-saved prices immediately so the table
+// isn't a wall of "loading…" until the first refresh (which is gated by the
+// slowest source) completes. The refreshAll below overwrites them with live data.
+hydrateQuotes();
+// Prewarm the Yahoo crumb in parallel with the synchronous render work below
+// (and the upcoming parallel fetches), so the first refresh's v7 quote batch
+// doesn't pay a serial crumb round-trip on the critical path. Deduped inside
+// getYahooCrumb(), so the refresh reuses this in-flight fetch. Only worth it
+// when the portfolio has Yahoo-dependent (stock/commodity) symbols.
+if (portfolio.some(p => !isCryptoSymbol(p.symbol))) getYahooCrumb().catch(() => {});
 buildHeader();
 renderTable();
 updateSummary();
