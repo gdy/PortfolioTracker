@@ -1616,6 +1616,20 @@ function makeEmptyQuote(sym) {
   };
 }
 
+// Fields filled once by deferred/secondary passes (performance history, 52-week
+// range, fundamentals, analyst consensus) and gated by the fetched* sets so they
+// aren't re-fetched. A price-only primary source (e.g. Stooq on the keyless path)
+// doesn't carry them, so _refreshAll preserves them across the quote overwrite —
+// otherwise a later full refresh (e.g. one triggered by adding another ticker)
+// would blank them on every existing row while only the just-added ticker, not
+// yet in the fetched* sets, gets re-populated.
+const STICKY_QUOTE_FIELDS = [
+  'perfYTD', 'perf6M', 'perf1Y', 'wk52High', 'wk52Low',
+  'pe', 'eps', 'beta', 'marketCap', 'avgVolume',
+  'dividend', 'dividendYield', 'exDivDate', 'earningsDate',
+  'analystRating', 'analystScore', 'analystCount', 'analystBreakdown', 'analystPeriod',
+];
+
 // ==================== STATE ====================
 // Parses localStorage JSON safely. `fallback` is a JSON string; if it's ever
 // malformed (shouldn't be — all callers pass a literal), or if the stored
@@ -4608,6 +4622,7 @@ async function _refreshAll(signal) {
           postMarketPrice: quoteData[sym].postMarketPrice, postMarketChange: quoteData[sym].postMarketChange,
           preMarketPrice: quoteData[sym].preMarketPrice, preMarketChange: quoteData[sym].preMarketChange,
           marketState: quoteData[sym].marketState,
+          prev: quoteData[sym], // old object — to carry sticky deferred fields across the overwrite
         };
       }
     }
@@ -4627,6 +4642,14 @@ async function _refreshAll(signal) {
         if (q.postMarketPrice == null && p.postMarketPrice != null) { q.postMarketPrice = p.postMarketPrice; q.postMarketChange = p.postMarketChange; }
         if (q.preMarketPrice == null && p.preMarketPrice != null) { q.preMarketPrice = p.preMarketPrice; q.preMarketChange = p.preMarketChange; }
         if (q.marketState == null && p.marketState != null) q.marketState = p.marketState;
+        // Carry forward sticky deferred-fetch fields (perf, 52-wk, fundamentals,
+        // analyst) the fresh primary lacks, so a price-only refresh doesn't blank
+        // them on rows that the fetched* guards won't let us re-fetch.
+        if (p.prev) {
+          for (const k of STICKY_QUOTE_FIELDS) {
+            if (q[k] == null && p.prev[k] != null) q[k] = p.prev[k];
+          }
+        }
       }
     }
     // Mark tickers as unknown when any source replied successfully (even with
