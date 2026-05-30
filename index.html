@@ -4416,14 +4416,57 @@ async function _refreshAll(signal) {
   // it provides cheap resilience: if the primary keyed sources hiccup, Stooq's
   // batched single call still has the whole portfolio.
   const hasStooqEligible = symbols.some(s => !isCryptoSymbol(s));
-  const [finnhubResult, yahooResult, alpacaResult, fmpResult, cryptoResult, freeResult, stooqResult] = await Promise.all([
-    hasFinnHub ? fetchFinnhubQuotes(symbols) : Promise.resolve(null),
-    fetchYahooQuotes(symbols),
-    hasAlpaca ? fetchAlpacaQuotes(symbols) : Promise.resolve(null),
-    hasFmp ? fetchFmpQuotes(symbols) : Promise.resolve(null),
-    hasCrypto ? fetchCryptoQuotes(symbols) : Promise.resolve(null),
-    !hasFinnHub ? fetchFinnhubFreeQuotes(symbols) : Promise.resolve(null),
-    hasStooqEligible ? fetchStooqQuotes(symbols) : Promise.resolve(null),
+  // Kick every source off at once (they all run concurrently) but await them in
+  // two waves. Wave 1 is the fast, single-call, direct-CORS sources — Stooq (the
+  // whole portfolio of US stocks + futures in one CSV) and CoinGecko + Coinbase
+  // (crypto) — which typically return in ~300–500 ms. The proxied Yahoo batch is
+  // the slowest link (and the only real-time stock source a keyless user has),
+  // so we paint an interim preview from the fast sources rather than make the
+  // first paint wait seconds on Yahoo.
+  const pFinnhub = hasFinnHub ? fetchFinnhubQuotes(symbols) : Promise.resolve(null);
+  const pYahoo = fetchYahooQuotes(symbols);
+  const pAlpaca = hasAlpaca ? fetchAlpacaQuotes(symbols) : Promise.resolve(null);
+  const pFmp = hasFmp ? fetchFmpQuotes(symbols) : Promise.resolve(null);
+  const pCrypto = hasCrypto ? fetchCryptoQuotes(symbols) : Promise.resolve(null);
+  const pFree = !hasFinnHub ? fetchFinnhubFreeQuotes(symbols) : Promise.resolve(null);
+  const pStooq = hasStooqEligible ? fetchStooqQuotes(symbols) : Promise.resolve(null);
+
+  // --- Wave 1: interim paint from the fast sources ---
+  const [stooqResult, cryptoResult] = await Promise.all([pStooq, pCrypto]);
+  if (signal && signal.aborted) return;
+  // Fill ONLY blank rows (symbols that have no price yet), merging price fields
+  // onto any existing/hydrated object instead of replacing it (so its
+  // fundamentals survive). Because we never touch an already-priced row, a
+  // steady-state tick is a no-op here — no double-flash — and the authoritative
+  // wave below still runs with every source and produces the final state. So
+  // this can only ever show a correct price ~1 s sooner, never a wrong one.
+  {
+    let interimPainted = false;
+    for (const src of [cryptoResult, stooqResult]) {
+      if (!src || !src.data) continue;
+      for (const [sym, d] of Object.entries(src.data)) {
+        if (!d || d.price == null) continue;
+        const cur = quoteData[sym];
+        if (cur && cur.price != null) continue; // already shown — let the final pass refine it
+        if (cur) {
+          cur.price = d.price;
+          if (d.change != null) cur.change = d.change;
+          if (d.changePct != null) cur.changePct = d.changePct;
+          if (d.prevClose != null) cur.prevClose = d.prevClose;
+          if (cur.name === sym && d.name && d.name !== sym) cur.name = d.name;
+          cur._lastUpdate = d._lastUpdate || Date.now();
+        } else {
+          quoteData[sym] = d;
+        }
+        interimPainted = true;
+      }
+    }
+    if (interimPainted) { renderTable(); updateSummary(); }
+  }
+
+  // --- Wave 2: the remaining sources (Stooq/crypto already resolved here) ---
+  const [finnhubResult, yahooResult, alpacaResult, fmpResult, freeResult] = await Promise.all([
+    pFinnhub, pYahoo, pAlpaca, pFmp, pFree,
   ]);
 
   if (signal && signal.aborted) return;
