@@ -3837,11 +3837,16 @@ async function fetchPerformanceData(symbols) {
     const sym = symbols[i];
     if (i > 0) await new Promise(r => setTimeout(r, PERF_SYMBOL_DELAY));
 
-    // Try Yahoo first — race 2 proxies on the primary CDN domain
+    // Try Yahoo first — race 2 proxies on the primary CDN domain. Weekly candles
+    // (interval=1wk → ~52 points) instead of daily (~250) keep the payload small so
+    // it survives the public CORS proxies far more often — the main reason these
+    // columns are blank for keyless users. Weekly granularity is plenty for a
+    // YTD/6M/1Y reference price: the reference date drifts by at most a few days,
+    // which is negligible for a performance percentage.
     let gotPerf = false;
     try {
       const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) +
-        '?period1=' + oneYearAgo + '&period2=' + nowUnix + '&interval=1d', 2, YAHOO_PERF_TIMEOUT);
+        '?period1=' + oneYearAgo + '&period2=' + nowUnix + '&interval=1wk', 2, YAHOO_PERF_TIMEOUT);
       const data = JSON.parse(text);
       const result = data.chart && data.chart.result && data.chart.result[0];
       if (result && result.timestamp && result.timestamp.length > 1) {
@@ -4873,14 +4878,20 @@ async function _refreshAll(signal) {
     directTasks.push(fetchCryptoSupplemental(symbols));
   }
 
-  // Proxy-dependent tasks run sequentially: fundamentals first, then performance data
+  // Proxy-dependent tasks run sequentially to avoid saturating the shared proxy
+  // pool. Performance goes FIRST: it's pure price-history that succeeds keylessly
+  // via Yahoo's chart, whereas the keyless fundamentals path (quoteSummary) mostly
+  // 401s — running fundamentals first would burn the proxy budget on doomed calls
+  // and leave YTD/6M/1Y blank. With a FinnHub key, fundamentals are already in
+  // fundamentalsCache from the main batch, so needsSummary is small here and the
+  // order barely matters.
   const proxyTask = (async () => {
-    if (needsSummary.length > 0) await fillFundamentals(needsSummary);
-    if (signal && signal.aborted) return;
     if (needsPerf.length > 0) {
       await fetchPerformanceData(needsPerf);
       needsPerf.forEach(s => fetchedPerformance.add(s));
     }
+    if (signal && signal.aborted) return;
+    if (needsSummary.length > 0) await fillFundamentals(needsSummary);
   })();
 
   const allTasks = [...directTasks, proxyTask];
