@@ -1955,11 +1955,34 @@ const COMMODITY_MAP = {
   'COPPER': 'HG=F', 'CORN': 'ZC=F', 'WHEAT': 'ZW=F', 'SOYBEANS': 'ZS=F',
   'SUGAR': 'SB=F', 'COFFEE': 'KC=F', 'COTTON': 'CT=F',
 };
+// Friendly display names for commodity futures. Yahoo supplies a name like
+// "Gold Dec 25", but Yahoo isn't queried off-hours (weekends/overnight) — the
+// only commodity sources then are Stooq (no name) and the Coinbase PAXG overlay
+// for gold (price only). Without this map a gold position added on a weekend
+// shows the bare "GC=F" forever. Used as a fallback whenever a commodity quote
+// would otherwise carry the bare symbol as its name.
+const COMMODITY_NAMES = {
+  'GC=F': 'Gold', 'SI=F': 'Silver', 'PL=F': 'Platinum', 'PA=F': 'Palladium',
+  'CL=F': 'Crude Oil (WTI)', 'BZ=F': 'Brent Crude', 'NG=F': 'Natural Gas',
+  'HG=F': 'Copper', 'ZC=F': 'Corn', 'ZW=F': 'Wheat', 'ZS=F': 'Soybeans',
+  'SB=F': 'Sugar', 'KC=F': 'Coffee', 'CT=F': 'Cotton',
+};
+function commodityName(sym) { return COMMODITY_NAMES[sym] || sym; }
 // Also accept the Yahoo symbol directly
 const COMMODITY_SYMBOLS = new Set(Object.values(COMMODITY_MAP));
 const CRYPTO_VALUES = new Set(Object.values(CRYPTO_MAP));
 function isCryptoSymbol(sym) { return sym.endsWith('-USD') || CRYPTO_VALUES.has(sym); }
 function isCommoditySymbol(sym) { return COMMODITY_SYMBOLS.has(sym); }
+// Display name for a quote: prefer a real name from a data source; for
+// commodities fall back to the friendly static name (so gold added off-hours
+// shows "Gold" instead of the bare "GC=F"); otherwise preserve prior behavior
+// (q.name || '') for stocks/crypto so nothing else changes.
+function quoteName(sym, q) {
+  const n = q && q.name;
+  if (n && n !== sym) return n;
+  if (isCommoditySymbol(sym)) return commodityName(sym);
+  return n || '';
+}
 
 // ==================== POSITION MANAGEMENT ====================
 function stepToolbar(id, delta) {
@@ -3537,6 +3560,7 @@ let _cgCache = { data: null, time: 0 };
 const CB_CACHE_TTL = 1000;
 const CB_FETCH_TIMEOUT = 1500;
 const _cbCache = {}; // sym -> { data: {price, bid, ask}, time: ms }
+const _cbStatsCache = {}; // product -> { data: {price, prevClose, dayHigh, dayLow}, time: ms }
 // Circuit breaker: after this many consecutive overlay attempts where every
 // symbol failed, skip Coinbase entirely for the cooldown so a Coinbase outage
 // can't permanently add 1.5 s of latency to every crypto refresh tick.
@@ -3551,6 +3575,7 @@ const CB_SKIP_COOLDOWN = 30000;
 // otherwise accumulate _cbCache entries indefinitely.
 function _resetCoinbaseOverlayState() {
   for (const k of Object.keys(_cbCache)) delete _cbCache[k];
+  for (const k of Object.keys(_cbStatsCache)) delete _cbStatsCache[k];
   _cbFailStreak = 0;
   _cbSkipUntil = 0;
 }
@@ -3571,6 +3596,35 @@ async function _coinbaseFetch(sym) {
       ask: j.ask != null && isFinite(parseFloat(j.ask)) && parseFloat(j.ask) > 0 ? parseFloat(j.ask) : null,
     };
     _cbCache[sym] = { data, time: now };
+    return data;
+  } catch (_) {
+    return null;
+  }
+}
+// Coinbase Exchange /stats — 24h rolling open/high/low/last for a product. Used
+// by the tokenized-commodity overlay (gold via PAXG) so gold carries a day
+// change + range even off-hours, when Yahoo (the usual futures prevClose
+// source) isn't queried. /ticker only gives spot price + bid/ask; /stats adds
+// the 24h "open" we re-anchor change to. One extra cached call, gold-only.
+async function _coinbaseStats(product) {
+  const cached = _cbStatsCache[product];
+  const now = Date.now();
+  if (cached && now - cached.time < CB_CACHE_TTL) return cached.data;
+  try {
+    const r = await fetch(`https://api.exchange.coinbase.com/products/${encodeURIComponent(product)}/stats`,
+                          { signal: AbortSignal.timeout(CB_FETCH_TIMEOUT) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const price = parseFloat(j.last);
+    if (!isFinite(price) || price <= 0) return null;
+    const open = parseFloat(j.open), high = parseFloat(j.high), low = parseFloat(j.low);
+    const data = {
+      price,
+      prevClose: isFinite(open) && open > 0 ? open : null,
+      dayHigh: isFinite(high) && high > 0 ? high : null,
+      dayLow: isFinite(low) && low > 0 ? low : null,
+    };
+    _cbStatsCache[product] = { data, time: now };
     return data;
   } catch (_) {
     return null;
@@ -4182,9 +4236,15 @@ async function fetchOneSymbolNow(sym) {
       // Coinbase circuit breaker is open (handled inside _coinbaseFetch).
       if (isCommodity && COMMODITY_REALTIME_PROXY[sym] && Date.now() >= _cbSkipUntil) {
         racers.push((async () => {
-          const cb = await _coinbaseFetch(COMMODITY_REALTIME_PROXY[sym]);
-          if (!cb || !cb.price) throw new Error('paxg unavailable');
-          return { ...makeEmptyQuote(sym), name: sym, price: cb.price, _lastUpdate: Date.now() };
+          const st = await _coinbaseStats(COMMODITY_REALTIME_PROXY[sym]);
+          if (!st || !st.price) throw new Error('paxg unavailable');
+          const pc = st.prevClose;
+          return { ...makeEmptyQuote(sym), name: commodityName(sym), price: st.price,
+            prevClose: pc,
+            change: pc ? st.price - pc : null,
+            changePct: pc ? ((st.price - pc) / pc) * 100 : null,
+            dayHigh: st.dayHigh, dayLow: st.dayLow,
+            _lastUpdate: Date.now() };
         })());
       }
 
@@ -4711,10 +4771,17 @@ async function _refreshAll(signal) {
       const q = quoteData[sym];
       if (!q) continue;
       q.price = rt.price;
+      // PAXG carries a 24h "open" we use as prevClose so gold shows a day change
+      // even off-hours when Yahoo (the usual futures prevClose source) isn't
+      // queried. Never override a real Yahoo/Stooq prevClose if one is present.
+      if (q.prevClose == null && rt.prevClose != null) q.prevClose = rt.prevClose;
       if (q.prevClose) {
         q.change = rt.price - q.prevClose;
         q.changePct = (q.change / q.prevClose) * 100;
       }
+      if (q.dayHigh == null && rt.dayHigh != null) q.dayHigh = rt.dayHigh;
+      if (q.dayLow == null && rt.dayLow != null) q.dayLow = rt.dayLow;
+      if (!q.name || q.name === sym) q.name = commodityName(sym);
       q._lastUpdate = Date.now();
     }
   }
@@ -5077,7 +5144,7 @@ function getCellHtml(col, pos, q, computed) {
       }
       return `<td class="sym">${sym}<span class="${_cls}" onclick="event.stopPropagation();openAlertPopover('${sym}',this)" title="${_ttl}">&#128276;</span></td>`;
     }
-    case 'name': return `<td class="left" style="color:#888; max-width:140px; overflow:hidden; text-overflow:ellipsis;" title="${escAttr(q.name || '')}">${computed.isError ? '<span class="error-text">Not found</span>' : esc(q.name || '')}</td>`;
+    case 'name': { const _nm = quoteName(pos.symbol, q); return `<td class="left" style="color:#888; max-width:140px; overflow:hidden; text-overflow:ellipsis;" title="${escAttr(_nm)}">${computed.isError ? '<span class="error-text">Not found</span>' : esc(_nm)}</td>`; }
     case 'last': return `<td class="${cc(change)}">${priceCell}</td>`;
     case 'change': return `<td class="${cc(change)}">${change != null ? (change >= 0 ? '+' : '') + fmtPrice(change) : '\u2014'}</td>`;
     case 'changePct': return `<td class="${cc(changePct)}">${changePct != null ? fmtPct(changePct) : '\u2014'}</td>`;
@@ -5213,7 +5280,7 @@ function getSortValue(pos, q) {
   const price = q.price;
   switch (sortCol) {
     case 'symbol': return pos.symbol;
-    case 'name': return q.name || '';
+    case 'name': return quoteName(pos.symbol, q);
     case 'last': return price || 0;
     case 'change': return q.change || 0;
     case 'changePct': return q.changePct || 0;
@@ -5666,7 +5733,7 @@ function renderMobileCards() {
                 ? '<span class="alert-icon triggered">&#128276;</span>'
                 : '<span class="alert-icon active">&#128276;</span>';
             })()}
-            <span class="mobile-card-name">${isError ? '<span class="error-text">Not found</span>' : esc(q.name || '')}</span>
+            <span class="mobile-card-name">${isError ? '<span class="error-text">Not found</span>' : esc(quoteName(pos.symbol, q))}</span>
           </div>
           <div class="mobile-card-row2">
             <span>${pos.shares} shares${pos.costBasis ? ' @ $' + fmt(pos.costBasis) : ''}</span>
@@ -5938,7 +6005,7 @@ function exportCSV() {
     const totalPL = (price != null && pos.costBasis) ? (price - pos.costBasis) * pos.shares : '';
     const totalPLPct = (totalPL !== '' && pos.costBasis) ? (totalPL / (Math.abs(pos.shares) * pos.costBasis) * 100) : '';
     const csvVal = v => v == null ? '' : (typeof v === 'string' && v.includes(',') ? '"' + v.replace(/"/g,'""') + '"' : v);
-    rows.push([pos.symbol, csvVal(q.name||''), price||'', q.change||'', q.changePct||'',
+    rows.push([pos.symbol, csvVal(quoteName(pos.symbol, q)), price||'', q.change||'', q.changePct||'',
       pos.shares, pos.costBasis||'', pos.purchaseDate||'', mktVal, dayPL, totalPL,
       totalPLPct !== '' ? totalPLPct.toFixed(2) : '', q.prevClose||'', q.open||'',
       q.volume||'', q.marketCap||'', q.pe||'', q.eps||'', q.beta||'',
@@ -7049,12 +7116,12 @@ async function _overlayRealtimeCommodities(commoditySyms) {
   if (Date.now() < _cbSkipUntil) return null;
   const targets = commoditySyms.filter(s => COMMODITY_REALTIME_PROXY[s]);
   if (targets.length === 0) return null;
-  const overlay = {}; // user sym → { price, change?, changePct?, prevClose? }
+  const overlay = {}; // user sym → { price, prevClose?, dayHigh?, dayLow? }
   await Promise.all(targets.map(async sym => {
     const cbProduct = COMMODITY_REALTIME_PROXY[sym];
-    const cb = await _coinbaseFetch(cbProduct); // already has caching + 1.5 s timeout
-    if (!cb) return;
-    overlay[sym] = { price: cb.price };
+    const st = await _coinbaseStats(cbProduct); // 24h open/high/low/last, cached + 1.5 s timeout
+    if (!st) return;
+    overlay[sym] = { price: st.price, prevClose: st.prevClose, dayHigh: st.dayHigh, dayLow: st.dayLow };
   }));
   return Object.keys(overlay).length > 0 ? overlay : null;
 }
@@ -7122,7 +7189,7 @@ async function refreshCommoditiesOnly() {
         if (!q) {
           // Stooq didn't return data either (maybe symbol unsupported) but
           // we still got a real-time token price — seed a minimal entry.
-          q = { ...makeEmptyQuote(sym), name: sym, _lastUpdate: Date.now() };
+          q = { ...makeEmptyQuote(sym), name: commodityName(sym), _lastUpdate: Date.now() };
           if (prePrices[sym] != null) prevPrices[sym] = prePrices[sym];
           quoteData[sym] = q;
         }
@@ -7130,10 +7197,16 @@ async function refreshCommoditiesOnly() {
           prevPrices[sym] = prePrices[sym];
         }
         q.price = rt.price;
+        // PAXG's 24h "open" backfills prevClose so gold shows a day change even
+        // off-hours (Yahoo isn't queried then). Never override a real prevClose.
+        if (q.prevClose == null && rt.prevClose != null) q.prevClose = rt.prevClose;
         if (q.prevClose) {
           q.change = rt.price - q.prevClose;
           q.changePct = (q.change / q.prevClose) * 100;
         }
+        if (q.dayHigh == null && rt.dayHigh != null) q.dayHigh = rt.dayHigh;
+        if (q.dayLow == null && rt.dayLow != null) q.dayLow = rt.dayLow;
+        if (!q.name || q.name === sym) q.name = commodityName(sym);
         q._lastUpdate = Date.now();
         errorSymbols.delete(sym);
         updated = true;
@@ -7245,7 +7318,7 @@ async function refreshAlwaysOnOnly() {
       for (const [sym, rt] of Object.entries(realtimeOverlay)) {
         let q = quoteData[sym];
         if (!q) {
-          q = { ...makeEmptyQuote(sym), name: sym, _lastUpdate: Date.now() };
+          q = { ...makeEmptyQuote(sym), name: commodityName(sym), _lastUpdate: Date.now() };
           if (preCommodityPrices[sym] != null) prevPrices[sym] = preCommodityPrices[sym];
           quoteData[sym] = q;
         }
@@ -7253,10 +7326,16 @@ async function refreshAlwaysOnOnly() {
           prevPrices[sym] = preCommodityPrices[sym];
         }
         q.price = rt.price;
+        // PAXG's 24h "open" backfills prevClose so gold shows a day change even
+        // off-hours (Yahoo isn't queried then). Never override a real prevClose.
+        if (q.prevClose == null && rt.prevClose != null) q.prevClose = rt.prevClose;
         if (q.prevClose) {
           q.change = rt.price - q.prevClose;
           q.changePct = (q.change / q.prevClose) * 100;
         }
+        if (q.dayHigh == null && rt.dayHigh != null) q.dayHigh = rt.dayHigh;
+        if (q.dayLow == null && rt.dayLow != null) q.dayLow = rt.dayLow;
+        if (!q.name || q.name === sym) q.name = commodityName(sym);
         q._lastUpdate = Date.now();
         errorSymbols.delete(sym);
         updated = true;
