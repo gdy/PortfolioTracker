@@ -1630,6 +1630,15 @@ const STICKY_QUOTE_FIELDS = [
   'analystRating', 'analystScore', 'analystCount', 'analystBreakdown', 'analystPeriod',
 ];
 
+// Stripped from persisted quotes at boot (see hydrateQuotes): the sticky deferred
+// fields above plus the after-hours/session fields. Restoring any of these from
+// the cache would freeze them permanently — the deferred passes refetch only when
+// the value is null (fill-if-missing), and a hydrated postMarketPrice would mark
+// fetchedAfterHours — so a stale value would be re-saved session after session
+// without ever being recomputed.
+const HYDRATE_STRIP_FIELDS = [...STICKY_QUOTE_FIELDS,
+  'postMarketPrice', 'postMarketChange', 'preMarketPrice', 'preMarketChange', 'marketState'];
+
 // ==================== STATE ====================
 // Parses localStorage JSON safely. `fallback` is a JSON string; if it's ever
 // malformed (shouldn't be — all callers pass a literal), or if the stored
@@ -1861,6 +1870,11 @@ function hydrateQuotes() {
     if (!syms.has(s)) continue;
     const q = cached[s];
     if (!q || typeof q !== 'object' || q.price == null) continue;
+    // Hydration seeds PRICES for instant paint — not the deferred-fetch fields.
+    // Those are nulled so each session re-derives them fresh (they fill back in
+    // within seconds), exactly like a cold load before the cache existed. See
+    // HYDRATE_STRIP_FIELDS for why restoring them would freeze them forever.
+    for (const k of HYDRATE_STRIP_FIELDS) q[k] = null;
     quoteData[s] = q;
     if (typeof q._lastUpdate === 'number' && q._lastUpdate > newest) newest = q._lastUpdate;
     n++;
@@ -2079,6 +2093,7 @@ function addPosition() {
   fetchedPerformance.delete(symbol);
   fetchedAfterHours.delete(symbol);
   attemptedSymbols.delete(symbol); // reset so the row shows "loading..." not "retrying..."
+  delete _summaryFailCounts[symbol];
   delete fundamentalsCache[symbol];
   savePortfolio();
   renderTable();
@@ -2140,6 +2155,7 @@ function clearAll() {
   fetchedPerformance.clear();
   fetchedAfterHours.clear();
   attemptedSymbols.clear();
+  _summaryFailCounts = {};
   _resetCoinbaseOverlayState();
   try { localStorage.removeItem('stonks_quotes'); } catch (_) {}
   savePortfolio();
@@ -2542,6 +2558,7 @@ function executeImport() {
     fetchedFundamentals.delete(pos.symbol);
     fetchedPerformance.delete(pos.symbol);
     fetchedAfterHours.delete(pos.symbol);
+    delete _summaryFailCounts[pos.symbol];
     delete fundamentalsCache[pos.symbol];
 
     // Seed quoteData with CSV last price as fallback (visible immediately even if APIs are down)
@@ -2563,9 +2580,12 @@ const PROXIES = [
   url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
   url => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
   url => 'https://corsproxy.io/?' + encodeURIComponent(url),
-  url => 'https://thingproxy.freeboard.io/fetch/' + url,
   url => 'https://proxy.cors.sh/' + url,
-  url => 'https://crossorigin.me/' + url,
+  // Pruned (2026-06): thingproxy.freeboard.io is NXDOMAIN — the domain no
+  // longer exists, so every rotation through it was a guaranteed dead attempt.
+  // crossorigin.me's proxy service shut down years ago and the domain has
+  // since changed hands — requests there (which carry portfolio symbols in
+  // the URL) went to an unknown party for zero chance of a response.
 ];
 
 let lastWorkingProxy = 0; // remember which proxy worked last
@@ -2765,7 +2785,14 @@ async function fetchYahooQuotes(symbols) {
       const text = await fetchWithProxy(url);
       const data = JSON.parse(text);
       if (data.quoteResponse && data.quoteResponse.result && data.quoteResponse.result.length > 0) {
+        // Only accept symbols we actually requested. Responses arrive via
+        // third-party CORS proxies, so a compromised proxy controls the body —
+        // an attacker "symbol" like "__proto__" used as a plain-object key
+        // would otherwise flow into Object.assign(quoteData, …) and pollute
+        // Object.prototype for the whole app.
+        const requested = new Set(stockSyms);
         for (const q of data.quoteResponse.result) {
+          if (!requested.has(q.symbol)) continue;
           const norm = normalizeYahoo(q);
           v7Results[q.symbol] = norm;
           // Only block the AH retry pass if we actually have a price — not just a marketState
@@ -3320,15 +3347,17 @@ async function fetchFmpQuotes(symbols) {
   const stockSyms = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
   if (stockSyms.length === 0) return null;
   try {
-    const resp = await fetch('https://financialmodelingprep.com/api/v3/quote/' + stockSyms.join(',') + '?apikey=' + key, {
+    const resp = await fetch('https://financialmodelingprep.com/api/v3/quote/' + stockSyms.map(yfEnc).join(',') + '?apikey=' + key, {
       signal: AbortSignal.timeout(FMP_TIMEOUT)
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (!Array.isArray(data) || data.length === 0) return null;
+    const requested = new Set(stockSyms); // response key guard (see fetchYahooQuotes)
     const results = {};
     for (const q of data) {
       const sym = q.symbol;
+      if (!requested.has(sym)) continue;
       results[sym] = { ...makeEmptyQuote(sym),
         name: q.name || sym,
         price: q.price, change: q.change, changePct: q.changesPercentage,
@@ -3364,8 +3393,10 @@ async function fetchYahooV6Quotes(symbols) {
     const data = JSON.parse(text);
     const quotes = data.quoteResponse && data.quoteResponse.result;
     if (quotes && quotes.length > 0) {
+      const requested = new Set(symbols); // proxy-response key guard (see fetchYahooQuotes)
       const results = {};
       for (const q of quotes) {
+        if (!requested.has(q.symbol)) continue;
         results[q.symbol] = normalizeYahoo(q);
       }
       return { source: 'Yahoo Finance (v6)', data: results };
@@ -3377,7 +3408,13 @@ async function fetchYahooV6Quotes(symbols) {
 }
 
 // --- FinnHub free (no key needed for basic quote, CORS-enabled, 1 call per symbol) ---
+// Latch: FinnHub's public "demo" token now 401s on every endpoint. Once any
+// demo-token call comes back 401/403 (or with an error body), stop issuing
+// demo-token requests for the rest of the session — each one is a guaranteed
+// dead round-trip per refresh for keyless users. Never set for a real user key.
+let _finnhubDemoBlocked = false;
 async function fetchFinnhubFreeQuotes(symbols) {
+  if (_finnhubDemoBlocked) return null; // demo token already proven dead this session
   const stockSyms = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
   if (stockSyms.length === 0) return null;
   const results = {};
@@ -3389,10 +3426,11 @@ async function fetchFinnhubFreeQuotes(symbols) {
       const resp = await fetch(`https://finnhub.io/api/v1/quote?symbol=${yfEnc(sym)}&token=demo`, {
         signal: AbortSignal.timeout(FINNHUB_TIMEOUT)
       });
-      if (resp.status === 429 || resp.status === 401 || resp.status === 403) break; // rate limited or invalid token — stop
+      if (resp.status === 401 || resp.status === 403) { _finnhubDemoBlocked = true; break; } // invalid token — stop for the session
+      if (resp.status === 429) break; // rate limited — transient, retry next refresh
       if (!resp.ok) continue;
       const q = await resp.json();
-      if (q.error) break; // API returned an error (e.g. invalid token) — stop
+      if (q.error) { _finnhubDemoBlocked = true; break; } // error body (e.g. invalid token) — stop for the session
       if (q.c && q.c > 0) {
         results[sym] = { ...makeEmptyQuote(sym),
           price: q.c, change: q.d, changePct: q.dp,
@@ -3573,6 +3611,12 @@ let _cgCache = { data: null, time: 0 };
 // within one tick.
 const CB_CACHE_TTL = 1000;
 const CB_FETCH_TIMEOUT = 1500;
+// Above this many portfolio cryptos, the per-symbol Coinbase ticker fan-out is
+// replaced by one batched CryptoCompare call per tick. Browsers cap ~6
+// connections per origin, so 15-20 per-symbol calls serialize into several
+// rounds every tick; the batch is faster and lighter at scale. Trade-off:
+// CryptoCompare has no real bid/ask, so spread estimates fill in instead.
+const CB_OVERLAY_MAX_FANOUT = 10;
 const _cbCache = {}; // sym -> { data: {price, bid, ask}, time: ms }
 const _cbStatsCache = {}; // product -> { data: {price, prevClose, dayHigh, dayLow}, time: ms }
 // Circuit breaker: after this many consecutive overlay attempts where every
@@ -3682,7 +3726,10 @@ async function _overlayCryptoComparePrices(out) {
       q._lastUpdate = Date.now();
       patched = true;
     }
-    if (patched) out.source = (out.source || 'CoinGecko') + ' + CryptoCompare';
+    // Absolute label, not an append: `out` is the long-lived _cgCache object, so
+    // appending would accumulate " + CryptoCompare" once per tick for the length
+    // of a Coinbase cooldown. Mirrors the Coinbase overlay's absolute assignment.
+    if (patched) out.source = 'CoinGecko + CryptoCompare';
   } catch (_) { /* per-call failure is silent — falls through to CoinGecko data */ }
   return out;
 }
@@ -3696,6 +3743,9 @@ async function _overlayCoinbasePrices(out) {
   if (Date.now() < _cbSkipUntil) return await _overlayCryptoComparePrices(out);
   const syms = Object.keys(out.data);
   if (syms.length === 0) return out;
+  // Large portfolios: one batched CryptoCompare call beats N per-symbol Coinbase
+  // calls per tick (see CB_OVERLAY_MAX_FANOUT).
+  if (syms.length > CB_OVERLAY_MAX_FANOUT) return await _overlayCryptoComparePrices(out);
   let patched = false;
   const results = await Promise.all(syms.map(_coinbaseFetch));
   for (let i = 0; i < syms.length; i++) {
@@ -3783,9 +3833,10 @@ async function fetchCryptoQuotes(symbols) {
     }
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-    // Build id→coin lookup
+    // Build id→coin lookup — only ids we asked for (response key guard, see fetchYahooQuotes)
+    const wantedIds = new Set(cryptoSyms.map(s => COINGECKO_IDS[s]));
     const byCgId = {};
-    for (const coin of data) byCgId[coin.id] = coin;
+    for (const coin of data) { if (coin && wantedIds.has(coin.id)) byCgId[coin.id] = coin; }
     const results = {};
     for (const sym of cryptoSyms) {
       const cgId = COINGECKO_IDS[sym];
@@ -3826,12 +3877,20 @@ async function fetchPerformanceData(symbols) {
   const oneYAgoDate = new Date(now.getTime() - 366 * 86400000).toISOString().split('T')[0];
 
   function applyPerf(sym, closes, timestamps) {
-    if (closes.length < 2) return;
-    const currentPrice = closes[closes.length - 1];
+    if (!closes || closes.length < 2) return;
+    // Yahoo's daily quote.close can contain nulls (halted sessions, partial
+    // candles). Walk in from each end for the current/1Y reference prices —
+    // a null last element would otherwise silently kill all perf for the
+    // symbol, and a null first element would break the 1Y figure.
+    let endIdx = closes.length - 1;
+    while (endIdx > 0 && !closes[endIdx]) endIdx--;
+    const currentPrice = closes[endIdx];
     if (!currentPrice) return;
+    let startIdx = 0;
+    while (startIdx < endIdx && !closes[startIdx]) startIdx++;
     const yearStartUnix = new Date(now.getFullYear(), 0, 1).getTime() / 1000;
     const sixMAgoUnix = nowUnix - 183 * 86400;
-    let ytdPrice = null, sixMPrice = null, oneYPrice = closes[0];
+    let ytdPrice = null, sixMPrice = null, oneYPrice = closes[startIdx];
     for (let i = 0; i < timestamps.length; i++) {
       if (ytdPrice == null && timestamps[i] >= yearStartUnix && closes[i]) ytdPrice = closes[i];
       if (sixMPrice == null && timestamps[i] >= sixMAgoUnix && closes[i]) sixMPrice = closes[i];
@@ -4031,10 +4090,17 @@ async function fetchAlpacaSupplemental(symbols) {
 }
 
 // --- Fill missing fundamentals from quoteSummary or FinnHub metrics ---
+// Keyless quoteSummary mostly 401s (Yahoo gates it behind consent cookies the
+// CORS proxies strip). Without a cap, every heavy refresh re-raced proxies for
+// every symbol forever — pure wasted proxy budget. After this many failures per
+// symbol we stop for the session; success still latches via fetchedSummary.
+const SUMMARY_MAX_FAILS = 2;
+let _summaryFailCounts = {}; // sym -> failed quoteSummary attempts this session
 async function fillFundamentals(symbols) {
   const toFetch = symbols.filter(s => {
     if (!quoteData[s] || fetchedSummary.has(s) || errorSymbols.has(s)) return false;
     if (isCryptoSymbol(s) || isCommoditySymbol(s)) return false;
+    if ((_summaryFailCounts[s] || 0) >= SUMMARY_MAX_FAILS) return false;
     // Skip if FinnHub already gave us a complete fundamentals cache for this symbol
     const fc = fundamentalsCache[s];
     if (fc && fc.pe != null && fc.beta != null && fc.marketCap != null) return false;
@@ -4092,15 +4158,19 @@ async function fillFundamentals(symbols) {
         }
         return;
       }
+      _summaryFailCounts[sym] = (_summaryFailCounts[sym] || 0) + 1;
 
-      // Fallback: FinnHub metrics (CORS-enabled, works with demo or free key)
-      if (!isCryptoSymbol(sym) && !fundamentalsCache[sym]) {
+      // Fallback: FinnHub metrics (CORS-enabled with a real key; the public
+      // demo token is dead — latched off after the first 401 so keyless users
+      // don't pay two doomed round-trips per symbol per refresh).
+      if (!isCryptoSymbol(sym) && !fundamentalsCache[sym] && !(finnhubKey === 'demo' && _finnhubDemoBlocked)) {
         try {
           const [metricsResp, profileResp] = await Promise.all([
             fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${finnhubKey}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
             fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${finnhubKey}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
           ]);
           if (metricsResp.status === 429) { console.warn('FinnHub rate limited in fillFundamentals for', sym); return; }
+          if ((metricsResp.status === 401 || metricsResp.status === 403) && finnhubKey === 'demo') { _finnhubDemoBlocked = true; return; }
           if (metricsResp.ok) {
             const metrics = await metricsResp.json();
             const m = metrics.metric || {};
@@ -4939,6 +5009,12 @@ async function _refreshAll(signal) {
     const q = quoteData[s];
     return q && !errorSymbols.has(s) && !fetchedAfterHours.has(s) &&
       !isCryptoSymbol(s) && !isCommoditySymbol(s) &&
+      // Skip while the market is OPEN: there's no fresh pre/post data to find
+      // mid-session, but postMarketPrice stays null all day — without this gate
+      // every refresh re-fired the v7 batch + per-symbol v8 chart hunts for the
+      // whole portfolio. marketState refreshes with each quote, so this releases
+      // by itself the moment the session flips to POST (no sticky set involved).
+      q.marketState !== 'REGULAR' &&
       q.postMarketPrice == null && q.preMarketPrice == null;
   });
   if (needsAfterHours.length > 0) {
@@ -4956,8 +5032,14 @@ async function _refreshAll(signal) {
       ]);
       const data = JSON.parse(text);
       if (data.quoteResponse && data.quoteResponse.result) {
+        // Requested-set guard (see fetchYahooQuotes). Critical here because
+        // quoteData["__proto__"] evaluates to Object.prototype — truthy — so an
+        // attacker-controlled symbol from a compromised proxy would turn the
+        // writes below into app-wide prototype pollution.
+        const ahRequested = new Set(needsAfterHours);
         for (const raw of data.quoteResponse.result) {
           const sym = raw.symbol;
+          if (!ahRequested.has(sym)) continue;
           const q = quoteData[sym];
           if (!q) continue;
           if (q.postMarketPrice == null && raw.postMarketPrice != null) {
@@ -6559,6 +6641,7 @@ function switchPortfolio(name) {
   quoteData = {}; fundamentalsCache = {}; prevPrices = {}; wsLastTradeTime = {};
   errorSymbols.clear(); fetchedSummary.clear(); fetchedFundamentals.clear();
   fetchedPerformance.clear(); fetchedAfterHours.clear(); attemptedSymbols.clear();
+  _summaryFailCounts = {};
   _resetCoinbaseOverlayState();
   undoStack.length = 0; redoStack.length = 0;
   // New portfolio means a different set of symbols — invalidate the sort cache
@@ -6620,6 +6703,7 @@ function deletePortfolioPrompt() {
   fetchedPerformance.clear();
   fetchedAfterHours.clear();
   attemptedSymbols.clear();
+  _summaryFailCounts = {};
   _resetCoinbaseOverlayState();
   undoStack.length = 0; redoStack.length = 0;
   updateUndoRedoButtons();
