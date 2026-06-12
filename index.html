@@ -115,6 +115,23 @@
   .btn:hover { background: #2a2a50; }
   .btn-add { border-color: #2a6; color: #3c8; }
   .btn-add:hover { background: #1a3a2a; }
+  /* "Ready to add" nudge: applied to the toolbar + Add button once the form is
+     filled in (ticker + shares + cost) but not yet confirmed — a gentle pulse
+     that encourages the confirming tap. Static highlight only under
+     prefers-reduced-motion. */
+  @keyframes pulse-add-ready {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(51, 204, 136, 0.55); }
+    50%      { box-shadow: 0 0 0 6px rgba(51, 204, 136, 0); }
+  }
+  #add-position-btn.add-ready {
+    background: #1a3a2a;
+    border-color: #3c8;
+    color: #5fdba7;
+    animation: pulse-add-ready 1.6s ease-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #add-position-btn.add-ready { animation: none; box-shadow: 0 0 0 2px rgba(51, 204, 136, 0.45); }
+  }
   .btn-danger { border-color: #a33; color: #e55; }
   .btn-danger:hover { background: #3a1a1a; }
   .btn-refresh { border-color: #48f; color: #6af; }
@@ -941,11 +958,27 @@
     .date-input-wrap:not(.has-value) input[type="date"]::-webkit-datetime-edit-year-field {
       color: transparent;
     }
+    /* Mobile: the + Add button is the primary action of the whole toolbar —
+       make it an unmissable solid-green CTA instead of a thin outline button. */
     .toolbar > div:first-child .btn-add {
       grid-column: 1 / -1;
       width: 100%;
-      padding: 12px;
-      font-size: 15px;
+      padding: 14px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      background: #1f7a4d;
+      border-color: #2a9960;
+      color: #eafff3;
+      border-radius: 6px;
+    }
+    .toolbar > div:first-child .btn-add:active { background: #27935e; }
+    /* Ready state on mobile: brighten the solid CTA rather than darken it
+       (the desktop ready rule's dark-green fill would mute the mobile CTA). */
+    #add-position-btn.add-ready {
+      background: #27935e;
+      border-color: #5fdba7;
+      color: #fff;
     }
     .toolbar input, .toolbar select {
       font-size: 16px; /* >=16px prevents iOS Safari auto-zoom on focus */
@@ -1127,7 +1160,7 @@
       <input type="date" id="date-input" style="width:120px;" />
       <span class="date-label">Date</span>
     </div>
-    <button class="btn btn-add" onclick="addPosition()">+ Add</button>
+    <button class="btn btn-add" id="add-position-btn" onclick="addPosition()">+ Add</button>
   </div>
   <div style="margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
     <label class="auto-refresh-toggle">
@@ -2017,7 +2050,28 @@ function stepToolbar(id, delta) {
   const input = document.getElementById(id);
   const cur = parseFloat(input.value) || 0;
   input.value = +(cur + delta).toFixed(4);
+  updateAddReadyState(); // programmatic value change fires no 'input' event
 }
+// ---- "Ready to add" highlight ----
+// Pulse the + Add button once ticker + shares + cost are all filled in but the
+// add hasn't been confirmed yet — a visual nudge toward the confirming tap.
+// Date stays optional, matching addPosition's own validation. The class clears
+// automatically when the fields empty out (e.g. right after a successful add).
+function updateAddReadyState() {
+  const btn = document.getElementById('add-position-btn');
+  if (!btn) return;
+  const ticker = (document.getElementById('ticker-input').value || '').trim();
+  const shares = parseFloat(document.getElementById('shares-input').value);
+  const cost = parseFloat(document.getElementById('cost-input').value);
+  btn.classList.toggle('add-ready', !!ticker && isFinite(shares) && shares !== 0 && isFinite(cost));
+}
+['ticker-input', 'shares-input', 'cost-input', 'date-input'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) {
+    el.addEventListener('input', updateAddReadyState);
+    el.addEventListener('change', updateAddReadyState);
+  }
+});
 function stepInput(btn, delta, symbol, field) {
   const input = btn.closest('.num-wrap').querySelector('input');
   const cur = parseFloat(input.value) || 0;
@@ -2100,7 +2154,16 @@ function addPosition() {
   updateSummary();
   tickerEl.value = ''; sharesEl.value = ''; costEl.value = ''; dateEl.value = '';
   updateDateLabel();
-  tickerEl.focus();
+  updateAddReadyState(); // fields are empty again — stop the ready pulse
+  if (isMobileView()) {
+    // Mobile: the entry flow is complete — dismiss the on-screen keyboard.
+    // Re-focusing the ticker (the desktop behavior below) would immediately
+    // pop the keyboard back up over the freshly added row.
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    tickerEl.blur();
+  } else {
+    tickerEl.focus();
+  }
   const fetchingMsg = 'Fetching data for ' + symbol + '...';
   setStatus(fetchingMsg, 'loading');
   // Fire a targeted single-symbol fetch immediately so the new symbol's price
@@ -2610,25 +2673,34 @@ async function fetchWithProxy(url, proxyIndex = -1, timeout = PROXY_FETCH_TIMEOU
     }
   }
 
-  // Fall through to CORS proxies
+  // Fall through to CORS proxies: try the last-known-good proxy first (one
+  // request — the cheap path while the fleet is healthy), then race ALL the
+  // remaining proxies in parallel. The previous sequential walk compounded
+  // worst-case latency to PROXIES.length × timeout (~40 s) when the fleet was
+  // degraded; the race bounds it at ~2 × timeout and only costs extra
+  // requests on the failure path.
   if (proxyIndex === -1) proxyIndex = lastWorkingProxy;
-  const tried = new Set();
-  async function attempt(idx) {
-    if (tried.has(idx) || tried.size >= PROXIES.length) throw new Error('All proxies failed');
-    tried.add(idx);
-    const proxiedUrl = PROXIES[idx](url);
-    try {
-      const resp = await fetch(proxiedUrl, { signal: AbortSignal.timeout(timeout) });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const text = _validateProxyResponse(await resp.text());
-      lastWorkingProxy = idx;
-      return text;
-    } catch (err) {
-      dbg(`Proxy ${idx} failed for ${url}:`, err.message);
-      return attempt((idx + 1) % PROXIES.length);
-    }
+  proxyIndex = proxyIndex % PROXIES.length;
+  const attempt = async (idx) => {
+    const resp = await fetch(PROXIES[idx](url), { signal: AbortSignal.timeout(timeout) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const text = _validateProxyResponse(await resp.text());
+    lastWorkingProxy = idx;
+    return text;
+  };
+  try {
+    return await attempt(proxyIndex);
+  } catch (err) {
+    dbg(`Proxy ${proxyIndex} failed for ${url}:`, err.message);
   }
-  return attempt(proxyIndex);
+  const rest = [];
+  for (let i = 0; i < PROXIES.length; i++) if (i !== proxyIndex) rest.push(i);
+  if (rest.length === 0) throw new Error('All proxies failed');
+  try {
+    return await Promise.any(rest.map(attempt));
+  } catch (_) {
+    throw new Error('All proxies failed');
+  }
 }
 
 // Validate a proxy response is real data, not an error page
@@ -2822,7 +2894,22 @@ async function fetchYahooQuotes(symbols) {
   // Final fallback: any non-commodity symbol that v7 missed (e.g. delisted, bad ticker
   // OR v7 batch failed entirely under yahooV7Failed). Batch in groups of 4 with a small
   // stagger so a failed v7 doesn't cause 20× sequential ~5s fetches.
-  const stillMissing = symbols.filter(s => !v7Results[s] && !isCommoditySymbol(s));
+  let stillMissing = symbols.filter(s => !v7Results[s] && !isCommoditySymbol(s));
+  // When v7 missed several symbols (typically the whole batch while
+  // yahooV7Failed is latched), try ONE batched v6 call before the per-symbol
+  // v8 chart fan-out: a single proxy request can cover everything, vs 3
+  // racing proxies per missing symbol. Whatever v6 still misses falls through
+  // to the v8 hunt below.
+  if (stillMissing.length >= 3) {
+    const v6 = await fetchYahooV6Quotes(stillMissing);
+    if (v6 && v6.data) {
+      for (const [s, q6] of Object.entries(v6.data)) {
+        v7Results[s] = q6;
+        if (q6.postMarketPrice != null || q6.preMarketPrice != null) fetchedAfterHours.add(s);
+      }
+      stillMissing = stillMissing.filter(s => !v7Results[s]);
+    }
+  }
   for (let bi = 0; bi < stillMissing.length; bi += STILL_MISSING_BATCH) {
     if (bi > 0) await new Promise(r => setTimeout(r, STILL_MISSING_BATCH_DELAY));
     const batch = stillMissing.slice(bi, bi + STILL_MISSING_BATCH);
@@ -5460,6 +5547,7 @@ function getSortedPortfolio() {
 }
 
 function renderTable() {
+  _lastLightFullRender = Date.now(); // any full redraw resets the light-tick throttle
   const mobile = isMobileView();
   const body = document.getElementById('portfolio-body');
   const emptyMsg = document.getElementById('empty-msg');
@@ -5713,6 +5801,33 @@ function _currentSortNeedsFullRender() {
 
 function isMobileView() {
   return window.matchMedia('(max-width: 768px)').matches;
+}
+// ---- Lightweight-tick rendering ----
+// The crypto-/commodity-only tick paths fire as often as every 2 s, but a full
+// renderTable costs ~15-20 ms on a mid-sized portfolio while the targeted
+// price-cell patch the WS path uses costs well under 1 ms. So light ticks do
+// the targeted patch, with a periodic full render so the slower cells these
+// paths also refresh (24h volume/range, market cap, bid/ask) can't freeze for
+// long — important on weekends when light ticks are the ONLY table updates.
+// A full render is forced when the active sort depends on live prices (row
+// order may change — same rule as the WS tick). renderTable stamps
+// _lastLightFullRender itself, so heavy refreshes and sort clicks reset the
+// throttle too.
+let _lastLightFullRender = 0;
+const LIGHT_FULL_RENDER_MS = 15000;
+function renderLightTick() {
+  if (_currentSortNeedsFullRender()) {
+    // Row order may have changed — invalidate the sort cache and redraw.
+    bumpPortfolioVersion();
+    renderTable();
+  } else if (Date.now() - _lastLightFullRender >= LIGHT_FULL_RENDER_MS) {
+    renderTable();
+  } else if (isMobileView()) {
+    updateMobileCardPrices();
+  } else {
+    updatePriceCells();
+  }
+  updateSummary();
 }
 // Re-render when crossing the mobile breakpoint
 window.matchMedia('(max-width: 768px)').addEventListener('change', () => { renderTable(); updateSummary(); });
@@ -7205,13 +7320,9 @@ async function refreshCryptoOnly() {
       updated = true;
     }
     if (updated) {
-      // If the user is sorted by a price-dependent column, the row order must
-      // be recomputed; otherwise getSortedPortfolio's cache returns the prior
-      // order with stale positions. Bumping the version is the same trigger
-      // the WS path uses for the same scenario.
-      if (_currentSortNeedsFullRender()) bumpPortfolioVersion();
-      renderTable();
-      updateSummary();
+      // Targeted cell patch on most ticks; the periodic / sort-forced full
+      // render lives inside renderLightTick.
+      renderLightTick();
       document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
       saveQuotes();
     }
@@ -7336,12 +7447,8 @@ async function refreshCommoditiesOnly() {
       }
     }
     if (updated) {
-      // Same sort-cache invalidation as refreshCryptoOnly: if sorted by a
-      // live-price column, recompute order; otherwise the cached sort would
-      // ignore commodities that have moved this tick.
-      if (_currentSortNeedsFullRender()) bumpPortfolioVersion();
-      renderTable();
-      updateSummary();
+      // Same light-tick render policy as refreshCryptoOnly.
+      renderLightTick();
       document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
       saveQuotes();
     }
@@ -7472,10 +7579,9 @@ async function refreshAlwaysOnOnly() {
   }
 
   if (updated) {
-    // Sort-cache invalidation when sorted by a price-dependent column
-    if (_currentSortNeedsFullRender()) bumpPortfolioVersion();
-    renderTable();
-    updateSummary();
+    // Same light-tick render policy as refreshCryptoOnly — matters most here:
+    // on weekends this path is the only thing updating the table.
+    renderLightTick();
     const sources = [];
     if (cryptoSourceLabel) sources.push(cryptoSourceLabel);
     if (commoditySourceLabel) sources.push(commoditySourceLabel);
