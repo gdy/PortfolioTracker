@@ -202,10 +202,14 @@
   thead th.th-drag-over { background: #1a2540; box-shadow: inset 3px 0 0 #4a9eff; }
 
   tbody tr {
-    border-bottom: 1px solid #2a2a3a;
+    /* Zebra striping + a stronger divider give clear horizontal separation
+       between rows without adding any vertical padding. Even rows sit on the
+       page background, odd rows on a slightly lighter band. */
+    border-bottom: 1px solid #36364a;
     transition: background 0.1s;
   }
-  tbody tr:hover { background: #1a1a2e; }
+  tbody tr:nth-child(odd) { background: #15152a; }
+  tbody tr:hover { background: #1f1f38; }
   tbody td {
     padding: 1px 8px;
     text-align: right;
@@ -629,15 +633,37 @@
 
   /* ==================== ALLOCATION CHART ==================== */
   .allocation-wrap {
-    background: #0f0f1f; border-bottom: 1px solid #222; padding: 12px;
-    display: flex; align-items: center; justify-content: center; gap: 20px;
-    flex-wrap: wrap;
+    background: #0f0f1f; border-bottom: 1px solid #222; padding: 14px 16px;
+    display: flex; align-items: center; justify-content: center; gap: 26px;
+    flex-wrap: wrap; position: relative;
+  }
+  /* Donut slices: stroked circles. Hover/tap thickens the slice in place. */
+  .alloc-seg { transition: stroke-width 0.15s ease; cursor: pointer; }
+  .alloc-seg.hot { stroke-width: 32; }
+  /* Sweep-in when the chart is first opened (not on live re-renders). */
+  @keyframes alloc-sweep { from { opacity: 0; transform: rotate(-18deg); } to { opacity: 1; transform: rotate(0deg); } }
+  .alloc-enter { animation: alloc-sweep 0.35s ease-out; transform-box: fill-box; transform-origin: center; }
+  @media (prefers-reduced-motion: reduce) { .alloc-enter { animation: none; } }
+  #alloc-tooltip {
+    position: absolute; pointer-events: none; display: none; z-index: 5;
+    background: #1a1a32; border: 1px solid #444; border-radius: 5px;
+    padding: 4px 9px; font-size: 11px; color: #d8d8e8; white-space: nowrap;
   }
   .allocation-legend {
-    display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; max-width: 500px;
+    display: flex; flex-direction: column; gap: 1px; font-size: 12px;
+    min-width: 230px; max-width: 340px; max-height: 220px; overflow-y: auto;
   }
-  .alloc-item { display: flex; align-items: center; gap: 4px; }
+  .alloc-item {
+    display: grid; grid-template-columns: 14px minmax(60px, 1fr) auto 52px;
+    gap: 8px; align-items: center; padding: 3px 8px; border-radius: 4px;
+    cursor: pointer; color: #b8b8cc;
+  }
+  .alloc-item:hover, .alloc-item.hot { background: rgba(74, 158, 255, 0.10); color: #e8e8f0; }
+  .alloc-item .alloc-val { color: #8888a0; text-align: right; }
+  .alloc-item .alloc-pct { text-align: right; }
   .alloc-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  /* Brief outline on the table row / mobile card a legend click jumps to. */
+  .alloc-locate { outline: 1px solid #4a9eff; outline-offset: -1px; }
   .alloc-toggle {
     background: #1a1a30; border: 1px solid #333; color: #8ab4ff;
     font-family: inherit; font-size: 11px; padding: 4px 10px;
@@ -783,14 +809,21 @@
   .mobile-cards { display: none; padding: 0; }
   .mobile-card {
     background: #111125;
-    border-bottom: 1px solid #2a2a3a;
+    /* Stronger divider between cards for at-a-glance row separation, no extra
+       padding. Zebra striping is added per-card by visual order (the .mobile-card-alt
+       class) in renderMobileCards — a CSS :nth-child can't be used because the cards
+       share their container with the sort bar, pull-indicator, and empty message. */
+    border-bottom: 1px solid #36364a;
     padding: 12px 14px;
     position: relative;
     overflow: hidden;
     transition: background 0.15s;
     -webkit-user-select: none; user-select: none;
   }
-  .mobile-card:active { background: #1a1a35; }
+  .mobile-card.mobile-card-alt { background: #1c1c3a; }
+  /* Press feedback stays lighter than BOTH stripe bands so a tap always reads
+     as a lift, never a dip. */
+  .mobile-card:active { background: #26264c; }
   .mobile-card-main {
     display: flex;
     gap: 8px;
@@ -895,6 +928,7 @@
 
     /* Allocation chart */
     .allocation-wrap { flex-direction: column; }
+    .allocation-legend { width: 100%; max-width: 100%; min-width: 0; }
 
     /* Hide table, show cards */
     .table-wrap { display: none; }
@@ -1437,6 +1471,7 @@
 <div id="allocation-wrap" class="allocation-wrap" style="display:none;">
   <div id="allocation-chart"></div>
   <div id="allocation-legend" class="allocation-legend"></div>
+  <div id="alloc-tooltip"></div>
 </div>
 
 <div class="table-wrap">
@@ -5882,7 +5917,12 @@ function renderMobileCards() {
   const sorted = getSortedPortfolio();
   let html = '';
 
-  for (const pos of sorted) {
+  for (let _ci = 0; _ci < sorted.length; _ci++) {
+    const pos = sorted[_ci];
+    // Zebra stripe by visual order (the cards share their container with the
+    // sort bar / pull-indicator / empty message, so a CSS :nth-child can't be
+    // trusted to alternate correctly — we tag the class here instead).
+    const stripeClass = (_ci % 2 === 1) ? 'mobile-card-alt' : '';
     const isError = errorSymbols.has(pos.symbol);
     const q = quoteData[pos.symbol] || {};
     const price = q.price;
@@ -5944,7 +5984,7 @@ function renderMobileCards() {
     const isExpanded = expandedSymbols.has(pos.symbol);
     // Compute alertTriggered once per card; reused below in the bell icon IIFE.
     const alertTriggered = checkAlertTriggered(pos.symbol, price);
-    const cardClass = ['mobile-card', flashClass, isError ? 'error-row' : '', isExpanded ? 'expanded' : '', alertTriggered ? 'alert-triggered' : ''].filter(Boolean).join(' ');
+    const cardClass = ['mobile-card', stripeClass, flashClass, isError ? 'error-row' : '', isExpanded ? 'expanded' : '', alertTriggered ? 'alert-triggered' : ''].filter(Boolean).join(' ');
     const noteVal = escAttr(notes[pos.symbol] || '');
 
     // Helper: emit a mobile detail item only if its corresponding column key
@@ -6586,8 +6626,10 @@ const ALLOC_COLORS = [
 let _lastAllocSig = ''; // signature of the last drawn allocation: skips re-render when nothing changed meaningfully
 let _lastAllocCheap = ''; // cheap pre-check: integer hash of portfolio+prices, used to skip the items-build pass when nothing has moved
 let allocationVisible = localStorage.getItem('stonks_alloc_visible') === '1';
+let _allocAnimateNext = false; // one-shot: sweep-in animation on the next render (set when the chart is toggled open)
 function toggleAllocationChart() {
   allocationVisible = !allocationVisible;
+  if (allocationVisible) _allocAnimateNext = true;
   safeSet('stonks_alloc_visible', allocationVisible ? '1' : '0');
   _lastAllocSig = ''; // force re-render
   _lastAllocCheap = '';
@@ -6633,15 +6675,17 @@ function renderAllocationChart() {
     _lastAllocCheap = cheapKey;
   }
 
-  // Decide whether the chart is even possible (need positions with prices)
+  // Decide whether the chart is even possible (need positions with prices).
+  // Day P&L is accumulated alongside for the donut's center stat.
   const items = [];
-  let total = 0;
+  let total = 0, dayPL = 0, hasPL = false;
   for (const pos of portfolio) {
     const q = quoteData[pos.symbol];
     if (q && q.price != null) {
       const val = Math.abs(q.price * pos.shares);
       items.push({ symbol: pos.symbol, value: val });
       total += val;
+      if (q.change != null) { dayPL += q.change * pos.shares; hasPL = true; }
     }
   }
   const possible = portfolio.length > 0 && total > 0;
@@ -6660,40 +6704,164 @@ function renderAllocationChart() {
   }
   wrap.style.display = 'flex';
 
-  // Skip re-render if percentages haven't shifted >0.1% and the symbol set is unchanged.
-  // High-frequency WebSocket trades would otherwise rebuild the SVG ~30x/sec for no
-  // visible benefit. Sort by symbol for the signature so order doesn't perturb it.
+  // Skip re-render if nothing visible changed: percentages stable to 0.1%,
+  // symbol set unchanged, AND the center stats (total $, day P&L $) stable to
+  // the dollar — the donut hole shows live dollars, so they're part of the
+  // signature. High-frequency WebSocket trades would otherwise rebuild the
+  // SVG ~30x/sec for no visible benefit.
   const sig = items
     .slice()
     .sort((a, b) => a.symbol.localeCompare(b.symbol))
     .map(it => it.symbol + ':' + ((it.value / total) * 1000 | 0))
-    .join('|');
+    .join('|') + '|T' + Math.round(total) + '|P' + (hasPL ? Math.round(dayPL) : 'x');
   if (sig === _lastAllocSig) return;
   _lastAllocSig = sig;
 
-  // Build SVG pie
-  const size = 140, cx = size/2, cy = size/2, r = size/2 - 4;
-  let angle = -Math.PI / 2;
-  let paths = '';
-  let legendHtml = '';
+  // ---- Build SVG donut ----
+  // Ring = stroked circles with dasharray arcs: slice gaps come free and
+  // hover/tap just widens the stroke. Inner hole radius is R - W/2 = 48px;
+  // every center line is fitted against its chord's width budget (narrower
+  // away from the vertical middle, where the circle pinches), shrinking the
+  // font and then compacting the total to $x.xM before it can ever collide
+  // with the ring.
+  const size = 200, c = size / 2, R = 61, W = 26;
+  const CIRC = 2 * Math.PI * R;
   items.sort((a, b) => b.value - a.value);
-  for (let i = 0; i < items.length; i++) {
-    const pct = items[i].value / total;
-    const sweep = pct * 2 * Math.PI;
-    const color = ALLOC_COLORS[i % ALLOC_COLORS.length];
-    if (items.length === 1) {
-      paths += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" opacity="0.8"/>`;
-    } else {
-      const x1 = cx + r * Math.cos(angle), y1 = cy + r * Math.sin(angle);
-      angle += sweep;
-      const x2 = cx + r * Math.cos(angle), y2 = cy + r * Math.sin(angle);
-      const large = sweep > Math.PI ? 1 : 0;
-      paths += `<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} Z" fill="${color}" opacity="0.8"/>`;
+
+  // Group tail positions (<1.5% each) into one gray "Other" slice once the
+  // portfolio is large enough for hairline slivers to clutter the ring.
+  let drawAll = items;
+  if (items.length > 6) {
+    const small = items.filter(it => it.value / total < 0.015);
+    if (small.length >= 2) {
+      drawAll = items.filter(it => it.value / total >= 0.015).concat([{
+        symbol: '', other: true,
+        label: 'Other (' + small.length + ')',
+        syms: small.map(it => it.symbol).join(', '),
+        value: small.reduce((s, it) => s + it.value, 0),
+      }]);
     }
-    legendHtml += `<span class="alloc-item"><span class="alloc-swatch" style="background:${color}"></span>${items[i].symbol} ${(pct*100).toFixed(1)}%</span>`;
   }
-  chart.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${paths}</svg>`;
+
+  const GAP = drawAll.length > 1 ? 2.5 : 0; // arc-px breathing room between slices
+  const dollar = v => '$' + Math.round(v).toLocaleString('en-US');
+  let segs = '', legendHtml = '', off = 0;
+  for (let i = 0; i < drawAll.length; i++) {
+    const it = drawAll[i];
+    const pct = it.value / total;
+    const arc = pct * CIRC;
+    const color = it.other ? '#5f5e5a' : ALLOC_COLORS[i % ALLOC_COLORS.length];
+    const dash = Math.max(arc - GAP, 0.6).toFixed(2);
+    const label = it.other ? it.label : (isCommoditySymbol(it.symbol) ? commodityName(it.symbol) : it.symbol);
+    const tip = (it.other ? it.syms : label) + ' · ' + dollar(it.value) + ' · ' + (pct * 100).toFixed(1) + '%';
+    const data = `data-i="${i}" data-sym="${escAttr(it.symbol)}" data-tip="${escAttr(tip)}"`;
+    segs += `<circle class="alloc-seg" ${data} cx="${c}" cy="${c}" r="${R}" fill="none" stroke="${color}" stroke-width="${W}" stroke-dasharray="${dash} ${CIRC.toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"><title>${esc(tip)}</title></circle>`;
+    legendHtml += `<div class="alloc-item" ${data} title="${escAttr(tip)}">`
+      + `<span class="alloc-swatch" style="background:${color}"></span>`
+      + `<span>${esc(label)}</span>`
+      + `<span class="alloc-val">${dollar(it.value)}</span>`
+      + `<span class="alloc-pct">${(pct * 100).toFixed(1)}%</span></div>`;
+    off += arc;
+  }
+
+  // Center stats, clip-safe per the chord budgets described above.
+  const MONO = 0.62; // monospace advance width per char (em)
+  const fit = (str, maxPx, minPx, budget) => Math.max(minPx, Math.min(maxPx, Math.floor(budget / (MONO * str.length))));
+  let totalStr = dollar(total);
+  if (total >= 1e9) totalStr = '$' + (total / 1e9).toFixed(2) + 'B';
+  else if (total >= 1e7) totalStr = '$' + (total / 1e6).toFixed(1) + 'M';
+  const totalFs = fit(totalStr, 20, 12, 82);
+  const posStr = items.length + (items.length === 1 ? ' position' : ' positions');
+  let centerText =
+    `<text x="${c}" y="${c - 8}" text-anchor="middle" fill="#e8e8f0" font-size="${totalFs}" font-weight="bold" font-family="inherit">${esc(totalStr)}</text>` +
+    `<text x="${c}" y="${c + 10}" text-anchor="middle" fill="#8888a0" font-size="11" font-family="inherit">${esc(posStr)}</text>`;
+  if (hasPL) {
+    let plStr = (dayPL >= 0 ? '+' : '−') + dollar(Math.abs(dayPL));
+    if (Math.abs(dayPL) >= 1e6) plStr = (dayPL >= 0 ? '+' : '−') + '$' + (Math.abs(dayPL) / 1e6).toFixed(1) + 'M';
+    let plText = plStr + ' today';
+    if (plText.length * MONO * 11 > 76) plText = plStr; // drop the suffix before shrinking the font
+    const plFs = fit(plText, 11, 9, 76);
+    centerText += `<text x="${c}" y="${c + 26}" text-anchor="middle" fill="${dayPL >= 0 ? '#00c853' : '#ff1744'}" font-size="${plFs}" font-family="inherit">${esc(plText)}</text>`;
+  }
+
+  const enter = _allocAnimateNext ? ' class="alloc-enter"' : '';
+  _allocAnimateNext = false;
+  chart.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="Portfolio allocation donut chart">`
+    + `<g${enter}><g transform="rotate(-90 ${c} ${c})">${segs}</g></g>${centerText}</svg>`;
   legend.innerHTML = legendHtml;
+  _initAllocInteractions();
+}
+
+// Wire donut/legend interactivity ONCE via delegation on the stable wrap —
+// re-renders replace the chart/legend innerHTML, so per-element listeners
+// would be wiped on every data change.
+let _allocWired = false;
+function _initAllocInteractions() {
+  if (_allocWired) return;
+  const wrap = document.getElementById('allocation-wrap');
+  const chart = document.getElementById('allocation-chart');
+  const legend = document.getElementById('allocation-legend');
+  const tip = document.getElementById('alloc-tooltip');
+  if (!wrap || !chart || !legend || !tip) return;
+  _allocWired = true;
+
+  const setHot = (i, on) => {
+    const seg = chart.querySelector('.alloc-seg[data-i="' + i + '"]');
+    const row = legend.querySelector('.alloc-item[data-i="' + i + '"]');
+    if (seg) seg.classList.toggle('hot', on);
+    if (row) row.classList.toggle('hot', on);
+  };
+  const clearHot = () => {
+    wrap.querySelectorAll('.alloc-seg.hot, .alloc-item.hot').forEach(el => el.classList.remove('hot'));
+    tip.style.display = 'none';
+  };
+  const showTip = (text, clientX, clientY) => {
+    tip.textContent = text;
+    tip.style.display = 'block';
+    const wr = wrap.getBoundingClientRect();
+    let x = clientX - wr.left + 12, y = clientY - wr.top - 30;
+    const maxX = wr.width - tip.offsetWidth - 4;
+    if (x > maxX) x = maxX;
+    if (x < 4) x = 4;
+    if (y < 4) y = clientY - wr.top + 16;
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+  };
+  const targetOf = e => e.target.closest && e.target.closest('.alloc-seg, .alloc-item');
+
+  wrap.addEventListener('mouseover', e => {
+    const t = targetOf(e);
+    if (!t) return;
+    clearHot();
+    setHot(t.dataset.i, true);
+    showTip(t.dataset.tip, e.clientX, e.clientY);
+  });
+  wrap.addEventListener('mousemove', e => {
+    const t = targetOf(e);
+    if (t && tip.style.display === 'block') showTip(t.dataset.tip, e.clientX, e.clientY);
+  });
+  wrap.addEventListener('mouseout', e => {
+    if (targetOf(e)) clearHot();
+  });
+  wrap.addEventListener('click', e => {
+    const t = targetOf(e);
+    if (!t) { clearHot(); return; }
+    const sym = t.dataset.sym;
+    // Legend row click: jump to that position in the table / mobile cards.
+    if (t.classList.contains('alloc-item') && sym) {
+      const row = document.querySelector('tr[data-sym="' + CSS.escape(sym) + '"], .mobile-card[data-sym="' + CSS.escape(sym) + '"]');
+      if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        row.classList.add('alloc-locate');
+        setTimeout(() => row.classList.remove('alloc-locate'), 1600);
+      }
+      return;
+    }
+    // Slice tap (mobile has no hover): toggle the highlight + tooltip.
+    const wasHot = t.classList.contains('hot');
+    clearHot();
+    if (!wasHot) { setHot(t.dataset.i, true); showTip(t.dataset.tip, e.clientX, e.clientY); }
+  });
 }
 
 // ==================== MULTIPLE PORTFOLIOS ====================

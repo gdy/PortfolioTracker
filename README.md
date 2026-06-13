@@ -30,7 +30,7 @@ A real-time portfolio tracker for stocks, crypto, and commodities that runs enti
 - **Drag-to-reorder** — grab any row in the desktop table or any mobile card (via the ☰ handle) to manually rearrange positions. Switching to a sorted column disables manual order; clearing the sort restores it.
 - **Column visibility toggle** — click **Columns** in the toolbar to hide/show any of the 30+ columns. Essential fields (symbol, name, price, change, quantity, cost basis) are locked and cannot be hidden. Selection is persisted to localStorage.
 - **Drag-to-reorder columns** — grab any column header in the desktop table to rearrange columns directly, or use the drag handles in the **Columns** picker. Order is persisted per browser; use **Reset Order** in the picker to restore the default.
-- **Allocation pie chart** — toggleable SVG pie chart showing percentage allocation by symbol, sorted largest first, with a 24-color palette tuned for dark backgrounds (mostly cool tones with warm accents interleaved for distinction at 20+ positions). Click **Show Chart** in the summary bar to show/hide; updates live as prices change.
+- **Allocation donut chart** — toggleable SVG donut showing allocation by symbol, sorted largest first, with a 24-color palette tuned for dark backgrounds (mostly cool tones with warm accents interleaved for distinction at 20+ positions). The center shows live totals (portfolio value, position count, day P&L) with clip-safe text fitting — long totals shrink, then compact to `$x.xM`, before they can touch the ring. Slices and legend rows highlight each other on hover (tap on mobile) with a value/percent tooltip; clicking a legend row jumps to that position in the table. Positions under 1.5% group into a gray "Other" slice on larger portfolios so slivers don't clutter the ring. Sweeps in on open (static under `prefers-reduced-motion`); updates live as prices change. Click **Show Chart** in the summary bar to show/hide.
 - **Price alerts** — set above/below price thresholds per symbol. A 🔔 icon appears next to alerted symbols; rows pulse when triggered. Browser notifications fire on threshold cross (requires notification permission — the bell tooltip shows current permission status). Set from the symbol bell on desktop or the Alert fields in the mobile expanded card.
 - **Export CSV** — one-click download of the current portfolio as CSV (filename includes the portfolio name and date), respecting your current sort order.
 - **Export / Import settings** — save and restore your API keys, column visibility, column order, price alerts, and refresh preferences as a JSON file. Found in the Settings panel.
@@ -69,6 +69,7 @@ Commodity futures symbols containing `=` are handled carefully: `=` is kept raw 
 ### Sorting & UI
 - **Click any column header to sort** — ascending/descending toggle with a sort indicator arrow.
 - **Sticky headers** — column headers stay visible while scrolling horizontally.
+- **Zebra striping** — alternating row backgrounds plus a strengthened row divider make it easy to track a single row across the wide table at a glance, without adding any vertical padding or row height.
 - **Keyboard shortcuts** — `Tab` moves between toolbar inputs (ticker → shares → cost → date); `Enter` adds a position; `Ctrl+Z` / `Ctrl+Y` undo/redo; `?` opens the keyboard shortcuts help overlay; `Esc` closes overlays.
 - **Dark theme** — terminal-style monospace UI with `color-scheme: dark` applied at the root so native browser widgets (date picker, scrollbars) match the theme.
 
@@ -78,7 +79,7 @@ Commodity futures symbols containing `=` are handled carefully: `=` is kept raw 
 - **Keyboard focus ring** — a high-contrast `:focus-visible` outline makes keyboard navigation obvious against the dark theme while staying invisible for mouse clicks.
 
 ### Mobile Responsive
-- **Card view** — on screens ≤768px, the data table is replaced with a tap-to-expand card layout. Each card shows symbol, name, price, change, shares, and cost at a glance. Tapping a card expands it to reveal all 30+ data fields, inline editing for quantity/cost/date/notes/alerts, and a delete button.
+- **Card view** — on screens ≤768px, the data table is replaced with a tap-to-expand card layout. Each card shows symbol, name, price, change, shares, and cost at a glance. Tapping a card expands it to reveal all 30+ data fields, inline editing for quantity/cost/date/notes/alerts, and a delete button. Cards alternate background bands (striped by visual order) with a strong divider so individual positions stay easy to separate.
 - **Sortable cards** — a sort dropdown above the cards lets you sort by any field, with an ascending/descending toggle button.
 - **Drag-to-reorder cards** — long-press the ☰ handle on any card to drag it to a new position. The handle hides automatically when sorting is active.
 - **Pull-to-refresh** — pull down on the card list to trigger a data refresh.
