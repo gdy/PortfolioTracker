@@ -175,7 +175,21 @@
   .summary-label { color: #777; }
   .summary-value { font-weight: bold; }
 
-  .table-wrap { overflow-x: auto; }
+  /* The table-wrap still owns the horizontal scroll, but its native scrollbar is
+     hidden — the sticky proxy below is the single, always-reachable one. */
+  .table-wrap { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; }
+  .table-wrap::-webkit-scrollbar { height: 0; }
+  /* Persistent horizontal scrollbar pinned to the bottom of the viewport, so the
+     wide table can be scrolled sideways without first scrolling down to its
+     bottom edge. Shown by JS (syncHScrollProxy) only when the table overflows
+     horizontally on desktop. */
+  .hscroll-proxy {
+    position: sticky; bottom: 0; z-index: 9;
+    overflow-x: auto; overflow-y: hidden;
+    height: 15px; background: #0d0d1a; border-top: 1px solid #222;
+    display: none;
+  }
+  .hscroll-spacer { height: 1px; }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -1486,7 +1500,7 @@
   </div>
 </div>
 
-<div class="table-wrap">
+<div class="table-wrap" id="table-wrap">
   <table aria-label="Portfolio positions">
     <thead>
       <tr id="header-row"></tr>
@@ -1497,6 +1511,7 @@
     No positions. Add a ticker above to get started.
   </div>
 </div>
+<div class="hscroll-proxy" id="hscroll-proxy"><div class="hscroll-spacer" id="hscroll-spacer"></div></div>
 
 <div class="mobile-cards" id="mobile-cards">
   <div class="mobile-sort-bar" id="mobile-sort-bar" style="display:none;">
@@ -5487,6 +5502,15 @@ function buildHeader() {
     table.style.minWidth = totalMin + 'px';
   }
 
+  // Reflect the active sort (including one restored from a previous session) in
+  // the header arrow, since the click handler that normally sets it hasn't run.
+  if (sortCol) {
+    const _esc = (window.CSS && CSS.escape) ? CSS.escape(sortCol) : sortCol;
+    const _ar = row.querySelector('th[data-sort="' + _esc + '"] .sort-arrow');
+    if (_ar) _ar.textContent = sortAsc ? ' ▲' : ' ▼';
+  }
+  syncHScrollProxy(); // column show/hide changes the table width
+
   // Sort handlers — only fire on click, not drag-end (suppressed via _thDragJustEnded)
   row.querySelectorAll('th[data-sort]').forEach(th => {
     th.addEventListener('click', () => {
@@ -5496,6 +5520,7 @@ function buildHeader() {
       else { sortCol = col; sortAsc = _defaultAscFor(col); }
       row.querySelectorAll('.sort-arrow').forEach(s => s.textContent = '');
       th.querySelector('.sort-arrow').textContent = sortAsc ? ' \u25B2' : ' \u25BC';
+      saveSort();
       renderTable();
     });
   });
@@ -5612,13 +5637,14 @@ function renderTable() {
     if (mobileEmpty) mobileEmpty.style.display = mobile ? 'block' : 'none';
     if (mobileSortBar) mobileSortBar.style.display = 'none';
     if (mobile) { const mc = document.getElementById('mobile-cards'); if (mc) mc.querySelectorAll('.mobile-card').forEach(c => c.remove()); }
+    syncHScrollProxy(); // no rows → hide the proxy
     return;
   }
   emptyMsg.style.display = 'none';
   if (mobileEmpty) mobileEmpty.style.display = 'none';
   if (mobileSortBar) mobileSortBar.style.display = mobile ? 'flex' : 'none';
 
-  if (mobile) { renderMobileCards(); return; }
+  if (mobile) { renderMobileCards(); syncHScrollProxy(); return; }
 
   const sorted = getSortedPortfolio();
   // Hoisted: visible columns are identical for every row, so compute once.
@@ -5683,6 +5709,7 @@ function renderTable() {
   }
 
   body.innerHTML = html;
+  syncHScrollProxy(); // table width may have changed → refresh the proxy
 }
 
 // Targeted in-place update of price-sensitive cells (used by WebSocket path when
@@ -5856,6 +5883,51 @@ function _currentSortNeedsFullRender() {
 // automatically as prices move through the day. Other columns stay ascending-first.
 const _DESC_FIRST_SORT_KEYS = new Set(['change','changePct','dayPL','totalPL','totalPLPct','perfYTD','perf6M','perf1Y']);
 function _defaultAscFor(col) { return !_DESC_FIRST_SORT_KEYS.has(col); }
+// Persist the active sort (column + direction) so it survives closing and
+// reopening the window. Restored at boot by restoreSort().
+function saveSort() {
+  try { safeSet('stonks_sort', JSON.stringify({ col: sortCol, asc: sortAsc })); } catch (_) {}
+}
+function restoreSort() {
+  try {
+    const s = JSON.parse(localStorage.getItem('stonks_sort') || 'null');
+    if (s && typeof s.col === 'string' && COLUMNS.some(c => c.key === s.col && c.sortable)) {
+      sortCol = s.col;
+      sortAsc = s.asc !== false;
+    }
+  } catch (_) {}
+}
+
+// ---- Persistent horizontal scrollbar ----
+// A sticky bar at the viewport bottom whose scroll position mirrors the table-
+// wrap's, so the wide table can be scrolled sideways from anywhere on the page.
+// The table-wrap's own scrollbar is hidden in CSS; this proxy is the only one.
+function syncHScrollProxy() {
+  const wrap = document.getElementById('table-wrap');
+  const proxy = document.getElementById('hscroll-proxy');
+  const spacer = document.getElementById('hscroll-spacer');
+  if (!wrap || !proxy || !spacer) return;
+  const sw = wrap.scrollWidth, cw = wrap.clientWidth;
+  if (!isMobileView() && sw > cw + 1) {
+    if (spacer.style.width !== sw + 'px') spacer.style.width = sw + 'px';
+    proxy.style.display = 'block';
+    if (proxy.scrollLeft !== wrap.scrollLeft) proxy.scrollLeft = wrap.scrollLeft;
+  } else {
+    proxy.style.display = 'none';
+  }
+}
+let _hscrollWired = false;
+function wireHScrollProxy() {
+  if (_hscrollWired) return;
+  const wrap = document.getElementById('table-wrap');
+  const proxy = document.getElementById('hscroll-proxy');
+  if (!wrap || !proxy) return;
+  _hscrollWired = true;
+  let lock = false;
+  wrap.addEventListener('scroll', () => { if (lock) return; lock = true; proxy.scrollLeft = wrap.scrollLeft; lock = false; }, { passive: true });
+  proxy.addEventListener('scroll', () => { if (lock) return; lock = true; wrap.scrollLeft = proxy.scrollLeft; lock = false; }, { passive: true });
+  window.addEventListener('resize', syncHScrollProxy);
+}
 
 function isMobileView() {
   return window.matchMedia('(max-width: 768px)').matches;
@@ -5888,7 +5960,7 @@ function renderLightTick() {
   updateSummary();
 }
 // Re-render when crossing the mobile breakpoint
-window.matchMedia('(max-width: 768px)').addEventListener('change', () => { renderTable(); updateSummary(); });
+window.matchMedia('(max-width: 768px)').addEventListener('change', () => { renderTable(); updateSummary(); syncHScrollProxy(); });
 
 // ---- Mobile sort UI helpers ----
 function syncMobileSortUI() {
@@ -5910,6 +5982,7 @@ function setMobileSort(key) {
     const th = document.querySelector(`#header-row th[data-sort="${sortCol}"] .sort-arrow`);
     if (th) th.textContent = sortAsc ? ' \u25B2' : ' \u25BC';
   }
+  saveSort();
   renderTable();
 }
 function toggleMobileSortDir() {
@@ -5918,6 +5991,7 @@ function toggleMobileSortDir() {
     const th = document.querySelector(`#header-row th[data-sort="${sortCol}"] .sort-arrow`);
     if (th) th.textContent = sortAsc ? ' \u25B2' : ' \u25BC';
   }
+  saveSort();
   renderTable();
 }
 
@@ -6946,17 +7020,24 @@ function switchPortfolio(name) {
   if (!all[name]) return;
   portfolioName = name;
   safeSet('stonks_active_portfolio', name);
+  // Keep the dropdown selection in sync. When this runs right after creating a
+  // new portfolio, the selector was rebuilt while portfolioName was still the
+  // OLD name — without this it would keep showing the old name even though the
+  // new (empty) portfolio is now active.
+  const _sel = document.getElementById('portfolio-select');
+  if (_sel && _sel.value !== name) _sel.value = name;
   portfolio = all[name].portfolio || [];
   notes = all[name].notes || {};
   // Also update the flat keys for backward compat
   safeSet('stonks_portfolio', JSON.stringify(portfolio));
   safeSet('stonks_notes', JSON.stringify(notes));
-  // Reset fetch caches
-  quoteData = {}; fundamentalsCache = {}; prevPrices = {}; wsLastTradeTime = {};
-  errorSymbols.clear(); fetchedSummary.clear(); fetchedFundamentals.clear();
-  fetchedPerformance.clear(); fetchedAfterHours.clear(); attemptedSymbols.clear();
-  _summaryFailCounts = {};
-  _resetCoinbaseOverlayState();
+  // Keep every per-symbol cache (quoteData, fundamentals, prev prices, the
+  // fetched* sets) instead of wiping them: they're keyed by symbol, so a
+  // position shared with the previous portfolio renders instantly rather than
+  // flashing "loading…", and flipping back and forth between portfolios no
+  // longer forces a full reload. The refresh below still updates prices and
+  // fills any symbol this portfolio hasn't loaded yet. Undo history is
+  // per-portfolio, so that does reset.
   undoStack.length = 0; redoStack.length = 0;
   // New portfolio means a different set of symbols — invalidate the sort cache
   // so the first render of the new portfolio doesn't reuse the previous one's
@@ -8002,9 +8083,12 @@ hydrateQuotes();
 // getYahooCrumb(), so the refresh reuses this in-flight fetch. Only worth it
 // when the portfolio has Yahoo-dependent (stock/commodity) symbols.
 if (portfolio.some(p => !isCryptoSymbol(p.symbol))) getYahooCrumb().catch(() => {});
+restoreSort(); // re-apply the sort column + direction saved last session
 buildHeader();
 renderTable();
 updateSummary();
+wireHScrollProxy();   // attach the sticky horizontal scrollbar's scroll sync
+syncHScrollProxy();
 initDragReorder();
 showWelcomeBanner();
 if (portfolio.length > 0) refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => connectFinnhubWebSocket());
