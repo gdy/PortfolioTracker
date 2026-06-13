@@ -136,6 +136,11 @@
   .btn-danger:hover { background: #3a1a1a; }
   .btn-refresh { border-color: #48f; color: #6af; }
   .btn-refresh:hover { background: #1a2a4a; }
+  /* Welcome-guide toggle in Settings — blue outline matching the Refresh button,
+     so it reads as accented next to the plain settings buttons without shouting.
+     Text flips to "Close Welcome Guide" while the guide is open (see _syncWelcomeBtn). */
+  .btn-welcome-toggle { border-color: #48f; color: #6af; }
+  .btn-welcome-toggle:hover { background: #1a2a4a; }
 
   @keyframes pulse-live { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
   #ws-indicator { animation: pulse-live 2s ease-in-out infinite; }
@@ -499,18 +504,21 @@
   }
   .welcome-banner a:hover { text-decoration: underline; }
   .welcome-banner .key-name { color: #e0e0e0; font-weight: bold; }
+  /* Primary close action for the guide — a solid accent button so older users
+     immediately see what closes it. (Label is "Close Welcome Guide".) */
   .welcome-banner .dismiss-btn {
     margin-top: 14px;
-    padding: 5px 16px;
-    background: #1e1e3a;
-    border: 1px solid #555;
-    color: #aaa;
+    padding: 8px 20px;
+    background: #2563b0;
+    border: 1px solid #5aa6ff;
+    color: #fff;
     cursor: pointer;
     font-family: inherit;
-    font-size: 12px;
-    border-radius: 3px;
+    font-size: 13px;
+    font-weight: bold;
+    border-radius: 4px;
   }
-  .welcome-banner .dismiss-btn:hover { background: #2a2a50; color: #ddd; }
+  .welcome-banner .dismiss-btn:hover { background: #2f78cf; color: #fff; }
 
   .welcome-tips { margin-top: 14px; border-top: 1px solid #2a2a44; padding-top: 10px; }
   .welcome-tips-summary {
@@ -1354,7 +1362,7 @@
         <span style="color:#666; font-size:11px;">250 req/day &mdash; financialmodelingprep.com</span>
       </div>
       <div style="display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:wrap;">
-        <button class="btn" onclick="showWelcomeBanner(true)" style="font-size:11px; padding:2px 10px;">Show Welcome Guide</button>
+        <button class="btn btn-welcome-toggle" id="welcome-toggle-btn" onclick="showWelcomeBanner(true)" style="font-size:11px; padding:2px 10px;">Show Welcome Guide</button>
         <button class="btn" onclick="exportSettings()" style="font-size:11px; padding:2px 10px;">Export Settings</button>
         <label class="btn" style="font-size:11px; padding:2px 10px; cursor:pointer;">Import Settings<input type="file" accept=".json" onchange="importSettings(this.files[0])" style="display:none;" /></label>
         <span class="save-confirm" id="confirm-settings-io">&#10003; Done</span>
@@ -1432,7 +1440,7 @@
         </div></div>
       </div>
       <div style="display:flex; align-items:center; justify-content:space-between; margin-top:16px;">
-        <button class="dismiss-btn" onclick="dismissWelcome()">Got it</button>
+        <button class="dismiss-btn" onclick="dismissWelcome()">Close Welcome Guide</button>
         <span style="color:#555; font-size:11px;">Made by <a href="https://github.com/gdy" target="_blank" rel="noopener noreferrer" style="color:#6a8ccc;">Grant</a></span>
       </div>
     </div>
@@ -1468,10 +1476,14 @@
   <button class="alloc-toggle" id="alloc-toggle" onclick="toggleAllocationChart()" style="display:none;" aria-label="Toggle allocation pie chart">Show Chart</button>
 </div>
 
-<div id="allocation-wrap" class="allocation-wrap" style="display:none;">
-  <div id="allocation-chart"></div>
-  <div id="allocation-legend" class="allocation-legend"></div>
-  <div id="alloc-tooltip"></div>
+<div class="slide-wrap" id="allocation-slide">
+  <div class="slide-inner">
+    <div id="allocation-wrap" class="allocation-wrap">
+      <div id="allocation-chart"></div>
+      <div id="allocation-legend" class="allocation-legend"></div>
+      <div id="alloc-tooltip"></div>
+    </div>
+  </div>
 </div>
 
 <div class="table-wrap">
@@ -1994,6 +2006,7 @@ function saveApiKey() {
   if (key) safeSet('stonks_finnhub_key', key);
   else localStorage.removeItem('stonks_finnhub_key');
   document.getElementById('welcome-wrap').classList.remove('show');
+  _syncWelcomeBtn();
   flashConfirm('confirm-finnhub');
   // Reconnect WebSocket with new key
   if (finnhubWs) { try { finnhubWs.close(); } catch(_){} finnhubWs = null; }
@@ -2010,6 +2023,7 @@ function saveAlpacaKeys() {
   if (secret) safeSet('stonks_alpaca_secret', secret);
   else localStorage.removeItem('stonks_alpaca_secret');
   document.getElementById('welcome-wrap').classList.remove('show');
+  _syncWelcomeBtn();
   flashConfirm('confirm-alpaca');
   refreshAll().catch(e => console.warn('refreshAll failed:', e));
 }
@@ -2021,6 +2035,7 @@ function saveFmpKey() {
   if (key) safeSet('stonks_fmp_key', key);
   else localStorage.removeItem('stonks_fmp_key');
   document.getElementById('welcome-wrap').classList.remove('show');
+  _syncWelcomeBtn();
   flashConfirm('confirm-fmp');
   refreshAll().catch(e => console.warn('refreshAll failed:', e));
 }
@@ -5478,7 +5493,7 @@ function buildHeader() {
       if (_thDragJustEnded) return;
       const col = th.dataset.sort;
       if (sortCol === col) sortAsc = !sortAsc;
-      else { sortCol = col; sortAsc = true; }
+      else { sortCol = col; sortAsc = _defaultAscFor(col); }
       row.querySelectorAll('.sort-arrow').forEach(s => s.textContent = '');
       th.querySelector('.sort-arrow').textContent = sortAsc ? ' \u25B2' : ' \u25BC';
       renderTable();
@@ -5833,6 +5848,14 @@ const _LIVE_PRICE_SORT_KEYS = new Set(['last','change','changePct','afterHours',
 function _currentSortNeedsFullRender() {
   return !!(sortCol && _LIVE_PRICE_SORT_KEYS.has(sortCol));
 }
+// Columns that lead with the BEST value on the first click — the day's biggest
+// gainer (or biggest total P&L / performance) goes to the TOP, the biggest loser
+// to the bottom. So one click on "% Chg" (or "$ Chg") gives the live
+// winners-to-losers board most people expect; clicking again flips it. Because
+// change/changePct are also live-sort keys above, that order then keeps updating
+// automatically as prices move through the day. Other columns stay ascending-first.
+const _DESC_FIRST_SORT_KEYS = new Set(['change','changePct','dayPL','totalPL','totalPLPct','perfYTD','perf6M','perf1Y']);
+function _defaultAscFor(col) { return !_DESC_FIRST_SORT_KEYS.has(col); }
 
 function isMobileView() {
   return window.matchMedia('(max-width: 768px)').matches;
@@ -5876,7 +5899,11 @@ function syncMobileSortUI() {
   dirBtn.textContent = sortAsc ? '\u25B2' : '\u25BC';
 }
 function setMobileSort(key) {
-  sortCol = key || null;
+  const newCol = key || null;
+  // Default a newly chosen column's direction the same way a desktop header
+  // click does: winners-first for change/P&L/performance, ascending otherwise.
+  if (newCol && newCol !== sortCol) sortAsc = _defaultAscFor(newCol);
+  sortCol = newCol;
   // Also update the desktop header arrow so the two views stay consistent
   document.querySelectorAll('#header-row .sort-arrow').forEach(s => s.textContent = '');
   if (sortCol) {
@@ -6640,13 +6667,17 @@ function renderAllocationChart() {
   const chart = document.getElementById('allocation-chart');
   const legend = document.getElementById('allocation-legend');
   const toggleBtn = document.getElementById('alloc-toggle');
+  // Outer slide-wrap drives the smooth open/close (grid-rows 0fr<->1fr), same
+  // animation as the Settings and Welcome panels. The inner allocation-wrap
+  // keeps its flex layout at all times; collapsing the slide just clips it.
+  const slide = document.getElementById('allocation-slide');
   if (!wrap || !chart) return;
 
   // Fast path: if chart is hidden, skip the items computation entirely.
   // On high-frequency WS trades this avoids building arrays for no visible effect.
   if (!allocationVisible) {
     if (toggleBtn) toggleBtn.textContent = 'Show Chart';
-    wrap.style.display = 'none';
+    if (slide) slide.classList.remove('show'); // animate closed
     _lastAllocSig = '';
     _lastAllocCheap = '';
     // Still show/hide toggle based on whether data exists
@@ -6697,12 +6728,12 @@ function renderAllocationChart() {
   }
 
   if (!possible) {
-    wrap.style.display = 'none';
+    if (slide) slide.classList.remove('show');
     _lastAllocSig = '';
     _lastAllocCheap = '';
     return;
   }
-  wrap.style.display = 'flex';
+  if (slide) slide.classList.add('show'); // animate open
 
   // Skip re-render if nothing visible changed: percentages stable to 0.1%,
   // symbol set unchanged, AND the center stats (total $, day P&L $) stable to
@@ -7864,6 +7895,15 @@ const savedAutoRefresh = localStorage.getItem('stonks_auto_refresh');
 if (savedAutoRefresh !== null) document.getElementById('auto-refresh').checked = savedAutoRefresh === '1';
 
 // Show welcome banner for first-time users (no keys and no portfolio), or on demand
+// Keep the Settings toggle button's label in sync with the guide's open state,
+// so it reads "Close Welcome Guide" whenever the guide is showing. Called from
+// every place that opens or closes the guide.
+function _syncWelcomeBtn() {
+  const btn = document.getElementById('welcome-toggle-btn');
+  const wrap = document.getElementById('welcome-wrap');
+  if (!btn || !wrap) return;
+  btn.textContent = wrap.classList.contains('show') ? 'Close Welcome Guide' : 'Show Welcome Guide';
+}
 function showWelcomeBanner(force) {
   const wrap = document.getElementById('welcome-wrap');
   if (force) {
@@ -7871,6 +7911,7 @@ function showWelcomeBanner(force) {
     if (wrap.classList.contains('show')) {
       wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
+    _syncWelcomeBtn();
     return;
   }
   const hasKeys = !!(getApiKey() || getAlpacaKeys().keyId || getFmpKey());
@@ -7878,10 +7919,12 @@ function showWelcomeBanner(force) {
   if (!dismissed && !hasKeys && portfolio.length === 0) {
     wrap.classList.add('show');
   }
+  _syncWelcomeBtn();
 }
 function dismissWelcome() {
   document.getElementById('welcome-wrap').classList.remove('show');
   safeSet('stonks_welcome_dismissed', '1');
+  _syncWelcomeBtn();
 }
 
 // ==================== PULL TO REFRESH (mobile) ====================
