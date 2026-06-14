@@ -1936,13 +1936,23 @@ function saveNotes() {
 // symbols so the blob stays small; the immediately-following refresh overwrites
 // these with live data. Saved least-critical-last (after portfolio/notes) so a
 // quota error can't block the writes that actually matter.
+// Only the price-relevant fields are persisted. Hydration re-derives the
+// deferred fields (performance, fundamentals, analyst, after-hours) fresh each
+// session anyway (see HYDRATE_STRIP_FIELDS), so persisting them just bloated the
+// blob — at 50+ positions that adds up on every debounced write.
+const _PERSIST_QUOTE_FIELDS = ['symbol', 'name', 'price', 'change', 'changePct', 'prevClose',
+  'open', 'dayHigh', 'dayLow', 'volume', 'bid', 'ask', 'bidEstimated', 'askEstimated', '_lastUpdate'];
 function _saveQuotesNow() {
   _saveQuotesTimer = null;
   const syms = portfolio.map(p => p.symbol);
   const slim = {};
   for (const s of syms) {
     const q = quoteData[s];
-    if (q && q.price != null) slim[s] = q;
+    if (q && q.price != null) {
+      const o = {};
+      for (const k of _PERSIST_QUOTE_FIELDS) if (q[k] != null) o[k] = q[k];
+      slim[s] = o;
+    }
   }
   if (Object.keys(slim).length > 0) safeSet('stonks_quotes', JSON.stringify(slim));
   else { try { localStorage.removeItem('stonks_quotes'); } catch (_) {} }
@@ -5099,22 +5109,27 @@ async function _refreshAll(signal) {
 
   if (signal && signal.aborted) return;
 
-  // Run fundamentals + performance in parallel (deferred, re-render only if data changed)
-  const needsSummary = symbols.filter(s => {
-    const q = quoteData[s];
-    if (!q || fetchedSummary.has(s) || errorSymbols.has(s)) return false;
-    // Always fetch if core fundamentals are missing
-    if (q.marketCap == null || q.pe == null || q.beta == null || q.eps == null) return true;
-    // Also fetch if bid/ask is only estimated
-    if (q.bid == null || q.bidEstimated) return true;
-    return false;
-  });
-  // Exclude crypto from the Yahoo perf path — fetchCryptoSupplemental already fetches
-  // 1-year perf via CoinGecko's dedicated chart endpoint, so running both doubles the
-  // network load for every crypto symbol with no benefit.
-  const needsPerf = symbols.filter(s => quoteData[s] && !errorSymbols.has(s) &&
-    !fetchedPerformance.has(s) && !isCryptoSymbol(s) &&
-    (quoteData[s].perfYTD == null || quoteData[s].perf6M == null || quoteData[s].perf1Y == null));
+  // Deferred per-symbol enrichment (Yahoo fundamentals + historical perf, no
+  // batch endpoint). For large portfolios, only enrich the rows on screen now;
+  // the rest enrich on scroll via enrichVisible(). Day price + day P&L are
+  // already on every row from the batched primary fetch above, so off-screen
+  // rows aren't missing those — only the fundamentals/performance columns.
+  // (crypto is excluded from the Yahoo perf path — fetchCryptoSupplemental
+  // already fetches 1-year perf via CoinGecko's dedicated chart endpoint.)
+  let needsSummary = symbols.filter(_needsFundamentals);
+  let needsPerf = symbols.filter(_needsPerf);
+  if (symbols.length > LAZY_ENRICH_THRESHOLD) {
+    const vis = getVisibleSymbols();
+    if (vis.size > 0) {
+      needsSummary = needsSummary.filter(s => vis.has(s));
+      needsPerf = needsPerf.filter(s => vis.has(s));
+    } else {
+      // Visibility unknown (e.g. nothing rendered yet) — do the first screenful
+      // by order so we still make progress.
+      needsSummary = needsSummary.slice(0, LAZY_ENRICH_THRESHOLD);
+      needsPerf = needsPerf.slice(0, LAZY_ENRICH_THRESHOLD);
+    }
+  }
 
   // Run proxy-dependent tasks (fundamentals, performance) sequentially to avoid
   // saturating the shared proxy pool. Non-proxy tasks (Alpaca, CoinGecko) run in parallel.
@@ -5875,6 +5890,66 @@ const _LIVE_PRICE_SORT_KEYS = new Set(['last','change','changePct','afterHours',
 function _currentSortNeedsFullRender() {
   return !!(sortCol && _LIVE_PRICE_SORT_KEYS.has(sortCol));
 }
+
+// ---- Lazy, viewport-prioritized enrichment ----
+// Day price and day P&L come from the BATCHED primary quote fetch, so every row
+// has them no matter what. The expensive part at 50+ positions is the per-symbol
+// deferred enrichment (Yahoo fundamentals + historical performance — Yahoo has
+// no batch endpoint for these). So above a threshold we only run those for rows
+// currently on/near the screen, and fetch the rest as they scroll into view.
+const LAZY_ENRICH_THRESHOLD = 25; // at/below this many positions, enrich everything up front
+function getVisibleSymbols(margin = 600) {
+  const set = new Set();
+  const sel = isMobileView() ? '.mobile-card[data-sym]' : '#portfolio-body tr[data-sym]';
+  const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+  document.querySelectorAll(sel).forEach(el => {
+    const r = el.getBoundingClientRect();
+    if (r.bottom > -margin && r.top < vh + margin) set.add(el.dataset.sym);
+  });
+  return set;
+}
+// Predicates mirroring _refreshAll's needsSummary / needsPerf gates.
+function _needsFundamentals(s) {
+  const q = quoteData[s];
+  if (!q || fetchedSummary.has(s) || errorSymbols.has(s)) return false;
+  if (isCryptoSymbol(s) || isCommoditySymbol(s)) return false;
+  if (q.marketCap == null || q.pe == null || q.beta == null || q.eps == null) return true;
+  if (q.bid == null || q.bidEstimated) return true;
+  return false;
+}
+function _needsPerf(s) {
+  const q = quoteData[s];
+  return !!(q && !errorSymbols.has(s) && !fetchedPerformance.has(s) && !isCryptoSymbol(s) &&
+    (q.perfYTD == null || q.perf6M == null || q.perf1Y == null));
+}
+let _enrichInFlight = false;
+let _enrichTimer = null;
+function scheduleEnrichVisible() {
+  if (portfolio.length <= LAZY_ENRICH_THRESHOLD) return; // small portfolios already enrich everything
+  if (_enrichTimer) return;
+  _enrichTimer = setTimeout(() => { _enrichTimer = null; enrichVisible(); }, 300);
+}
+// Fetch fundamentals + performance for the on-screen rows that still need them,
+// so off-screen rows enrich only once scrolled into view.
+async function enrichVisible() {
+  if (_enrichInFlight || refreshInProgress) return;
+  const vis = getVisibleSymbols();
+  if (vis.size === 0) return;
+  const needPerf = [...vis].filter(_needsPerf);
+  const needFund = [...vis].filter(_needsFundamentals);
+  if (needPerf.length === 0 && needFund.length === 0) return;
+  _enrichInFlight = true;
+  try {
+    if (needPerf.length) { await fetchPerformanceData(needPerf); needPerf.forEach(s => fetchedPerformance.add(s)); }
+    if (needFund.length) await fillFundamentals(needFund);
+    renderTable(); updateSummary(); saveQuotes();
+  } catch (e) { dbg('enrichVisible failed:', e && e.message); }
+  finally { _enrichInFlight = false; }
+}
+// Page scrolls vertically, so watch window scroll/resize to enrich rows as they
+// come into view.
+window.addEventListener('scroll', scheduleEnrichVisible, { passive: true });
+window.addEventListener('resize', scheduleEnrichVisible);
 // Columns that lead with the BEST value on the first click — the day's biggest
 // gainer (or biggest total P&L / performance) goes to the TOP, the biggest loser
 // to the bottom. So one click on "% Chg" (or "$ Chg") gives the live
@@ -5945,11 +6020,35 @@ function isMobileView() {
 // throttle too.
 let _lastLightFullRender = 0;
 const LIGHT_FULL_RENDER_MS = 15000;
+// Live-sort reorder: when a tick changes only prices + row order (the active
+// sort is a live-price column), MOVE the existing <tr> nodes into the new order
+// and patch their prices, instead of rebuilding every cell via renderTable.
+// ~10x cheaper at 50+ rows, and moving nodes preserves an in-progress cell edit
+// and the flash animation. Falls back to a full render if the DOM row set no
+// longer matches the data (rows added/removed since the last full render).
+// Caller must bumpPortfolioVersion() first so getSortedPortfolio re-sorts.
+function reorderTableToSort() {
+  if (isMobileView()) { renderMobileCards(); return; }
+  const body = document.getElementById('portfolio-body');
+  if (!body) { renderTable(); return; }
+  const rows = body.querySelectorAll('tr[data-sym]');
+  const sorted = getSortedPortfolio();
+  if (rows.length === 0 || rows.length !== sorted.length) { renderTable(); return; }
+  const rowBySym = new Map();
+  rows.forEach(tr => rowBySym.set(tr.dataset.sym, tr));
+  for (const pos of sorted) if (!rowBySym.has(pos.symbol)) { renderTable(); return; }
+  const frag = document.createDocumentFragment();
+  for (const pos of sorted) frag.appendChild(rowBySym.get(pos.symbol)); // appendChild MOVES existing nodes
+  body.appendChild(frag);
+  updatePriceCells(); // patch prices + flash on the reordered rows
+}
 function renderLightTick() {
   if (_currentSortNeedsFullRender()) {
-    // Row order may have changed — invalidate the sort cache and redraw.
-    bumpPortfolioVersion();
-    renderTable();
+    bumpPortfolioVersion(); // prices changed → re-sort
+    // Reorder cheaply most ticks; a periodic full render still refreshes the
+    // slow cells updatePriceCells doesn't touch (volume, market cap, 52-wk, …).
+    if (Date.now() - _lastLightFullRender >= LIGHT_FULL_RENDER_MS) renderTable();
+    else reorderTableToSort();
   } else if (Date.now() - _lastLightFullRender >= LIGHT_FULL_RENDER_MS) {
     renderTable();
   } else if (isMobileView()) {
@@ -7005,6 +7104,42 @@ function renderPortfolioSelector() {
     sel.appendChild(opt);
   }
 }
+// Symbols that appear in ANY saved portfolio. Used to bound the in-memory
+// caches now that switching no longer wipes them.
+function _allPortfolioSymbols() {
+  const set = new Set();
+  const all = lsGet('stonks_portfolios', '{}');
+  if (all && typeof all === 'object') {
+    for (const key of Object.keys(all)) {
+      const list = all[key] && all[key].portfolio;
+      if (Array.isArray(list)) for (const pos of list) if (pos && pos.symbol) set.add(pos.symbol);
+    }
+  }
+  // Also keep the live in-memory portfolio (its latest edits may not be flushed
+  // to the stonks_portfolios slot yet) so we never prune a symbol still on screen.
+  for (const pos of portfolio) if (pos && pos.symbol) set.add(pos.symbol);
+  return set;
+}
+// Drop cached per-symbol state for symbols no longer in any portfolio. Without
+// this, keeping quoteData across portfolio switches would grow unbounded over a
+// long session of switching between large portfolios.
+function pruneQuoteCache() {
+  const keep = _allPortfolioSymbols();
+  for (const s of Object.keys(quoteData)) {
+    if (keep.has(s)) continue;
+    delete quoteData[s];
+    delete fundamentalsCache[s];
+    delete prevPrices[s];
+    delete wsLastTradeTime[s];
+    delete _summaryFailCounts[s];
+    errorSymbols.delete(s);
+    fetchedSummary.delete(s);
+    fetchedFundamentals.delete(s);
+    fetchedPerformance.delete(s);
+    fetchedAfterHours.delete(s);
+    attemptedSymbols.delete(s);
+  }
+}
 function switchPortfolio(name) {
   // Abort any in-flight refresh for the old portfolio
   abortRefresh();
@@ -7039,6 +7174,7 @@ function switchPortfolio(name) {
   // fills any symbol this portfolio hasn't loaded yet. Undo history is
   // per-portfolio, so that does reset.
   undoStack.length = 0; redoStack.length = 0;
+  pruneQuoteCache(); // bound the kept caches to symbols that still exist somewhere
   // New portfolio means a different set of symbols — invalidate the sort cache
   // so the first render of the new portfolio doesn't reuse the previous one's
   // sorted array (cache key would otherwise collide when lengths happen to match).
@@ -7450,11 +7586,11 @@ function connectFinnhubWebSocket() {
               // full renderTable when the active sort column depends on live
               // price, since a tick can reorder rows in that case.
               if (_currentSortNeedsFullRender()) {
-                // Prices changed — invalidate the sort cache so the full
-                // renderTable picks up the new order instead of returning
-                // the previously-sorted array for the same portfolio.
+                // Prices changed — invalidate the sort cache, then reorder the
+                // existing rows into the new order + patch prices rather than
+                // rebuilding every cell on each WS frame (cheap at 50+ rows).
                 bumpPortfolioVersion();
-                renderTable();
+                reorderTableToSort();
               } else if (isMobileView()) {
                 updateMobileCardPrices();
               } else {
@@ -7495,21 +7631,41 @@ function syncWsSubscriptions() {
   const stockSymbols = portfolio
     .map(p => p.symbol)
     .filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
-  const stockSet = new Set(stockSymbols);
 
-  // Collect symbols to unsubscribe (don't modify Set while iterating)
+  // FinnHub's free WebSocket caps at 50 concurrent symbols (raising the cap just
+  // makes it silently drop the overflow subscriptions). When a portfolio exceeds
+  // that, subscribe the LARGEST positions so the most significant rows stream
+  // live and the rest fall back to REST polling. Rank by cost-basis value, which
+  // is stable across price ticks — ranking by live market value would thrash the
+  // subscriptions whenever a price wobbled near the 50/51 boundary. Falls back to
+  // market value for positions with no cost basis entered.
+  const posBySym = new Map(portfolio.map(p => [p.symbol, p]));
+  const sizeOf = sym => {
+    const pos = posBySym.get(sym);
+    if (!pos) return 0;
+    const basis = Math.abs(pos.shares) * (pos.costBasis || 0);
+    if (basis > 0) return basis;
+    const q = quoteData[sym];
+    return (q && q.price != null) ? Math.abs(pos.shares * q.price) : 0;
+  };
+  const desired = new Set(
+    stockSymbols.slice().sort((a, b) => sizeOf(b) - sizeOf(a)).slice(0, MAX_WS_SYMBOLS)
+  );
+
+  // Unsubscribe anything no longer wanted — removed from the portfolio OR bumped
+  // out of the top 50 by a larger position.
   const toRemove = [];
   for (const sym of wsSubscribedSymbols) {
-    if (!stockSet.has(sym)) toRemove.push(sym);
+    if (!desired.has(sym)) toRemove.push(sym);
   }
   for (const sym of toRemove) {
     try { finnhubWs.send(JSON.stringify({ type: 'unsubscribe', symbol: sym })); } catch(_){}
     wsSubscribedSymbols.delete(sym);
   }
-  // Subscribe new symbols (FinnHub free tier: up to 50)
+  // Subscribe the wanted symbols not already streaming.
   let subscribed = false;
-  for (const sym of stockSymbols) {
-    if (!wsSubscribedSymbols.has(sym) && wsSubscribedSymbols.size < MAX_WS_SYMBOLS) {
+  for (const sym of desired) {
+    if (!wsSubscribedSymbols.has(sym)) {
       try { finnhubWs.send(JSON.stringify({ type: 'subscribe', symbol: sym })); } catch(_){}
       wsSubscribedSymbols.add(sym);
       subscribed = true;
@@ -7551,6 +7707,7 @@ function getMarketPhase() {
 }
 
 let offHoursLastFullRefresh = 0;
+let _lastHeavyStart = 0; // last time the timer kicked off a heavy refreshAll (adaptive cadence)
 
 // Lightweight crypto-only refresh — used during active hours when the heavy
 // refreshAll is mid-flight, so BTC/ETH still update on the user's chosen tick
@@ -7883,26 +8040,27 @@ function setupAutoRefresh() {
     if (document.getElementById('auto-refresh').checked && portfolio.length > 0) {
       const phase = getMarketPhase();
       if (phase === 'active') {
-        // Always run the REST refresh on the user's chosen interval — WS
-        // ticks supplement it with real-time prices when available, but
-        // never block the REST cycle (stale/restricted streams shouldn't
-        // freeze the table).
-        if (refreshInProgress) {
-          // Main refresh is mid-flight (heavy stock fan-out can take 2–4 s on
-          // slow proxies). Don't stack a second one — but do fire lightweight
-          // crypto + commodities-only ticks so BTC/ETH and gold/oil stay on
-          // the user's interval instead of stalling at the slowest stock
-          // source's pace. Each is a no-op if its asset class isn't in the
-          // portfolio. Both go through fast direct-CORS sources (Coinbase
-          // for crypto, Stooq for commodities) so neither hits the proxy fleet.
+        // Heavy-refresh cadence scales with stock count: at 50+ positions a full
+        // fan-out (Yahoo proxy + FinnHub batches + per-symbol enrichment) can't
+        // finish within a 2–3 s interval, so firing one every tick just stacks
+        // proxy load. Space heavy refreshes at least ~ceil(stocks/15) s apart
+        // (never below the user's chosen interval). Between them — and whenever a
+        // heavy refresh is still mid-flight — fire the lightweight crypto +
+        // commodity ticks so BTC/ETH and gold/oil stay live on the user's
+        // interval via fast direct-CORS sources that don't touch the proxy fleet.
+        const stockCount = portfolio.reduce((n, p) =>
+          n + ((!isCryptoSymbol(p.symbol) && !isCommoditySymbol(p.symbol)) ? 1 : 0), 0);
+        const heavyFloor = Math.max(userInterval, Math.ceil(stockCount / 15) * 1000);
+        if (!refreshInProgress && Date.now() - _lastHeavyStart >= heavyFloor) {
+          _lastHeavyStart = Date.now();
+          refreshAll().catch(e => console.warn('refreshAll failed:', e));
+        } else {
           if (portfolio.some(p => COINGECKO_IDS[p.symbol])) {
             refreshCryptoOnly().catch(e => dbg('crypto-only refresh failed:', e.message));
           }
           if (portfolio.some(p => isCommoditySymbol(p.symbol))) {
             refreshCommoditiesOnly().catch(e => dbg('commodities-only refresh failed:', e.message));
           }
-        } else {
-          refreshAll().catch(e => console.warn('refreshAll failed:', e));
         }
       } else {
         // Off-hours (weeknight or weekend)
