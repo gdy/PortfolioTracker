@@ -1892,7 +1892,7 @@ document.addEventListener('keydown', e => {
 // Debounced persistence. Typing in the cost/share/notes fields fires change
 // events on every keystroke; writing the whole portfolio to localStorage each
 // time blocks the main thread. We coalesce writes on a trailing 250 ms timer
-// and also flush on beforeunload so nothing is lost if the user closes the tab.
+// and also flush on tab teardown so nothing is lost if the user closes the tab.
 const SAVE_DEBOUNCE_MS = 250;
 let _savePortfolioTimer = null;
 let _saveNotesTimer = null;
@@ -2001,7 +2001,19 @@ function flushPendingSaves() {
   if (_saveQuotesTimer) clearTimeout(_saveQuotesTimer);
   _saveQuotesNow();
 }
+// beforeunload is unreliable on mobile (iOS Safari routinely skips it when the
+// user switches apps, locks the device, or the OS discards the tab), so also
+// flush on pagehide and whenever the page is hidden — the Page Lifecycle signals
+// that actually fire on mobile. flushPendingSaves is idempotent (it clears the
+// pending timers and writes the current state), so firing on several events is
+// harmless. Without this, a quick edit followed by backgrounding the app on a
+// phone — exactly how the app is used on the go — could be lost inside the 250ms
+// save debounce.
 window.addEventListener('beforeunload', flushPendingSaves);
+window.addEventListener('pagehide', flushPendingSaves);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) flushPendingSaves();
+});
 function updateUndoRedoButtons() {
   const u = document.getElementById('undo-btn');
   const r = document.getElementById('redo-btn');
@@ -3316,11 +3328,11 @@ async function fetchFinnhubQuotes(symbols) {
         if (fundRateLimited) return;
         try {
           const [profileResp, metricsResp, earningsResp, dividendResp, recResp] = await Promise.all([
-            fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${key}`),
-            fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${key}`),
-            fetch(`https://finnhub.io/api/v1/calendar/earnings?symbol=${yfEnc(sym)}&from=${fromDate}&to=${toDate}&token=${key}`),
-            fetch(`https://finnhub.io/api/v1/stock/dividend?symbol=${yfEnc(sym)}&from=2024-01-01&to=${toDate}&token=${key}`),
-            fetch(`https://finnhub.io/api/v1/stock/recommendation?symbol=${yfEnc(sym)}&token=${key}`),
+            fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${key}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
+            fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${key}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
+            fetch(`https://finnhub.io/api/v1/calendar/earnings?symbol=${yfEnc(sym)}&from=${fromDate}&to=${toDate}&token=${key}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
+            fetch(`https://finnhub.io/api/v1/stock/dividend?symbol=${yfEnc(sym)}&from=2024-01-01&to=${toDate}&token=${key}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
+            fetch(`https://finnhub.io/api/v1/stock/recommendation?symbol=${yfEnc(sym)}&token=${key}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
           ]);
           if (metricsResp.status === 429 || profileResp.status === 429) {
             fundRateLimited = true;
@@ -3410,7 +3422,7 @@ async function fetchFinnhubQuotes(symbols) {
     const quotePromises = batch.map(async sym => {
       if (rateLimited) return;
       try {
-        const resp = await fetch(`https://finnhub.io/api/v1/quote?symbol=${yfEnc(sym)}&token=${key}`);
+        const resp = await fetch(`https://finnhub.io/api/v1/quote?symbol=${yfEnc(sym)}&token=${key}`, { signal: AbortSignal.timeout(FINNHUB_TIMEOUT) });
         if (resp.status === 429) { rateLimited = true; dbg('FinnHub quote rate limited — bailing out of remaining batches'); return; }
         const quote = await resp.json();
         if (quote.c && quote.c > 0) {
