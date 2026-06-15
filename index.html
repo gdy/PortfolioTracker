@@ -243,6 +243,23 @@
     font-weight: bold;
     color: #fff;
     text-align: left;
+    /* Freeze the symbol column during horizontal scroll so the stock stays
+       identifiable. Needs an opaque background (matching the row's zebra band)
+       so scrolled cells slide underneath instead of bleeding through, plus a
+       soft right edge to mark the frozen boundary. */
+    position: sticky;
+    left: 0;
+    z-index: 5;
+    background: #0a0a0a; /* even rows sit on the page background */
+    box-shadow: 2px 0 5px -2px rgba(0,0,0,0.5);
+  }
+  tbody tr:nth-child(odd) td.sym { background: #15152a; }
+  tbody tr:hover td.sym { background: #1f1f38; }
+  /* The symbol header is the sticky corner: pin it left as well and lift it
+     above the other sticky headers (z-index:10) so nothing scrolls over it. */
+  thead th[data-col-key="symbol"] {
+    position: sticky; left: 0; z-index: 12;
+    box-shadow: 2px 0 5px -2px rgba(0,0,0,0.5);
   }
 
   .pos { color: #00c853; }
@@ -423,6 +440,10 @@
     width: 320px;
   }
   .settings-bar input:focus { border-color: #4a9eff; outline: none; }
+  /* The 320px width above is for the API-key text fields. A checkbox must keep
+     its native size — otherwise the 320px box sits between it and its label and
+     reads as a huge gap. Reset width/spacing so the toggle hugs its label. */
+  .settings-bar input[type="checkbox"] { width: auto; padding: 0; margin: 0; flex: none; }
   .save-confirm {
     display: inline-block;
     color: #3c8;
@@ -733,6 +754,27 @@
     border-radius: 6px; padding: 12px; z-index: 6000; width: 220px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.5);
   }
+  /* Quick-actions menu opened by clicking a row's symbol or company name. */
+  .row-menu {
+    position: fixed; background: #12122a; border: 1px solid #444;
+    border-radius: 6px; padding: 4px; z-index: 6000; min-width: 168px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  .row-menu-sym {
+    color: #fff; font-weight: bold; font-size: 12px;
+    padding: 4px 8px 6px; margin-bottom: 4px; border-bottom: 1px solid #2a2a44;
+  }
+  .row-menu-item {
+    display: block; width: 100%; text-align: left; background: none; border: none;
+    color: #d0d0d0; font-family: inherit; font-size: 12px; padding: 6px 8px;
+    border-radius: 3px; cursor: pointer; white-space: nowrap;
+  }
+  .row-menu-item:hover { background: #23234a; }
+  .row-menu-item.danger { color: #ff6b6b; }
+  .row-menu-item.danger:hover { background: #3a1a1a; }
+  /* Make the clickable symbol text discoverable without disrupting the row. */
+  .sym-link { cursor: pointer; }
+  .sym-link:hover { text-decoration: underline; }
   /* Analyst rating popover — wider than the alert popover so the breakdown bar reads cleanly */
   .analyst-popover {
     position: fixed; background: #12122a; border: 1px solid #444;
@@ -1356,6 +1398,13 @@
     <button class="btn btn-add" onclick="saveAlertFromPopover()" style="flex:1; font-size:11px; padding:4px;">Set</button>
     <button class="btn" onclick="clearAlertFromPopover()" style="flex:1; font-size:11px; padding:4px;">Clear</button>
   </div>
+</div>
+
+<div class="row-menu" id="row-menu" style="display:none;" onclick="event.stopPropagation()">
+  <div class="row-menu-sym" id="row-menu-sym"></div>
+  <button class="row-menu-item" onclick="_rowMenuAct('alert')">&#128276; Set price alert</button>
+  <button class="row-menu-item" onclick="_rowMenuAct('copy')">&#128203; Copy symbol</button>
+  <button class="row-menu-item danger" onclick="_rowMenuAct('remove')">&#10005; Remove position</button>
 </div>
 
 <div class="slide-wrap" id="settings-wrap">
@@ -5484,9 +5533,9 @@ function getCellHtml(col, pos, q, computed) {
         if (Notification.permission === 'denied') _ttl += ' (notifications blocked)';
         else if (Notification.permission === 'default') _ttl += ' (notifications not enabled)';
       }
-      return `<td class="sym">${sym}<span class="${_cls}" onclick="event.stopPropagation();openAlertPopover('${sym}',this)" title="${_ttl}">&#128276;</span></td>`;
+      return `<td class="sym"><span class="sym-link" onclick="event.stopPropagation();openRowMenu('${sym}',this)" title="Quick actions">${sym}</span><span class="${_cls}" onclick="event.stopPropagation();openAlertPopover('${sym}',this)" title="${_ttl}">&#128276;</span></td>`;
     }
-    case 'name': { const _nm = quoteName(pos.symbol, q); return `<td class="left" style="color:#888; max-width:140px; overflow:hidden; text-overflow:ellipsis;" title="${escAttr(_nm)}">${computed.isError ? '<span class="error-text">Not found</span>' : esc(_nm)}</td>`; }
+    case 'name': { const _nm = quoteName(pos.symbol, q); return `<td class="left" style="color:#888; max-width:140px; overflow:hidden; text-overflow:ellipsis; cursor:pointer;" title="${escAttr(_nm)}" onclick="event.stopPropagation();openRowMenu('${sym}',this)">${computed.isError ? '<span class="error-text">Not found</span>' : esc(_nm)}</td>`; }
     case 'last': return `<td class="${cc(change)}">${priceCell}</td>`;
     case 'change': return `<td class="${cc(change)}">${change != null ? (change >= 0 ? '+' : '') + fmtPrice(change) : '\u2014'}</td>`;
     case 'changePct': return `<td class="${cc(changePct)}">${changePct != null ? fmtPct(changePct) : '\u2014'}</td>`;
@@ -6581,6 +6630,49 @@ function openAlertPopover(symbol, el) {
 }
 function _closeAlertPopover() {
   document.getElementById('alert-popover').style.display = 'none';
+}
+
+// ==================== ROW QUICK-ACTIONS MENU ====================
+// Click a row's symbol or company name for a small menu of quick actions
+// (set alert, copy symbol, remove position). Mirrors the alert popover's
+// positioning + outside-click dismiss so behavior stays consistent.
+let _rowMenuSym = null;
+let _rowMenuAnchor = null;
+function openRowMenu(symbol, el) {
+  _closeAlertPopover();
+  if (typeof _closeAnalystPopover === 'function') _closeAnalystPopover();
+  _rowMenuSym = symbol;
+  _rowMenuAnchor = el;
+  const pop = document.getElementById('row-menu');
+  document.getElementById('row-menu-sym').textContent = symbol;
+  pop.style.display = 'block';
+  // Position just below the clicked text, clamped inside the viewport. Falls back
+  // to a sensible spot if ever called without an anchor element.
+  const rect = el ? el.getBoundingClientRect() : { left: 12, bottom: 80 };
+  const w = pop.offsetWidth || 168;
+  pop.style.left = Math.max(4, Math.min(rect.left, window.innerWidth - w - 4)) + 'px';
+  pop.style.top = (rect.bottom + 4) + 'px';
+  setTimeout(() => document.addEventListener('click', _closeRowMenu, { once: true }), 0);
+}
+function _closeRowMenu() {
+  const pop = document.getElementById('row-menu');
+  if (pop) pop.style.display = 'none';
+}
+function _rowMenuAct(action) {
+  const sym = _rowMenuSym;
+  const anchor = _rowMenuAnchor;
+  _closeRowMenu();
+  if (!sym) return;
+  if (action === 'remove') {
+    removePosition(sym); // undoable via Ctrl+Z
+  } else if (action === 'alert') {
+    openAlertPopover(sym, anchor || document.body);
+  } else if (action === 'copy') {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(sym).catch(() => {});
+    } catch (_) {}
+    setStatus('Copied "' + sym + '"', '');
+  }
 }
 
 // ==================== ANALYST RATING POPOVER ====================
