@@ -233,7 +233,10 @@
     padding: 1px 8px;
     text-align: right;
     white-space: nowrap;
-    font-size: 12px;
+    /* Bumped 12→14px for readability. Row height is set by the taller input
+       cells (~24px), so larger static text just fills the vertical whitespace
+       that used to sit above/below each value — rows don't get any taller. */
+    font-size: 14px;
   }
   tbody td.left { text-align: left; }
   tbody td.sym {
@@ -293,9 +296,11 @@
     border: 1px solid #222;
     color: #e0e0e0;
     width: 70px;
-    padding: 2px 4px;
+    /* Trimmed vertical padding 2→1px to offset the 11→13px font bump so the
+       input — which sets the row height — stays the same height as before. */
+    padding: 1px 4px;
     font-family: inherit;
-    font-size: 11px;
+    font-size: 13px;
     text-align: right;
     border-radius: 2px;
   }
@@ -634,10 +639,13 @@
   @keyframes eeFall { to { transform: translateY(110vh) rotate(720deg); opacity: 0; } }
 
   /* ==================== PORTFOLIO BAR ==================== */
+  /* Hidden by default to save vertical space. Opt-in via Settings →
+     "Show multiple-portfolio selector bar", which adds the .pb-show class. */
   .portfolio-bar {
-    background: #0d0d1a; padding: 6px 12px; display: flex; gap: 6px;
+    background: #0d0d1a; padding: 6px 12px; display: none; gap: 6px;
     align-items: center; border-bottom: 1px solid #222;
   }
+  .portfolio-bar.pb-show { display: flex; }
   .portfolio-bar select {
     background: #1a1a2e; border: 1px solid #444; color: #e0e0e0;
     font-family: inherit; font-size: 13px; padding: 4px 8px;
@@ -1190,7 +1198,7 @@
 </head>
 <body>
 
-<div class="portfolio-bar" role="toolbar" aria-label="Portfolio selection">
+<div class="portfolio-bar" id="portfolio-bar" role="toolbar" aria-label="Portfolio selection">
   <select id="portfolio-select" onchange="switchPortfolio(this.value)" aria-label="Select portfolio"></select>
   <button class="portfolio-btn" onclick="createPortfolioPrompt()" title="New portfolio" aria-label="New portfolio">+</button>
   <button class="portfolio-btn" onclick="renamePortfolioPrompt()" title="Rename portfolio" aria-label="Rename portfolio">&#9998;</button>
@@ -1381,6 +1389,13 @@
         <label class="btn" style="font-size:11px; padding:2px 10px; cursor:pointer;">Import Settings<input type="file" accept=".json" onchange="importSettings(this.files[0])" style="display:none;" /></label>
         <span class="save-confirm" id="confirm-settings-io">&#10003; Done</span>
       </div>
+      <div style="display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:wrap;">
+        <label style="color:#aaa; display:flex; align-items:center; gap:6px; cursor:pointer;">
+          <input type="checkbox" id="toggle-portfolio-bar" onchange="setPortfolioBarVisible(this.checked)" style="cursor:pointer;" />
+          Show multiple-portfolio selector bar
+        </label>
+        <span style="color:#666; font-size:11px;">Adds the portfolio switcher row above the toolbar (off by default to save space)</span>
+      </div>
     </div>
   </div>
 </div>
@@ -1421,7 +1436,7 @@
         <div class="welcome-tips-body"><div class="welcome-tips-body-inner">
           <div class="step">
             <span class="step-num">&bull;</span>
-            <span><strong>Multiple portfolios</strong> &mdash; Use the portfolio bar above the toolbar to create, switch, rename, and delete named portfolios (e.g. <em>Long-term</em>, <em>Trading</em>, <em>Crypto</em>). Each has its own positions, notes, and price alerts.</span>
+            <span><strong>Multiple portfolios</strong> &mdash; Turn on <strong>Show multiple-portfolio selector bar</strong> in <strong>Settings</strong> to reveal the portfolio bar above the toolbar, where you can create, switch, rename, and delete named portfolios (e.g. <em>Long-term</em>, <em>Trading</em>, <em>Crypto</em>). Each has its own positions, notes, and price alerts.</span>
           </div>
           <div class="step">
             <span class="step-num">&bull;</span>
@@ -2343,6 +2358,30 @@ function toggleSettings() {
   }
 }
 
+// Portfolio selector bar visibility. Hidden by default to save vertical space;
+// users who keep multiple named portfolios can enable it in Settings. The bar is
+// only a switcher — hiding it never changes which portfolio is loaded.
+function applyPortfolioBarVisibility() {
+  const stored = localStorage.getItem('stonks_show_portfolio_bar');
+  let on;
+  if (stored === null) {
+    // First run since this became opt-in: default OFF, but auto-enable if the
+    // user already keeps more than one named portfolio so we never hide
+    // existing portfolios out from under them.
+    const all = lsGet('stonks_portfolios', '{}');
+    on = Object.keys(all).length > 1;
+  } else {
+    on = stored === '1';
+  }
+  const el = document.getElementById('portfolio-bar');
+  if (el) el.classList.toggle('pb-show', on);
+  const cb = document.getElementById('toggle-portfolio-bar');
+  if (cb) cb.checked = on;
+}
+function setPortfolioBarVisible(on) {
+  safeSet('stonks_show_portfolio_bar', on ? '1' : '0');
+  applyPortfolioBarVisibility();
+}
 function exportSettings() {
   const data = {
     _format: 'stonks_settings_v1',
@@ -2355,6 +2394,7 @@ function exportSettings() {
     alerts: alerts,
     refreshInterval: localStorage.getItem('stonks_refresh_interval'),
     autoRefresh: localStorage.getItem('stonks_auto_refresh'),
+    showPortfolioBar: localStorage.getItem('stonks_show_portfolio_bar'),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -2380,12 +2420,14 @@ function importSettings(file) {
       if (data.alerts && typeof data.alerts === 'object') { alerts = data.alerts; saveAlerts(); }
       if (data.refreshInterval) safeSet('stonks_refresh_interval', data.refreshInterval);
       if (data.autoRefresh != null) safeSet('stonks_auto_refresh', data.autoRefresh);
+      if (data.showPortfolioBar != null) safeSet('stonks_show_portfolio_bar', data.showPortfolioBar);
       // Refresh UI
       document.getElementById('finnhub-key').value = getApiKey();
       const alpaca = getAlpacaKeys();
       document.getElementById('alpaca-key-id').value = alpaca.keyId;
       document.getElementById('alpaca-secret').value = alpaca.secret;
       document.getElementById('fmp-key').value = getFmpKey();
+      applyPortfolioBarVisibility();
       buildHeader(); renderTable(); updateSummary();
       const conf = document.getElementById('confirm-settings-io');
       if (conf) { conf.style.opacity = '1'; setTimeout(() => conf.style.opacity = '0', 2000); }
@@ -8144,6 +8186,11 @@ const savedInterval = localStorage.getItem('stonks_refresh_interval');
 if (savedInterval) document.getElementById('refresh-interval').value = savedInterval;
 const savedAutoRefresh = localStorage.getItem('stonks_auto_refresh');
 if (savedAutoRefresh !== null) document.getElementById('auto-refresh').checked = savedAutoRefresh === '1';
+
+// Apply portfolio-bar visibility (hidden by default to save vertical space).
+// Runs in the synchronous boot path so the bar's state is set before first
+// paint — no flash. Auto-enables for users who already have >1 portfolio.
+applyPortfolioBarVisibility();
 
 // Show welcome banner for first-time users (no keys and no portfolio), or on demand
 // Keep the Settings toggle button's label in sync with the guide's open state,
