@@ -202,7 +202,7 @@
     font-weight: normal;
     text-transform: uppercase;
     font-size: 10px;
-    padding: 6px 8px;
+    padding: 6px 6px;
     text-align: right;
     border-bottom: 2px solid #333;
     position: sticky;
@@ -230,13 +230,13 @@
   tbody tr:nth-child(odd) { background: #15152a; }
   tbody tr:hover { background: #1f1f38; }
   tbody td {
-    padding: 1px 8px;
+    padding: 1px 6px;
     text-align: right;
     white-space: nowrap;
-    /* Bumped 12→14px for readability. Row height is set by the taller input
+    /* Bumped to 15px for readability. Row height is set by the taller input
        cells (~24px), so larger static text just fills the vertical whitespace
        that used to sit above/below each value — rows don't get any taller. */
-    font-size: 14px;
+    font-size: 15px;
   }
   tbody td.left { text-align: left; }
   tbody td.sym {
@@ -313,8 +313,9 @@
     border: 1px solid #222;
     color: #e0e0e0;
     width: 70px;
-    /* Trimmed vertical padding 2→1px to offset the 11→13px font bump so the
-       input — which sets the row height — stays the same height as before. */
+    /* Vertical padding trimmed to 1px. Kept at 13px (not bumped with the static
+       text) because the native date input grows ~1px per font step and would
+       push the row past its 24px height — the editors set the row height. */
     padding: 1px 4px;
     font-family: inherit;
     font-size: 13px;
@@ -350,7 +351,7 @@
   @keyframes flashG { 0% { background: rgba(0,200,83,0.15); } 100% { background: transparent; } }
   @keyframes flashR { 0% { background: rgba(255,23,68,0.15); } 100% { background: transparent; } }
 
-  .after-hours { color: #b388ff; font-size: 11px; }
+  .after-hours { color: #b388ff; font-size: 12px; }
 
   /* Auto-refresh toggle is styled exactly like .btn .btn-refresh but green.
      The native checkbox is hidden and a leading glyph (\u2713 when checked,
@@ -1444,6 +1445,9 @@
           Show multiple-portfolio selector bar
         </label>
         <span style="color:#666; font-size:11px;">Adds the portfolio switcher row above the toolbar (off by default to save space)</span>
+      </div>
+      <div style="display:flex; margin-top:10px;">
+        <button class="btn" onclick="toggleSettings()" style="font-size:11px; padding:4px 14px;">Close Settings</button>
       </div>
     </div>
   </div>
