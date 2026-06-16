@@ -252,6 +252,11 @@
     z-index: 5;
     background: #0a0a0a; /* even rows sit on the page background */
     box-shadow: 2px 0 5px -2px rgba(0,0,0,0.5);
+    /* This cell paints its own opaque background (the rest of the row is
+       transparent over the tr). Match the tr's hover transition so the frozen
+       column fades in/out of the hover highlight at the same speed as the row
+       instead of snapping instantly. */
+    transition: background 0.1s;
   }
   tbody tr:nth-child(odd) td.sym { background: #15152a; }
   tbody tr:hover td.sym { background: #1f1f38; }
