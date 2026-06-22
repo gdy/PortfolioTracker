@@ -5795,9 +5795,12 @@ function renderTable() {
       else if (price < prevPrices[pos.symbol]) flashClass = 'flash-red';
     }
 
-    // After hours display
+    // After hours display \u2014 suppressed during the regular session (any pre/post
+    // value present then is stale, carried forward by the refresh preservation).
     let ahDisplay = '\u2014';
-    if (q.postMarketPrice != null) {
+    if (_hideAfterHours(q)) {
+      // regular session \u2014 no current after-hours value to show
+    } else if (q.postMarketPrice != null) {
       const ahChg = q.postMarketChange != null ? q.postMarketChange : (q.postMarketPrice - (price || 0));
       ahDisplay = `<span class="after-hours">${fmtPrice(q.postMarketPrice)} <span class="${cc(ahChg)}">${ahChg >= 0 ? '+' : ''}${fmtPrice(ahChg)}</span></span>`;
     } else if (q.preMarketPrice != null) {
@@ -6266,9 +6269,11 @@ function renderMobileCards() {
       priceHtml = '$' + fmtPrice(price);
     }
 
-    // After hours
+    // After hours — hidden during the regular session (stale otherwise)
     let ahHtml = '';
-    if (q.postMarketPrice != null) {
+    if (_hideAfterHours(q)) {
+      // regular session — no current after-hours value to show
+    } else if (q.postMarketPrice != null) {
       const ahChg = q.postMarketChange != null ? q.postMarketChange : (q.postMarketPrice - (price || 0));
       ahHtml = `<span class="after-hours">AH: ${fmtPrice(q.postMarketPrice)} <span class="${cc(ahChg)}">${ahChg >= 0 ? '+' : ''}${fmtPrice(ahChg)}</span></span>`;
     } else if (q.preMarketPrice != null) {
@@ -7836,13 +7841,12 @@ function syncWsSubscriptions() {
 }
 
 // ==================== AUTO REFRESH ====================
-function getMarketPhase() {
-  // Returns 'active' during US market + extended hours (4am-8pm ET weekdays),
-  // 'after' for weeknight off-hours (8pm-4am ET), or 'closed' for weekends.
-  // Uses UTC offset arithmetic instead of toLocaleString to avoid locale/polyfill issues.
+// US Eastern wall-clock as a Date whose UTC fields read as ET. Uses UTC offset
+// arithmetic (not toLocaleString) to avoid locale/polyfill issues. DST per the
+// 2nd-Sunday-March / 1st-Sunday-November rule.
+function _etNow() {
   const now = new Date();
   const utcMs = now.getTime();
-  // US Eastern: UTC-5 standard, UTC-4 DST. Determine DST using the 2nd Sunday in March / 1st Sunday in November rule.
   const year = now.getUTCFullYear();
   const mar1 = new Date(Date.UTC(year, 2, 1)); // March 1
   const marSun2 = 8 + (7 - mar1.getUTCDay()) % 7; // 2nd Sunday
@@ -7852,13 +7856,38 @@ function getMarketPhase() {
   const dstEnd = Date.UTC(year, 10, novSun1, 6); // 2 AM EDT = 6 AM UTC
   const isDST = utcMs >= dstStart && utcMs < dstEnd;
   const etOffsetH = isDST ? -4 : -5;
-  const etMs = utcMs + etOffsetH * 3600000;
-  const et = new Date(etMs);
+  return new Date(utcMs + etOffsetH * 3600000);
+}
+function getMarketPhase() {
+  // Returns 'active' during US market + extended hours (4am-8pm ET weekdays),
+  // 'after' for weeknight off-hours (8pm-4am ET), or 'closed' for weekends.
+  const et = _etNow();
   const day = et.getUTCDay(); // 0=Sun, 6=Sat
   const hour = et.getUTCHours();
   if (day === 0 || day === 6) return 'closed';
   if (hour >= 4 && hour < 20) return 'active';
   return 'after'; // weeknight off-hours (8pm-4am ET)
+}
+// True during the US regular cash session (9:30am-4:00pm ET, weekdays) — the
+// window in which there is NO current pre/post-market price to show.
+function isRegularMarketHours() {
+  const et = _etNow();
+  const day = et.getUTCDay();
+  if (day === 0 || day === 6) return false;
+  const mins = et.getUTCHours() * 60 + et.getUTCMinutes();
+  return mins >= 570 && mins < 960; // 09:30 .. 16:00
+}
+// Whether to hide the after-hours / pre-market cell. During the regular session
+// any pre/post value still in quoteData is STALE — the refresh preserves those
+// fields across ticks (a fresh REGULAR quote has none), so last session's
+// post-market price would otherwise linger in the column all day. Prefer the
+// live marketState (authoritative; also right on half-day early closes); fall
+// back to the ET clock when no source reported a state.
+function _hideAfterHours(q) {
+  const st = q && q.marketState;
+  if (st === 'PRE' || st === 'PREPRE' || st === 'POST' || st === 'POSTPOST' || st === 'CLOSED') return false;
+  if (st === 'REGULAR') return true;
+  return isRegularMarketHours();
 }
 
 let offHoursLastFullRefresh = 0;
