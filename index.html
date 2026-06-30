@@ -1440,6 +1440,7 @@
       </div>
       <div style="display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:wrap;">
         <button class="btn btn-welcome-toggle" id="welcome-toggle-btn" onclick="showWelcomeBanner(true)" style="font-size:11px; padding:2px 10px;">Show Welcome Guide</button>
+        <button class="btn" onclick="loadSampleData()" style="font-size:11px; padding:2px 10px;">Load Sample Data</button>
         <button class="btn" onclick="exportSettings()" style="font-size:11px; padding:2px 10px;">Export Settings</button>
         <label class="btn" style="font-size:11px; padding:2px 10px; cursor:pointer;">Import Settings<input type="file" accept=".json" onchange="importSettings(this.files[0])" style="display:none;" /></label>
         <span class="save-confirm" id="confirm-settings-io">&#10003; Done</span>
@@ -1471,6 +1472,10 @@
       <div class="step">
         <span class="step-num">&bull;</span>
         <span><strong>Import positions</strong> &mdash; Click the <strong>Import</strong> button to bulk-import from a CSV file or paste data directly. Auto-detects exports from <strong>Robinhood</strong>, <strong>E*Trade</strong>, <strong>Fidelity</strong>, <strong>Schwab</strong>, <strong>Webull</strong>, and <strong>Vanguard</strong>. You can also use a simple format: <code style="background:#1a1a30; padding:1px 5px; border-radius:2px;">Symbol, Shares, Cost, Date</code></span>
+      </div>
+      <div class="step">
+        <span class="step-num">&bull;</span>
+        <span><strong>Just exploring?</strong> &mdash; <button class="btn btn-add" onclick="loadSampleData()" style="font-size:12px; padding:3px 12px;">Load Sample Data</button> to fill the table with a couple of well-known tech stocks, a commodity, and a crypto.</span>
       </div>
 
       <p style="margin-top:16px; margin-bottom:6px; color:#aab;"><strong style="color:#e0e0e0;">API Keys</strong> <span style="color:#f4c542;">(highly recommended)</span></p>
@@ -1886,6 +1891,7 @@ let fetchedPerformance = new Set(); // track symbols whose YTD/6M/1Y perf has be
 let fundamentalsCache = {}; // cache profile, metrics, earnings, dividends from FinnHub
 let alpacaWorkingFeed = null; // cache which Alpaca feed works ('', 'iex', or null=unknown)
 let attemptedSymbols = new Set(); // symbols that have had at least one fetch attempt
+let _notFoundStreak = {}; // sym -> consecutive refreshes a stock missed all sources (grace before "Not found")
 let hiddenColumns = lsGet('stonks_hidden_columns', '[]'); // column keys to hide
 // Strip any stale-saved essentials from a previous version of the app where they
 // could be hidden — they're locked now and the picker won't render them as hidden.
@@ -2309,6 +2315,7 @@ function addPosition() {
   attemptedSymbols.delete(symbol); // reset so the row shows "loading..." not "retrying..."
   delete _summaryFailCounts[symbol];
   delete fundamentalsCache[symbol];
+  delete _notFoundStreak[symbol];
   savePortfolio();
   renderTable();
   updateSummary();
@@ -2345,6 +2352,88 @@ function addPosition() {
     pendingRefreshAfter = true;
   }
   refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
+}
+
+// ---- Sample / demo data ----
+// Short catalog of well-known names so a first-time user can populate the table
+// in one click. Each load picks 2 random big-tech stocks, 1 commodity, and 1
+// crypto. Shorthand (GOLD, BTC) is mapped to real tickers by the same
+// CRYPTO_MAP/COMMODITY_MAP logic addPosition uses. Cost bases are deliberately
+// set below recent prices so the demo shows a realistic spread of gains.
+const SAMPLE_TECH = [
+  { symbol: 'AAPL', shares: 25, cost: 175 },
+  { symbol: 'MSFT', shares: 15, cost: 330 },
+  { symbol: 'GOOGL', shares: 20, cost: 135 },
+  { symbol: 'AMZN', shares: 18, cost: 145 },
+  { symbol: 'NVDA', shares: 30, cost: 90 },
+  { symbol: 'META', shares: 12, cost: 350 },
+];
+const SAMPLE_COMMODITY = [
+  { symbol: 'GOLD', shares: 5, cost: 2000 },
+  { symbol: 'SILVER', shares: 50, cost: 24 },
+  { symbol: 'OIL', shares: 20, cost: 75 },
+  { symbol: 'COPPER', shares: 100, cost: 4 },
+];
+const SAMPLE_CRYPTO = [
+  { symbol: 'BTC', shares: 0.25, cost: 45000 },
+  { symbol: 'ETH', shares: 2, cost: 2500 },
+  { symbol: 'SOL', shares: 20, cost: 120 },
+];
+function _pickRandom(arr, n) {
+  const pool = arr.slice();
+  const out = [];
+  for (let i = 0; i < n && pool.length; i++) {
+    out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  }
+  return out;
+}
+function loadSampleData() {
+  if (portfolio.length > 0 &&
+      !confirm('Add sample demo positions (2 tech stocks, 1 commodity, 1 crypto) to your current portfolio?')) {
+    return;
+  }
+  const picks = [
+    ..._pickRandom(SAMPLE_TECH, 2),
+    ..._pickRandom(SAMPLE_COMMODITY, 1),
+    ..._pickRandom(SAMPLE_CRYPTO, 1),
+  ];
+  pushUndo();
+  const added = [];
+  for (const item of picks) {
+    let symbol = item.symbol.toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+    if (CRYPTO_MAP[symbol]) symbol = CRYPTO_MAP[symbol];
+    if (COMMODITY_MAP[symbol]) symbol = COMMODITY_MAP[symbol];
+    // Staggered purchase dates (~6 months to ~2 years ago) so a cost basis below
+    // today's price reads as a coherent long-term hold rather than a same-day buy.
+    const daysAgo = 180 + Math.floor(Math.random() * 540);
+    const purchaseDate = new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
+    const existing = portfolio.find(p => p.symbol === symbol);
+    if (existing) {
+      existing.costBasis = mergedCostBasis(existing.shares, existing.costBasis, item.shares, item.cost);
+      existing.shares = existing.shares + item.shares;
+    } else {
+      portfolio.push({ symbol, shares: item.shares, costBasis: item.cost, purchaseDate });
+    }
+    errorSymbols.delete(symbol);
+    fetchedSummary.delete(symbol);
+    fetchedFundamentals.delete(symbol);
+    fetchedPerformance.delete(symbol);
+    fetchedAfterHours.delete(symbol);
+    attemptedSymbols.delete(symbol);
+    delete _summaryFailCounts[symbol];
+    delete fundamentalsCache[symbol];
+    delete _notFoundStreak[symbol];
+    added.push(symbol);
+  }
+  savePortfolio();
+  // Dismiss the Welcome guide if it's open — the user just chose to dive in.
+  const ww = document.getElementById('welcome-wrap');
+  if (ww && ww.classList.contains('show')) { ww.classList.remove('show'); _syncWelcomeBtn(); }
+  renderTable();
+  updateSummary();
+  setStatus('Loaded sample data: ' + added.join(', '), 'loading');
+  refreshAll().catch(e => console.warn('refreshAll failed:', e))
+    .then(() => { syncWsSubscriptions(); connectFinnhubWebSocket(); });
 }
 
 function removePosition(symbol) {
@@ -5013,10 +5102,19 @@ async function _refreshAll(signal) {
     if (anySourceReplied) {
       for (const sym of symbols) {
         const found = allResults.some(r => r && r.data[sym]);
-        if (!found && !quoteData[sym] && !isCommoditySymbol(sym) && !isCryptoSymbol(sym)) {
-          errorSymbols.add(sym);
-        } else if (found) {
+        if (found) {
           errorSymbols.delete(sym);
+          delete _notFoundStreak[sym];
+        } else if (!quoteData[sym] && !isCommoditySymbol(sym) && !isCryptoSymbol(sym)) {
+          // A keyless user's stock quotes come through flaky CORS proxies, and a
+          // fast crypto reply makes anySourceReplied true before the proxied
+          // stock batch lands — so a single miss is usually a transient proxy
+          // failure, not an invalid ticker. Require two consecutive misses before
+          // flashing "Not found"; until then the row stays on "loading...". This
+          // stops well-known names (AAPL, GOOGL) from briefly showing an alarming
+          // error right after Load Sample Data before the retry resolves them.
+          _notFoundStreak[sym] = (_notFoundStreak[sym] || 0) + 1;
+          if (_notFoundStreak[sym] >= 2) errorSymbols.add(sym);
         }
       }
     }
