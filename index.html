@@ -2432,6 +2432,10 @@ function loadSampleData() {
   renderTable();
   updateSummary();
   setStatus('Loaded sample data: ' + added.join(', '), 'loading');
+  // If a refresh is already running (e.g. an auto-refresh tick), queue another so
+  // the just-added symbols get fetched after it instead of being skipped by
+  // refreshAll's overlap guard — same as addPosition.
+  if (refreshInProgress) pendingRefreshAfter = true;
   refreshAll().catch(e => console.warn('refreshAll failed:', e))
     .then(() => { syncWsSubscriptions(); connectFinnhubWebSocket(); });
 }
@@ -2459,6 +2463,15 @@ function removePosition(symbol) {
 function clearAll() {
   if (!confirm('Clear all positions?')) return;
   pushUndo();
+  // Abort any in-flight refresh for the now-cleared positions and reset the
+  // refresh guard. Without this, a refresh still winding down would keep
+  // refreshInProgress=true, so the next add/Load-Sample-Data would hit
+  // `if (refreshInProgress) return` in refreshAll and never fetch its symbols
+  // (symptom: a freshly re-added ticker stuck on "loading..."). Mirrors switchPortfolio.
+  abortRefresh();
+  if (_deferredCommodityAbort) { _deferredCommodityAbort.abort(); _deferredCommodityAbort = null; }
+  refreshInProgress = false;
+  pendingRefreshAfter = false;
   portfolio = []; quoteData = {}; fundamentalsCache = {};
   prevPrices = {}; wsLastTradeTime = {};
   errorSymbols.clear();
@@ -2468,6 +2481,7 @@ function clearAll() {
   fetchedAfterHours.clear();
   attemptedSymbols.clear();
   _summaryFailCounts = {};
+  _notFoundStreak = {};
   _resetCoinbaseOverlayState();
   try { localStorage.removeItem('stonks_quotes'); } catch (_) {}
   savePortfolio();
@@ -5090,29 +5104,27 @@ async function _refreshAll(signal) {
         }
       }
     }
-    // Mark tickers as unknown when any source replied successfully (even with
-    // no hits for the batch) — an empty-but-non-null response means the source
-    // is reachable and the symbol genuinely doesn't exist there. Previously
-    // this required totalHits > 0, but that broke single-symbol portfolios:
-    // adding just "GHH" (UK ticker entered without .L) left the row stuck on
-    // "loading..." because there were no *other* symbols to prove the fetch
-    // layer was working.
-    // Never mark known commodity/crypto symbols as errors — they're valid but proxy-dependent
-    const anySourceReplied = allResults.length > 0;
-    if (anySourceReplied) {
+    // Mark a stock "Unknown ticker" only when a STOCK-capable source actually
+    // returned at least one stock quote this pass — positive proof the stock data
+    // layer is healthy, so a missing symbol is genuinely absent rather than a
+    // failed fetch. Trusting *any* reply (e.g. a fast crypto result) wrongly
+    // condemns valid tickers when the proxied stock fetches are all failing —
+    // exactly what happens when rapid Load-Sample-Data/Clear cycles leave
+    // uncancelled fetches saturating the shared proxy pool. When no stock source
+    // replied we leave the stocks on "loading..." so they recover instead of
+    // flashing a false error. Two consecutive misses (not one) are still required
+    // even when the layer is up, so a single transient hiccup never condemns a
+    // well-known name like AAPL. Commodity/crypto are never error-marked here.
+    const stockSources = [finnhubResult, yahooFinal, freeResult, fmpResult, alpacaResult, stooqResult];
+    const anyStockSourceReplied = symbols.some(s =>
+      !isCryptoSymbol(s) && !isCommoditySymbol(s) && stockSources.some(r => r && r.data[s]));
+    if (anyStockSourceReplied) {
       for (const sym of symbols) {
         const found = allResults.some(r => r && r.data[sym]);
         if (found) {
           errorSymbols.delete(sym);
           delete _notFoundStreak[sym];
         } else if (!quoteData[sym] && !isCommoditySymbol(sym) && !isCryptoSymbol(sym)) {
-          // A keyless user's stock quotes come through flaky CORS proxies, and a
-          // fast crypto reply makes anySourceReplied true before the proxied
-          // stock batch lands — so a single miss is usually a transient proxy
-          // failure, not an invalid ticker. Require two consecutive misses before
-          // flashing "Not found"; until then the row stays on "loading...". This
-          // stops well-known names (AAPL, GOOGL) from briefly showing an alarming
-          // error right after Load Sample Data before the retry resolves them.
           _notFoundStreak[sym] = (_notFoundStreak[sym] || 0) + 1;
           if (_notFoundStreak[sym] >= 2) errorSymbols.add(sym);
         }
@@ -7493,6 +7505,7 @@ function deletePortfolioPrompt() {
   fetchedAfterHours.clear();
   attemptedSymbols.clear();
   _summaryFailCounts = {};
+  _notFoundStreak = {};
   _resetCoinbaseOverlayState();
   undoStack.length = 0; redoStack.length = 0;
   updateUndoRedoButtons();
