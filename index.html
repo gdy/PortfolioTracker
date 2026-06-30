@@ -2949,7 +2949,18 @@ let lastWorkingProxy = 0; // remember which proxy worked last
 // of the deploys. A real 2xx response keeps the latch open so sites that do
 // support direct fetches never get degraded.
 let _directFetchBlocked = false;
-async function fetchWithProxy(url, proxyIndex = -1, timeout = PROXY_FETCH_TIMEOUT) {
+// Combine a per-attempt timeout with the refresh's abort signal so aborting a
+// refresh (Clear All, portfolio switch, or a superseding refresh) cancels its
+// in-flight proxy calls instead of letting them run to timeout and saturate the
+// shared proxy pool — which otherwise starves the next refresh's price fetches
+// and leaves rows stuck on "loading...". `signal` is undefined for one-off /
+// manual fetches, which then just use the timeout.
+function _fetchTimeoutSignal(ms, signal) {
+  const t = AbortSignal.timeout(ms);
+  return signal ? AbortSignal.any([t, signal]) : t;
+}
+async function fetchWithProxy(url, proxyIndex = -1, timeout = PROXY_FETCH_TIMEOUT, signal) {
+  if (signal && signal.aborted) throw new DOMException('Refresh aborted', 'AbortError');
   // Try direct fetch first (works when served from a web server or extensions with relaxed CORS)
   if (!_directFetchBlocked) {
     try {
@@ -2972,7 +2983,7 @@ async function fetchWithProxy(url, proxyIndex = -1, timeout = PROXY_FETCH_TIMEOU
   if (proxyIndex === -1) proxyIndex = lastWorkingProxy;
   proxyIndex = proxyIndex % PROXIES.length;
   const attempt = async (idx) => {
-    const resp = await fetch(PROXIES[idx](url), { signal: AbortSignal.timeout(timeout) });
+    const resp = await fetch(PROXIES[idx](url), { signal: _fetchTimeoutSignal(timeout, signal) });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const text = _validateProxyResponse(await resp.text());
     lastWorkingProxy = idx;
@@ -3006,7 +3017,8 @@ function _validateProxyResponse(text) {
 
 // Race N proxies in parallel and return the first valid response.
 // Used for slow commodity fetches where sequential proxy attempts add 30+ seconds.
-async function fetchWithProxyRace(url, n = 3, timeout = PROXY_RACE_TIMEOUT) {
+async function fetchWithProxyRace(url, n = 3, timeout = PROXY_RACE_TIMEOUT, signal) {
+  if (signal && signal.aborted) throw new DOMException('Refresh aborted', 'AbortError');
   // Try direct fetch first (cheap if it works, e.g. served from a real web server)
   if (!_directFetchBlocked) {
     try {
@@ -3029,7 +3041,7 @@ async function fetchWithProxyRace(url, n = 3, timeout = PROXY_RACE_TIMEOUT) {
 
   const attempts = picks.map(idx => (async () => {
     const proxiedUrl = PROXIES[idx](url);
-    const resp = await fetch(proxiedUrl, { signal: AbortSignal.timeout(timeout) });
+    const resp = await fetch(proxiedUrl, { signal: _fetchTimeoutSignal(timeout, signal) });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const text = _validateProxyResponse(await resp.text());
     lastWorkingProxy = idx;
@@ -3109,7 +3121,7 @@ function yfPath(sym) { return sym.replace(/ /g, '%20'); }
 // --- Yahoo v7 batch quote ---
 let yahooV7Failed = false;       // skip v7 if it failed this refresh cycle
 let yahooV7FailedTime = 0;       // timestamp of last failure
-async function fetchYahooQuotes(symbols) {
+async function fetchYahooQuotes(symbols, signal) {
   // Reset v7 failure flag after cooldown so transient proxy errors don't
   // permanently degrade all future refreshes to the slower per-symbol v8 path
   if (yahooV7Failed && Date.now() - yahooV7FailedTime > YF_V7_RETRY_MS) {
@@ -3125,7 +3137,7 @@ async function fetchYahooQuotes(symbols) {
     // Tiny stagger so we don't fire 5 commodities all at once through the same proxy
     if (i > 0) await new Promise(r => setTimeout(r, 200 * i));
     try {
-      const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true', 3, 8000);
+      const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true', 3, 8000, signal);
       const data = JSON.parse(text);
       if (data.chart && data.chart.result && data.chart.result[0]) {
         return { sym, chart: normalizeYahooChart(sym, data.chart.result[0]) };
@@ -3144,7 +3156,7 @@ async function fetchYahooQuotes(symbols) {
     let url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + stockSyms.map(yfEnc).join(',');
     if (crumb) url += '&crumb=' + encodeURIComponent(crumb);
     try {
-      const text = await fetchWithProxy(url);
+      const text = await fetchWithProxy(url, -1, PROXY_FETCH_TIMEOUT, signal);
       const data = JSON.parse(text);
       if (data.quoteResponse && data.quoteResponse.result && data.quoteResponse.result.length > 0) {
         // Only accept symbols we actually requested. Responses arrive via
@@ -3191,7 +3203,7 @@ async function fetchYahooQuotes(symbols) {
   // racing proxies per missing symbol. Whatever v6 still misses falls through
   // to the v8 hunt below.
   if (stillMissing.length >= 3) {
-    const v6 = await fetchYahooV6Quotes(stillMissing);
+    const v6 = await fetchYahooV6Quotes(stillMissing, signal);
     if (v6 && v6.data) {
       for (const [s, q6] of Object.entries(v6.data)) {
         v7Results[s] = q6;
@@ -3207,7 +3219,7 @@ async function fetchYahooQuotes(symbols) {
       // Tiny per-symbol stagger so they don't all hit the same proxy at the same instant
       if (k > 0) await new Promise(r => setTimeout(r, STILL_MISSING_STAGGER * k));
       try {
-        const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true', 3, 8000);
+        const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true', 3, 8000, signal);
         const data = JSON.parse(text);
         if (data.chart && data.chart.result && data.chart.result[0]) {
           const chart = normalizeYahooChart(sym, data.chart.result[0]);
@@ -3237,8 +3249,11 @@ async function fetchYahooQuotes(symbols) {
 }
 
 // --- Yahoo quoteSummary per symbol (gets fundamentals) ---
-async function fetchYahooSummary(sym) {
+async function fetchYahooSummary(sym, signal) {
   const modules = 'price,summaryDetail,defaultKeyStatistics,calendarEvents,financialData';
+  // Note: getYahooCrumb is intentionally NOT passed the refresh signal — it is
+  // shared/deduped across concurrent refreshes and cached ~30 min, so tying it to
+  // one refresh's abort could cancel the crumb another refresh still needs.
   const crumb = await getYahooCrumb();
 
   // Build URL variants. Try crumb-bearing URLs FIRST since they're more reliable —
@@ -3310,14 +3325,14 @@ async function fetchYahooSummary(sym) {
   // symbols in parallel, so this caps total parallel proxy connections at
   // BATCH_SIZE × 3 (not BATCH_SIZE × 7 × 4 like the old sequential rotation).
   try {
-    const text = await fetchWithProxyRace(urls[0], 3, YAHOO_SUMMARY_TIMEOUT_PRIMARY);
+    const text = await fetchWithProxyRace(urls[0], 3, YAHOO_SUMMARY_TIMEOUT_PRIMARY, signal);
     const result = parseResult(text);
     if (result) return result;
   } catch (e) { /* fall through to second URL */ }
   // Second-chance: try the alternate URL with a slightly smaller race
   if (urls.length > 1) {
     try {
-      const text = await fetchWithProxyRace(urls[1], 2, YAHOO_SUMMARY_TIMEOUT_SECONDARY);
+      const text = await fetchWithProxyRace(urls[1], 2, YAHOO_SUMMARY_TIMEOUT_SECONDARY, signal);
       const result = parseResult(text);
       if (result) return result;
     } catch (e) { /* exhausted */ }
@@ -3762,11 +3777,11 @@ async function fetchFmpQuotes(symbols) {
 }
 
 // --- Yahoo v6 finance quote (alternative endpoint, sometimes works when v7/v8 are blocked) ---
-async function fetchYahooV6Quotes(symbols) {
+async function fetchYahooV6Quotes(symbols, signal) {
   if (symbols.length === 0) return null;
   try {
     const url = 'https://query1.finance.yahoo.com/v6/finance/quote?symbols=' + symbols.map(yfEnc).join(',');
-    const text = await fetchWithProxy(url);
+    const text = await fetchWithProxy(url, -1, PROXY_FETCH_TIMEOUT, signal);
     const data = JSON.parse(text);
     const quotes = data.quoteResponse && data.quoteResponse.result;
     if (quotes && quotes.length > 0) {
@@ -3843,7 +3858,7 @@ function _stooqSymbol(sym) {
   if (!/^[A-Z][A-Z0-9]{0,5}$/.test(sym)) return null;
   return sym.toLowerCase() + '.us';
 }
-async function fetchStooqQuotes(symbols) {
+async function fetchStooqQuotes(symbols, signal) {
   const supported = [];
   const reverseMap = {}; // STOOQ_ID (uppercase) → user symbol
   for (const s of symbols) {
@@ -3873,11 +3888,11 @@ async function fetchStooqQuotes(symbols) {
     try {
       // Try direct CORS first — Stooq's CSV endpoints typically allow it,
       // which keeps us off the public proxy fleet entirely on the happy path.
-      const r = await fetch(url, { signal: AbortSignal.timeout(STOOQ_TIMEOUT) });
+      const r = await fetch(url, { signal: _fetchTimeoutSignal(STOOQ_TIMEOUT, signal) });
       if (r.ok) text = await r.text();
     } catch (_) { /* fall through to proxy */ }
     if (!text) {
-      try { text = await fetchWithProxy(url); }
+      try { text = await fetchWithProxy(url, -1, PROXY_FETCH_TIMEOUT, signal); }
       catch (e) { dbg('Stooq fetch failed:', e && e.message); continue; }
     }
     if (!text || !text.trim()) continue;
@@ -4245,7 +4260,7 @@ async function fetchCryptoQuotes(symbols) {
 }
 
 // --- Historical performance via Yahoo v8 chart ---
-async function fetchPerformanceData(symbols) {
+async function fetchPerformanceData(symbols, signal) {
   const now = new Date();
   const nowUnix = Math.floor(now.getTime() / 1000);
   const oneYearAgo = nowUnix - 366 * 86400;
@@ -4284,6 +4299,10 @@ async function fetchPerformanceData(symbols) {
   // helper fans out 2 proxies per call so we still get parallelism per request without
   // burning the entire proxy pool on one symbol.
   for (let i = 0; i < symbols.length; i++) {
+    // Bail the moment the refresh is superseded (Clear All / portfolio switch /
+    // newer refresh) so a stale enrichment pass stops issuing per-symbol proxy
+    // calls instead of saturating the pool the live refresh needs.
+    if (signal && signal.aborted) return;
     const sym = symbols[i];
     if (i > 0) await new Promise(r => setTimeout(r, PERF_SYMBOL_DELAY));
 
@@ -4296,7 +4315,7 @@ async function fetchPerformanceData(symbols) {
     let gotPerf = false;
     try {
       const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) +
-        '?period1=' + oneYearAgo + '&period2=' + nowUnix + '&interval=1d', 2, YAHOO_PERF_TIMEOUT);
+        '?period1=' + oneYearAgo + '&period2=' + nowUnix + '&interval=1d', 2, YAHOO_PERF_TIMEOUT, signal);
       const data = JSON.parse(text);
       const result = data.chart && data.chart.result && data.chart.result[0];
       if (result && result.timestamp && result.timestamp.length > 1) {
@@ -4473,7 +4492,7 @@ async function fetchAlpacaSupplemental(symbols) {
 // symbol we stop for the session; success still latches via fetchedSummary.
 const SUMMARY_MAX_FAILS = 2;
 let _summaryFailCounts = {}; // sym -> failed quoteSummary attempts this session
-async function fillFundamentals(symbols) {
+async function fillFundamentals(symbols, signal) {
   const toFetch = symbols.filter(s => {
     if (!quoteData[s] || fetchedSummary.has(s) || errorSymbols.has(s)) return false;
     if (isCryptoSymbol(s) || isCommoditySymbol(s)) return false;
@@ -4492,6 +4511,10 @@ async function fillFundamentals(symbols) {
   // without overwhelming the proxy fleet (shared with performance data, after-hours,
   // and commodity retry paths). Smaller BATCH also keeps us under FinnHub's 60/min limit.
   for (let i = 0; i < toFetch.length; i += FILL_FUND_BATCH) {
+    // Stop issuing fundamentals fetches once the refresh is superseded — this
+    // per-symbol pass is the heaviest proxy consumer, so leaving it running after
+    // a Clear All / reload is what starves the live refresh's price fetches.
+    if (signal && signal.aborted) return;
     if (i > 0) await new Promise(r => setTimeout(r, FILL_FUND_BATCH_DELAY));
     const batch = toFetch.slice(i, i + FILL_FUND_BATCH);
     const promises = batch.map(async sym => {
@@ -4499,7 +4522,7 @@ async function fillFundamentals(symbols) {
       if (!q) return;
 
       // Try Yahoo quoteSummary first
-      const summary = await fetchYahooSummary(sym);
+      const summary = await fetchYahooSummary(sym, signal);
       if (summary) {
         fetchedSummary.add(sym);
         if (q.pe == null && summary.pe != null) q.pe = summary.pe;
@@ -4543,8 +4566,8 @@ async function fillFundamentals(symbols) {
       if (!isCryptoSymbol(sym) && !fundamentalsCache[sym] && !(finnhubKey === 'demo' && _finnhubDemoBlocked)) {
         try {
           const [metricsResp, profileResp] = await Promise.all([
-            fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${finnhubKey}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
-            fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${finnhubKey}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
+            fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${finnhubKey}`, { signal: _fetchTimeoutSignal(FINNHUB_FUND_TIMEOUT, signal) }),
+            fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${finnhubKey}`, { signal: _fetchTimeoutSignal(FINNHUB_FUND_TIMEOUT, signal) }),
           ]);
           if (metricsResp.status === 429) { console.warn('FinnHub rate limited in fillFundamentals for', sym); return; }
           if ((metricsResp.status === 401 || metricsResp.status === 403) && finnhubKey === 'demo') { _finnhubDemoBlocked = true; return; }
@@ -4955,12 +4978,12 @@ async function _refreshAll(signal) {
   // so we paint an interim preview from the fast sources rather than make the
   // first paint wait seconds on Yahoo.
   const pFinnhub = hasFinnHub ? fetchFinnhubQuotes(symbols) : Promise.resolve(null);
-  const pYahoo = fetchYahooQuotes(symbols);
+  const pYahoo = fetchYahooQuotes(symbols, signal);
   const pAlpaca = hasAlpaca ? fetchAlpacaQuotes(symbols) : Promise.resolve(null);
   const pFmp = hasFmp ? fetchFmpQuotes(symbols) : Promise.resolve(null);
   const pCrypto = hasCrypto ? fetchCryptoQuotes(symbols) : Promise.resolve(null);
   const pFree = !hasFinnHub ? fetchFinnhubFreeQuotes(symbols) : Promise.resolve(null);
-  const pStooq = hasStooqEligible ? fetchStooqQuotes(symbols) : Promise.resolve(null);
+  const pStooq = hasStooqEligible ? fetchStooqQuotes(symbols, signal) : Promise.resolve(null);
 
   // --- Wave 1: interim paint from the fast sources ---
   const [stooqResult, cryptoResult] = await Promise.all([pStooq, pCrypto]);
@@ -5008,7 +5031,7 @@ async function _refreshAll(signal) {
   // If Yahoo failed, try v6 endpoint as last resort
   let yahooFinal = yahooResult;
   if (!yahooFinal) {
-    yahooFinal = await fetchYahooV6Quotes(symbols);
+    yahooFinal = await fetchYahooV6Quotes(symbols, signal);
   }
 
   // Pick primary source: prefer the one with the most matching symbols
@@ -5094,6 +5117,19 @@ async function _refreshAll(signal) {
         if (q.postMarketPrice == null && p.postMarketPrice != null) { q.postMarketPrice = p.postMarketPrice; q.postMarketChange = p.postMarketChange; }
         if (q.preMarketPrice == null && p.preMarketPrice != null) { q.preMarketPrice = p.preMarketPrice; q.preMarketChange = p.preMarketChange; }
         if (q.marketState == null && p.marketState != null) q.marketState = p.marketState;
+        // Don't let a transient null/missing price from the primary source blank a
+        // row that already had one. Yahoo occasionally returns a symbol entry with
+        // no regularMarketPrice; that would overwrite the interim Stooq price and —
+        // because the entry exists, the mergeSources pass treats it as "in primary"
+        // and won't refill it — flip a just-shown row back to "loading..." for a
+        // tick (a visible flicker on first load, e.g. AMZN). Keep the last-known
+        // price and its change figures; the next pass refreshes them.
+        if (q.price == null && p.prev && p.prev.price != null) {
+          q.price = p.prev.price;
+          if (q.change == null) q.change = p.prev.change;
+          if (q.changePct == null) q.changePct = p.prev.changePct;
+          if (q.prevClose == null) q.prevClose = p.prev.prevClose;
+        }
         // Carry forward sticky deferred-fetch fields (perf, 52-wk, fundamentals,
         // analyst) the fresh primary lacks, so a price-only refresh doesn't blank
         // them on rows that the fetched* guards won't let us re-fetch.
@@ -5374,11 +5410,11 @@ async function _refreshAll(signal) {
   // order barely matters.
   const proxyTask = (async () => {
     if (needsPerf.length > 0) {
-      await fetchPerformanceData(needsPerf);
+      await fetchPerformanceData(needsPerf, signal);
       needsPerf.forEach(s => fetchedPerformance.add(s));
     }
     if (signal && signal.aborted) return;
-    if (needsSummary.length > 0) await fillFundamentals(needsSummary);
+    if (needsSummary.length > 0) await fillFundamentals(needsSummary, signal);
   })();
 
   const allTasks = [...directTasks, proxyTask];
