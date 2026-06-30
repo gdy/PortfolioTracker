@@ -2387,16 +2387,75 @@ function _pickRandom(arr, n) {
   }
   return out;
 }
-function loadSampleData() {
-  if (portfolio.length > 0 &&
-      !confirm('Add sample demo positions (2 tech stocks, 1 commodity, 1 crypto) to your current portfolio?')) {
-    return;
-  }
+// Sample chosen + its quotes warmed at boot, so the first Load Sample Data click
+// paints instantly instead of showing "loading...". loadSampleData consumes this
+// (reusing the same picks the quotes were warmed for); a later load re-randomizes.
+let _samplePrefetch = null;
+function _samplePickToSymbol(item) {
+  let s = item.symbol.toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+  if (CRYPTO_MAP[s]) s = CRYPTO_MAP[s];
+  if (COMMODITY_MAP[s]) s = COMMODITY_MAP[s];
+  return s;
+}
+function prefetchSampleData() {
+  if (_samplePrefetch) return; // decide + warm once
   const picks = [
     ..._pickRandom(SAMPLE_TECH, 2),
     ..._pickRandom(SAMPLE_COMMODITY, 1),
     ..._pickRandom(SAMPLE_CRYPTO, 1),
   ];
+  _samplePrefetch = { picks }; // loadSampleData reuses these so the warmed quotes match
+  const syms = picks.map(_samplePickToSymbol);
+  // Seed quoteData (price fields only) from each source AS IT RETURNS, so the fast
+  // direct-CORS sources (Stooq stocks/futures, CoinGecko crypto, ~1s) warm the
+  // cache without waiting on the slow proxied Yahoo batch (which can take 10s+ when
+  // the proxy fleet is degraded). Best-effort and fire-and-forget — the click works
+  // (and refreshes) regardless of whether/which prefetch landed.
+  const warm = (src, isCryptoSrc) => {
+    if (!src || !src.data) return;
+    for (const [sym, d] of Object.entries(src.data)) {
+      if (!d || d.price == null) continue;
+      const cur = quoteData[sym];
+      if (cur && cur.price != null && !isCryptoSrc) continue; // keep first good price for stocks/futures
+      if (cur) {
+        cur.price = d.price;
+        if (d.change != null) cur.change = d.change;
+        if (d.changePct != null) cur.changePct = d.changePct;
+        if (d.prevClose != null) cur.prevClose = d.prevClose;
+        if (cur.name === sym && d.name && d.name !== sym) cur.name = d.name;
+        cur._lastUpdate = d._lastUpdate || Date.now();
+      } else {
+        quoteData[sym] = d;
+      }
+    }
+  };
+  fetchStooqQuotes(syms).then(r => warm(r, false)).catch(() => {});                       // fast: stocks + futures
+  if (syms.some(s => COINGECKO_IDS[s])) fetchCryptoQuotes(syms).then(r => warm(r, true)).catch(() => {}); // fast: crypto
+  fetchYahooQuotes(syms).then(r => warm(r, false)).catch(() => {});                        // slower: refines/fills gaps
+}
+function loadSampleData() {
+  if (portfolio.length > 0 &&
+      !confirm('Add sample demo positions (2 tech stocks, 1 commodity, 1 crypto) to your current portfolio?')) {
+    return;
+  }
+  // Reuse the pre-decided sample if it was warmed at boot (its quotes are already
+  // in quoteData, so the table paints instantly); consume it so a later load
+  // re-randomizes.
+  let picks;
+  if (_samplePrefetch && _samplePrefetch.picks) {
+    picks = _samplePrefetch.picks;
+    _samplePrefetch = null;
+    // Rows paint immediately from the warmed (slightly delayed) quotes; suppress
+    // the next refresh's seed flash so they don't strobe green/red when they
+    // update to live values — same treatment as the cached-hydrate paint.
+    _suppressNextSeedFlash = true;
+  } else {
+    picks = [
+      ..._pickRandom(SAMPLE_TECH, 2),
+      ..._pickRandom(SAMPLE_COMMODITY, 1),
+      ..._pickRandom(SAMPLE_CRYPTO, 1),
+    ];
+  }
   pushUndo();
   const added = [];
   for (const item of picks) {
@@ -8587,6 +8646,12 @@ initDragReorder();
 showWelcomeBanner();
 if (portfolio.length > 0) refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => connectFinnhubWebSocket());
 else connectFinnhubWebSocket();
+// Warm sample-data quotes in the background for first-time users (empty portfolio,
+// welcome guide not yet dismissed) so the Load Sample Data button paints instantly
+// instead of cycling through "loading...". Best-effort; the click works regardless.
+if (portfolio.length === 0 && !localStorage.getItem('stonks_welcome_dismissed')) {
+  try { prefetchSampleData(); } catch (_) {}
+}
 setupAutoRefresh();
 </script>
 </body>
