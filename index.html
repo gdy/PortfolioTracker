@@ -2423,6 +2423,13 @@ function prefetchSampleData() {
         if (d.changePct != null) cur.changePct = d.changePct;
         if (d.prevClose != null) cur.prevClose = d.prevClose;
         if (cur.name === sym && d.name && d.name !== sym) cur.name = d.name;
+        // Keep the AH fields too: fetchYahooQuotes marks fetchedAfterHours when a
+        // quote carries pre/post prices, and if this warm lands after the user's
+        // click (fire-and-forget), dropping them would leave the symbol marked
+        // "AH fetched" with no AH data to show.
+        if (cur.postMarketPrice == null && d.postMarketPrice != null) { cur.postMarketPrice = d.postMarketPrice; cur.postMarketChange = d.postMarketChange; }
+        if (cur.preMarketPrice == null && d.preMarketPrice != null) { cur.preMarketPrice = d.preMarketPrice; cur.preMarketChange = d.preMarketChange; }
+        if (cur.marketState == null && d.marketState != null) cur.marketState = d.marketState;
         cur._lastUpdate = d._lastUpdate || Date.now();
       } else {
         quoteData[sym] = d;
@@ -2459,9 +2466,9 @@ function loadSampleData() {
   pushUndo();
   const added = [];
   for (const item of picks) {
-    let symbol = item.symbol.toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
-    if (CRYPTO_MAP[symbol]) symbol = CRYPTO_MAP[symbol];
-    if (COMMODITY_MAP[symbol]) symbol = COMMODITY_MAP[symbol];
+    // Shared mapping with prefetchSampleData so the warmed quotes always match
+    // the symbols actually added.
+    const symbol = _samplePickToSymbol(item);
     // Staggered purchase dates (~6 months to ~2 years ago) so a cost basis below
     // today's price reads as a coherent long-term hold rather than a same-day buy.
     const daysAgo = 180 + Math.floor(Math.random() * 540);
@@ -3016,7 +3023,14 @@ let _directFetchBlocked = false;
 // manual fetches, which then just use the timeout.
 function _fetchTimeoutSignal(ms, signal) {
   const t = AbortSignal.timeout(ms);
-  return signal ? AbortSignal.any([t, signal]) : t;
+  if (!signal) return t;
+  // AbortSignal.any is newer (Safari 17.4+/Chrome 116+) than the app's baseline
+  // (AbortSignal.timeout: Safari 16/Chrome 103). Without this guard, older
+  // browsers would throw a TypeError on EVERY refresh fetch — total refresh
+  // failure. Degrade to timeout-only there: aborts then stop new fetches at the
+  // loop guards, they just can't cancel one already in flight (pre-cancellation
+  // behavior).
+  return (typeof AbortSignal.any === 'function') ? AbortSignal.any([t, signal]) : t;
 }
 async function fetchWithProxy(url, proxyIndex = -1, timeout = PROXY_FETCH_TIMEOUT, signal) {
   if (signal && signal.aborted) throw new DOMException('Refresh aborted', 'AbortError');
@@ -5120,7 +5134,7 @@ async function _refreshAll(signal) {
       if (i > 0) await new Promise(r => setTimeout(r, COMMODITY_STAGGER * i));
       try {
         const chartUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true';
-        const text = await fetchWithProxyRace(chartUrl, 4, 8000);
+        const text = await fetchWithProxyRace(chartUrl, 4, 8000, signal);
         const data = JSON.parse(text);
         if (data.chart && data.chart.result && data.chart.result[0]) {
           const q = normalizeYahooChart(sym, data.chart.result[0]);
@@ -5511,8 +5525,8 @@ async function _refreshAll(signal) {
       const ahBase2 = 'https://query2.finance.yahoo.com/v7/finance/quote?symbols=' + ahSymList;
       const ahCrumb = crumb ? '&crumb=' + encodeURIComponent(crumb) : '';
       const text = await Promise.any([
-        fetchWithProxy(ahBase1 + ahCrumb, -1, YAHOO_AH_TIMEOUT),
-        fetchWithProxy(ahBase2 + ahCrumb, -1, YAHOO_AH_TIMEOUT),
+        fetchWithProxy(ahBase1 + ahCrumb, -1, YAHOO_AH_TIMEOUT, signal),
+        fetchWithProxy(ahBase2 + ahCrumb, -1, YAHOO_AH_TIMEOUT, signal),
       ]);
       const data = JSON.parse(text);
       if (data.quoteResponse && data.quoteResponse.result) {
@@ -5554,13 +5568,16 @@ async function _refreshAll(signal) {
     if (stillNeeds.length > 0) {
       // Process sequentially with delays to avoid proxy rate limits
       for (let i = 0; i < stillNeeds.length; i++) {
+        // This per-symbol hunt can run for a while on large portfolios — stop
+        // issuing new proxy calls once the refresh is superseded.
+        if (signal && signal.aborted) break;
         if (i > 0) await new Promise(r => setTimeout(r, AH_CHART_DELAY));
         const sym = stillNeeds[i];
         await (async () => {
           const q = quoteData[sym];
           if (!q) return;
           try {
-            const text = await fetchWithProxy('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=1d&interval=5m&includePrePost=true');
+            const text = await fetchWithProxy('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=1d&interval=5m&includePrePost=true', -1, PROXY_FETCH_TIMEOUT, signal);
             const cData = JSON.parse(text);
             const cResult = cData.chart && cData.chart.result && cData.chart.result[0];
             if (cResult) {
@@ -5612,8 +5629,10 @@ async function _refreshAll(signal) {
         if (deferAbort.signal.aborted || refreshInProgress || (quoteData[sym] && quoteData[sym].price != null)) continue;
         try {
           const yahooUrl = 'https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true';
-          // Race up to 5 proxies for the retry — we already failed once, so widen the net
-          const text = await fetchWithProxyRace(yahooUrl, 5, PROXY_FETCH_TIMEOUT);
+          // Race up to 5 proxies for the retry — we already failed once, so widen the net.
+          // Tied to deferAbort (not the refresh signal): this retry deliberately outlives
+          // its refresh, and clearAll/switchPortfolio already abort deferAbort directly.
+          const text = await fetchWithProxyRace(yahooUrl, 5, PROXY_FETCH_TIMEOUT, deferAbort.signal);
           const data = JSON.parse(text);
           if (data.chart && data.chart.result && data.chart.result[0]) {
             const q = normalizeYahooChart(sym, data.chart.result[0]);
@@ -6021,8 +6040,11 @@ function renderTable() {
     if (isError) {
       priceCell = '<span class="error-text">Unknown ticker</span>';
     } else if (price == null) {
-      // Show "retrying..." only for commodity/crypto that already had a failed fetch attempt
-      if (attemptedSymbols.has(pos.symbol) && (isCommoditySymbol(pos.symbol) || isCryptoSymbol(pos.symbol))) {
+      // "retrying..." for ANY symbol that already had a full failed fetch attempt
+      // (attemptedSymbols is only set after a refresh pass completes). Stocks used
+      // to stay on "loading..." here, which read as stuck-forever when the proxied
+      // stock sources were down — "retrying..." is what's actually happening.
+      if (attemptedSymbols.has(pos.symbol)) {
         priceCell = '<span style="color:#f0ad4e">retrying...</span>';
       } else {
         priceCell = '<span style="color:#4a9eff">loading...</span>';
@@ -6465,7 +6487,8 @@ function renderMobileCards() {
     if (isError) {
       priceHtml = '<span class="error-text">Unknown</span>';
     } else if (price == null) {
-      if (attemptedSymbols.has(pos.symbol) && (isCommoditySymbol(pos.symbol) || isCryptoSymbol(pos.symbol))) {
+      // Any attempted symbol without a price is retrying, not loading (see desktop)
+      if (attemptedSymbols.has(pos.symbol)) {
         priceHtml = '<span style="color:#f0ad4e">retrying...</span>';
       } else {
         priceHtml = '<span style="color:#4a9eff">loading...</span>';
