@@ -1880,6 +1880,7 @@ let finnhubWs = null; // FinnHub WebSocket connection
 let wsSubscribedSymbols = new Set(); // symbols currently subscribed via WebSocket
 let wsConnected = false;
 let wsReconnectTimer = null;
+let _wsConsecCloses = 0; // consecutive closes without a healthy open — drives reconnect backoff
 let wsLastTradeTime = {}; // track last trade time per symbol for freshness
 let wsRenderPending = false; // debounce WebSocket-triggered renders
 let wsOpenedAt = 0; // time WS last opened (for stale-stream grace period)
@@ -7909,6 +7910,7 @@ function connectFinnhubWebSocket() {
     wsConnected = true;
     wsOpenedAt = Date.now();
     wsLastAnyTrade = 0;
+    _wsConsecCloses = 0; // healthy connection — reset the reconnect backoff
     console.log('FinnHub WebSocket connected');
     syncWsSubscriptions();
     updateWsIndicator();
@@ -7929,7 +7931,10 @@ function connectFinnhubWebSocket() {
         for (const sym of Object.keys(latestBySymbol)) {
           const trade = latestBySymbol[sym];
           const price = trade.p;
-          if (!quoteData[sym]) continue;
+          // Own-property check, not truthiness: quoteData["constructor"] is truthy
+          // via inheritance, so a malformed upstream symbol would otherwise write
+          // price fields onto Object.prototype members instead of being skipped.
+          if (!Object.prototype.hasOwnProperty.call(quoteData, sym)) continue;
 
           const q = quoteData[sym];
           const oldPrice = q.price;
@@ -8007,10 +8012,15 @@ function connectFinnhubWebSocket() {
     wsLastAnyTrade = 0;
     console.log('FinnHub WebSocket closed');
     updateWsIndicator();
-    // Reconnect after 5 seconds if we have a key
+    // Reconnect if we have a key, with capped exponential backoff: 5s after a
+    // one-off drop (onopen resets the counter), doubling to a 60s ceiling when
+    // closes repeat — e.g. an invalid/revoked key or a FinnHub outage, where the
+    // old fixed 5s delay hammered the endpoint in a connect/close loop all session.
     if (getApiKey()) {
+      _wsConsecCloses++;
+      const backoff = Math.min(WS_RECONNECT_DELAY * Math.pow(2, _wsConsecCloses - 1), 60000);
       if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-      wsReconnectTimer = setTimeout(() => connectFinnhubWebSocket(), WS_RECONNECT_DELAY);
+      wsReconnectTimer = setTimeout(() => connectFinnhubWebSocket(), backoff);
     }
   };
 }
