@@ -1278,7 +1278,9 @@
     <label class="auto-refresh-toggle">
       <input type="checkbox" id="auto-refresh" checked /> Auto
     </label>
-    <select id="refresh-interval" onchange="setupAutoRefresh()">
+    <!-- No inline onchange: the JS listener below persists the value AND calls
+         setupAutoRefresh(); an attribute handler here just ran it twice. -->
+    <select id="refresh-interval">
       <option value="2">2s</option>
       <option value="3">3s</option>
       <option value="5">5s</option>
@@ -1760,6 +1762,7 @@ const WS_FRESH_MS = 10000;               // how recent a WS trade must be to ski
 const WS_STALE_THRESHOLD = 60000;         // flag WS as "no data" if no trades in this long during active hours
 const OFF_HOURS_FULL_INTERVAL = 60000;    // min interval between full off-hours refreshes
 const WS_RECONNECT_DELAY = 5000;
+const WS_HEALTHY_MS = 30000;              // socket must stay open this long to clear the reconnect backoff
 const FLASH_TITLE_INTERVAL = 900;
 const FLASH_TITLE_MAX_QUEUE = 6;
 
@@ -1881,6 +1884,9 @@ let wsSubscribedSymbols = new Set(); // symbols currently subscribed via WebSock
 let wsConnected = false;
 let wsReconnectTimer = null;
 let _wsConsecCloses = 0; // consecutive closes without a healthy open — drives reconnect backoff
+let _wsOpenedRealTime = 0; // when the socket actually opened; drives the healthy-uptime check
+                           // (wsOpenedAt is also bumped by syncWsSubscriptions for the
+                           // stale-stream grace period, so it can't measure uptime)
 let wsLastTradeTime = {}; // track last trade time per symbol for freshness
 let wsRenderPending = false; // debounce WebSocket-triggered renders
 let wsOpenedAt = 0; // time WS last opened (for stale-stream grace period)
@@ -2515,6 +2521,10 @@ function removePosition(symbol) {
   delete prevPrices[symbol];
   delete wsLastTradeTime[symbol];
   delete _cbCache[symbol];
+  // These two were the only per-symbol maps this path didn't clear, so they grew
+  // for the life of the session as positions came and went.
+  delete _summaryFailCounts[symbol];
+  delete _notFoundStreak[symbol];
   errorSymbols.delete(symbol);
   fetchedSummary.delete(symbol);
   fetchedFundamentals.delete(symbol);
@@ -2719,6 +2729,38 @@ function parseCSVLine(line) {
   return result;
 }
 
+// Split CSV text into records, respecting quoted fields. A plain
+// text.split(/\r?\n/) tears a record in half whenever a field legitimately
+// contains a newline — which our own export now emits for multi-line notes — so
+// re-importing an exported file depended on the orphan fragment happening to be
+// dropped by the column-count guard. Falls back to naive line splitting if the
+// quotes turn out to be unbalanced (a malformed paste), so a single stray quote
+// can't swallow the whole file into one record.
+function splitCsvRecords(text) {
+  const records = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (inQuotes && text[i + 1] === '"') { cur += '""'; i++; continue; }
+      inQuotes = !inQuotes;
+      cur += ch;
+      continue;
+    }
+    if (!inQuotes && (ch === '\n' || ch === '\r')) {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      records.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  records.push(cur);
+  if (inQuotes) return text.split(/\r?\n/); // unbalanced quotes — don't trust the scan
+  return records;
+}
+
 function parseNumber(val) {
   if (typeof val !== 'string') return NaN;
   return parseFloat(val.replace(/[$,%]/g, '').replace(/\((.+)\)/, '-$1'));
@@ -2735,22 +2777,34 @@ function detectColumns(headers) {
   const assigned = new Set(); // prevent two detectors from claiming the same column
 
   function tryMatch(names) {
+    // `names` is ordered most-specific-first, so the NAME loop has to be the
+    // OUTER one. These passes used to iterate columns outer / names inner, which
+    // silently made *header order* the tiebreaker instead of name specificity:
+    // for headers `Current Value, Total Cost Basis`, column 0 matched some name
+    // and won, so the vaguer entry beat the exact one. Name-outer means a more
+    // specific name always claims its column before a vaguer one gets a look.
     // Pass 1: exact match
-    for (let i = 0; i < lower.length; i++) {
-      if (assigned.has(i)) continue;
-      if (names.some(n => lower[i] === n)) return i;
+    for (const n of names) {
+      for (let i = 0; i < lower.length; i++) {
+        if (assigned.has(i)) continue;
+        if (lower[i] === n) return i;
+      }
     }
     // Pass 2: header starts with name (prefix match)
-    for (let i = 0; i < lower.length; i++) {
-      if (assigned.has(i)) continue;
-      const h = lower[i];
-      if (names.some(n => h.startsWith(n + ' ') || h.startsWith(n + '/'))) return i;
+    for (const n of names) {
+      for (let i = 0; i < lower.length; i++) {
+        if (assigned.has(i)) continue;
+        const h = lower[i];
+        if (h.startsWith(n + ' ') || h.startsWith(n + '/')) return i;
+      }
     }
     // Pass 3: header contains name as a substring (fallback for odd formatting)
-    for (let i = 0; i < lower.length; i++) {
-      if (assigned.has(i)) continue;
-      const h = lower[i];
-      if (names.some(n => n.length >= 3 && h.includes(n))) return i;
+    for (const n of names) {
+      if (n.length < 3) continue;
+      for (let i = 0; i < lower.length; i++) {
+        if (assigned.has(i)) continue;
+        if (lower[i].includes(n)) return i;
+      }
     }
     return -1;
   }
@@ -2771,9 +2825,14 @@ function detectColumns(headers) {
   ]));
 
   // 4. Total cost basis
+  // NOT 'current value': that's market value, not cost. It used to be listed
+  // here as a last-ditch fallback, which meant a file carrying "Current Value"
+  // and no cost column produced costBasis = |marketValue / shares| — i.e. today's
+  // price — so every row silently reported ~$0 total P&L. A blank cost basis is
+  // both honest and visibly incomplete; a wrong one isn't.
   totalCostIdx = claim(tryMatch([
     'total cost basis', 'cost basis total', 'total cost', 'book value',
-    'cost basis', 'costbasis', 'current value'
+    'cost basis', 'costbasis'
   ]));
 
   // 5. Last/current price — must NOT match "Price Paid" (already claimed above)
@@ -2805,14 +2864,21 @@ function parseDate(val) {
   // US format: 01/15/2024 or 1/15/2024
   const us = val.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
   if (us) return `${us[3]}-${us[1].padStart(2,'0')}-${us[2].padStart(2,'0')}`;
-  // Try native parse as fallback
+  // Try native parse as fallback. Format from the LOCAL date fields rather than
+  // toISOString(): a bare date string parses as local midnight, and converting
+  // that to UTC moves the date a day BACKWARD for anyone east of UTC — e.g.
+  // "15 Jan 2024" in UTC+5:30 is 2024-01-14T18:30Z, so the purchase date landed
+  // on the 14th. The two formats handled above are string slices and unaffected.
   const d = new Date(val);
-  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  if (!isNaN(d.getTime())) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
   return '';
 }
 
 function parseImportData(text) {
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  const lines = splitCsvRecords(text).map(l => l.trim()).filter(l => l.length > 0);
   if (lines.length === 0) return [];
 
   // Scan first several lines for the header row (some brokers have metadata rows before headers)
@@ -3038,12 +3104,16 @@ async function fetchWithProxy(url, proxyIndex = -1, timeout = PROXY_FETCH_TIMEOU
   // Try direct fetch first (works when served from a web server or extensions with relaxed CORS)
   if (!_directFetchBlocked) {
     try {
-      const directResp = await fetch(url, { signal: AbortSignal.timeout(DIRECT_FETCH_TIMEOUT) });
+      const directResp = await fetch(url, { signal: _fetchTimeoutSignal(DIRECT_FETCH_TIMEOUT, signal) });
       if (directResp.ok) {
         const text = await directResp.text();
         if (text && (text.trimStart()[0] === '{' || text.trimStart()[0] === '[')) return text;
       }
     } catch (_) {
+      // Don't latch on OUR OWN abort: a superseded refresh says nothing about
+      // whether direct CORS works, and mislatching would permanently downgrade
+      // every later fetch on this origin to the slower proxy path.
+      if (signal && signal.aborted) throw new DOMException('Refresh aborted', 'AbortError');
       _directFetchBlocked = true; /* expected on file:// — skip from now on */
     }
   }
@@ -3096,12 +3166,14 @@ async function fetchWithProxyRace(url, n = 3, timeout = PROXY_RACE_TIMEOUT, sign
   // Try direct fetch first (cheap if it works, e.g. served from a real web server)
   if (!_directFetchBlocked) {
     try {
-      const directResp = await fetch(url, { signal: AbortSignal.timeout(DIRECT_FETCH_TIMEOUT - 1000) });
+      const directResp = await fetch(url, { signal: _fetchTimeoutSignal(DIRECT_FETCH_TIMEOUT - 1000, signal) });
       if (directResp.ok) {
         const text = await directResp.text();
         if (text && (text.trimStart()[0] === '{' || text.trimStart()[0] === '[')) return text;
       }
     } catch (_) {
+      // See fetchWithProxy: an abort of ours must not latch the direct path off.
+      if (signal && signal.aborted) throw new DOMException('Refresh aborted', 'AbortError');
       _directFetchBlocked = true; /* skip direct for the rest of the session */
     }
   }
@@ -3130,7 +3202,8 @@ async function fetchWithProxyRace(url, n = 3, timeout = PROXY_RACE_TIMEOUT, sign
 // and proxy capacity is contested. Capped because browsers limit ~6 connections per
 // origin — fanning out 28+ requests just queues most of them and adds contention
 // against the in-progress refresh that's competing for the same proxies.
-async function fetchAnyVariantRace(urls, timeout = 9000, maxAttempts = 8) {
+async function fetchAnyVariantRace(urls, timeout = 9000, maxAttempts = 8, signal) {
+  if (signal && signal.aborted) throw new DOMException('Refresh aborted', 'AbortError');
   const attempts = [];
   // Pick proxies starting from last-working so we hit known-good ones first
   const proxyOrder = [];
@@ -3145,7 +3218,7 @@ async function fetchAnyVariantRace(urls, timeout = 9000, maxAttempts = 8) {
       const url = urls[ui];
       attempts.push((async () => {
         const proxiedUrl = PROXIES[idx](url);
-        const resp = await fetch(proxiedUrl, { signal: AbortSignal.timeout(timeout) });
+        const resp = await fetch(proxiedUrl, { signal: _fetchTimeoutSignal(timeout, signal) });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const text = _validateProxyResponse(await resp.text());
         lastWorkingProxy = idx;
@@ -3982,7 +4055,20 @@ async function fetchStooqQuotes(symbols, signal) {
     if (iSym < 0 || iClose < 0) continue;
 
     for (let li = 1; li < lines.length; li++) {
-      const cells = lines[li].split(',');
+      // Quote-aware split (Stooq quotes some names), then repair the one case it
+      // can't: an UNQUOTED company name containing a comma ("XYZ, INC."). Name is
+      // second-to-last, so the overflow pushes Change% off the end and the percent
+      // parses as a fragment of the name — silently losing the day change for that
+      // symbol. The old `< headers.length` guard never caught it because the row
+      // gets LONGER, not shorter. Re-join the surplus fields into the name so every
+      // index after it lines up again.
+      let cells = parseCSVLine(lines[li]);
+      if (iName >= 0 && cells.length > headers.length) {
+        const extra = cells.length - headers.length;
+        cells = cells.slice(0, iName)
+          .concat([cells.slice(iName, iName + extra + 1).join(', ')])
+          .concat(cells.slice(iName + extra + 1));
+      }
       if (cells.length < headers.length) continue;
       const stooqSym = (cells[iSym] || '').trim().toUpperCase();
       const userSym = reverseMap[stooqSym];
@@ -5709,12 +5795,51 @@ function rangeBar(low, high, current) {
   const pct = Math.max(0, Math.min(100, ((current - low) / (high - low)) * 100));
   return `${fmtPrice(low)}<span class="range-bar"><span class="marker" style="left:${pct}%"></span></span>${fmtPrice(high)}`;
 }
+// Escape one CSV field. Quoting only when the value contained a comma (the old
+// behavior) emitted raw double quotes and let an embedded newline split the row,
+// so an exported file with a quote or multi-line note wouldn't survive a
+// round-trip through our own importer. Quote on any of " , CR LF instead.
+// Values that begin with = + - @ (or a leading tab/CR, which spreadsheets strip
+// before evaluating) are prefixed with an apostrophe so a crafted note can't run
+// as a formula when the file is opened in Excel/Sheets — but only when the value
+// isn't itself a number, so negative share counts stay numeric.
+function csvField(v) {
+  if (v == null) return '';
+  if (typeof v === 'number') return isFinite(v) ? String(v) : '';
+  let s = String(v);
+  if (s === '') return '';
+  if (/^[=+\-@\t\r]/.test(s) && !isFinite(Number(s))) s = "'" + s;
+  if (/[",\n\r]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
 function fmtDivYield(div, yld) {
   if (div == null && yld == null) return '\u2014';
   let parts = [];
   if (div != null) parts.push('$' + fmt(div));
   if (yld != null) parts.push(fmt(yld) + '%');
   return parts.join(' / ');
+}
+// Single source of truth for the after-hours / pre-market cell. Previously this
+// markup was duplicated in renderTable and renderMobileCards and absent from the
+// in-place update paths, so a WS tick or light tick left the AH column showing a
+// stale value until the next full render. `labels` adds the AH:/PM: prefixes the
+// mobile cards use; `empty` is what to show when there's nothing to display.
+// (_hideAfterHours is a hoisted function declaration defined further down.)
+function afterHoursHtml(q, price, opts) {
+  const labels = !!(opts && opts.labels);
+  const empty = (opts && opts.empty != null) ? opts.empty : '\u2014';
+  if (!q || _hideAfterHours(q)) return empty;
+  if (q.postMarketPrice != null) {
+    const chg = q.postMarketChange != null ? q.postMarketChange : (q.postMarketPrice - (price || 0));
+    return `<span class="after-hours">${labels ? 'AH: ' : ''}${fmtPrice(q.postMarketPrice)} `
+      + `<span class="${cc(chg)}">${chg >= 0 ? '+' : ''}${fmtPrice(chg)}</span></span>`;
+  }
+  if (q.preMarketPrice != null) {
+    const chg = q.preMarketChange != null ? q.preMarketChange : (q.preMarketPrice - (q.prevClose || price || 0));
+    return `<span class="after-hours">${labels ? 'PM: ' : ''}${fmtPrice(q.preMarketPrice)} `
+      + `<span class="${cc(chg)}">${chg >= 0 ? '+' : ''}${fmtPrice(chg)}</span></span>`;
+  }
+  return empty;
 }
 
 // ==================== RENDERING ====================
@@ -6022,16 +6147,7 @@ function renderTable() {
 
     // After hours display \u2014 suppressed during the regular session (any pre/post
     // value present then is stale, carried forward by the refresh preservation).
-    let ahDisplay = '\u2014';
-    if (_hideAfterHours(q)) {
-      // regular session \u2014 no current after-hours value to show
-    } else if (q.postMarketPrice != null) {
-      const ahChg = q.postMarketChange != null ? q.postMarketChange : (q.postMarketPrice - (price || 0));
-      ahDisplay = `<span class="after-hours">${fmtPrice(q.postMarketPrice)} <span class="${cc(ahChg)}">${ahChg >= 0 ? '+' : ''}${fmtPrice(ahChg)}</span></span>`;
-    } else if (q.preMarketPrice != null) {
-      const pmChg = q.preMarketChange != null ? q.preMarketChange : (q.preMarketPrice - (q.prevClose || price || 0));
-      ahDisplay = `<span class="after-hours">${fmtPrice(q.preMarketPrice)} <span class="${cc(pmChg)}">${pmChg >= 0 ? '+' : ''}${fmtPrice(pmChg)}</span></span>`;
-    }
+    const ahDisplay = afterHoursHtml(q, price);
 
     const sym = escAttr(pos.symbol);
     const noteVal = escAttr(notes[pos.symbol] || '');
@@ -6135,6 +6251,11 @@ function updatePriceCells() {
         case 'ask':
           td.textContent = q.ask != null ? (q.askEstimated ? '~' : '') + fmtPrice(q.ask) : '\u2014';
           break;
+        case 'afterHours':
+          // Depends on price (the change fallback) and on the session, so it
+          // can't be left to the next full render.
+          td.innerHTML = afterHoursHtml(q, price);
+          break;
         // Skip input cells (shares, costBasis, date, notes) and non-price cells
       }
     });
@@ -6143,6 +6264,10 @@ function updatePriceCells() {
       if (price > prevPrices[sym]) { row.classList.add('flash-green'); row.classList.remove('flash-red'); }
       else if (price < prevPrices[sym]) { row.classList.add('flash-red'); row.classList.remove('flash-green'); }
     }
+    // Keep the alert pulse in sync \u2014 a tick can cross a threshold, and without
+    // this the sound/notification from checkAllAlerts fired while the row stayed
+    // visually unmarked until the next full render.
+    row.classList.toggle('alert-triggered', checkAlertTriggered(sym, price));
   });
 }
 
@@ -6218,11 +6343,18 @@ function updateMobileCardPrices() {
     const askEl = card.querySelector('.mobile-detail-item[data-col="ask"] .mobile-detail-value');
     if (askEl) askEl.textContent = q.ask != null ? (q.askEstimated ? '~' : '') + fmtPrice(q.ask) : '\u2014';
 
+    // After-hours / pre-market line (see updatePriceCells for why this can't
+    // wait for the next full render).
+    const ahEl = card.querySelector('.mobile-card-ah');
+    if (ahEl) ahEl.innerHTML = afterHoursHtml(q, price, { labels: true, empty: '' });
+
     // Flash class
     if (prevPrices[sym] != null && price != null) {
       if (price > prevPrices[sym]) { card.classList.add('flash-green'); card.classList.remove('flash-red'); }
       else if (price < prevPrices[sym]) { card.classList.add('flash-red'); card.classList.remove('flash-green'); }
     }
+    // Keep the alert pulse in sync with the live price (see updatePriceCells).
+    card.classList.toggle('alert-triggered', checkAlertTriggered(sym, price));
   });
 }
 
@@ -6499,16 +6631,7 @@ function renderMobileCards() {
     }
 
     // After hours — hidden during the regular session (stale otherwise)
-    let ahHtml = '';
-    if (_hideAfterHours(q)) {
-      // regular session — no current after-hours value to show
-    } else if (q.postMarketPrice != null) {
-      const ahChg = q.postMarketChange != null ? q.postMarketChange : (q.postMarketPrice - (price || 0));
-      ahHtml = `<span class="after-hours">AH: ${fmtPrice(q.postMarketPrice)} <span class="${cc(ahChg)}">${ahChg >= 0 ? '+' : ''}${fmtPrice(ahChg)}</span></span>`;
-    } else if (q.preMarketPrice != null) {
-      const pmChg = q.preMarketChange != null ? q.preMarketChange : (q.preMarketPrice - (q.prevClose || price || 0));
-      ahHtml = `<span class="after-hours">PM: ${fmtPrice(q.preMarketPrice)} <span class="${cc(pmChg)}">${pmChg >= 0 ? '+' : ''}${fmtPrice(pmChg)}</span></span>`;
-    }
+    const ahHtml = afterHoursHtml(q, price, { labels: true, empty: '' });
 
     // Analyst rating — precomputed so the template stays a flat ternary (no IIFE alloc per card)
     let analystInner = '\u2014';
@@ -6559,7 +6682,11 @@ function renderMobileCards() {
           </div>
           <div class="mobile-card-row2">
             <span>${pos.shares} shares${pos.costBasis ? ' @ $' + fmt(pos.costBasis) : ''}</span>
-            ${ahHtml ? '<span>' + ahHtml + '</span>' : ''}
+            <!-- Always emitted (empty when there's no AH value) so
+                 updateMobileCardPrices can patch it without a full re-render.
+                 The row is justify-content:space-between, so an empty span is
+                 zero-width and leaves the layout identical. -->
+            <span class="mobile-card-ah">${ahHtml}</span>
           </div>
         </div>
         <div class="mobile-card-right">
@@ -6816,22 +6943,30 @@ function exportCSV() {
     setStatus('Nothing to export \u2014 portfolio is empty', 'error');
     return;
   }
-  const cols = ['Symbol','Name','Last Price','$ Change','% Change','Shares','Cost Basis','Purchase Date',
+  // "Cost Basis Per Share", not "Cost Basis": we store a PER-SHARE basis, but
+  // brokers that label a column plain "Cost Basis" (Schwab, Fidelity) mean the
+  // position TOTAL — and detectColumns has to keep reading it that way for them.
+  // Exporting the ambiguous name meant re-importing our own file divided the
+  // basis by the share count (150 came back as 15). This spelling hits the
+  // per-share matcher's first exact name, so an export now round-trips.
+  const cols = ['Symbol','Name','Last Price','$ Change','% Change','Shares','Cost Basis Per Share','Purchase Date',
     'Market Value','Day P&L','Total P&L','P&L %','Prev Close','Open','Volume','Market Cap','P/E','EPS','Beta',
     'Div/Yield','Notes'];
-  const rows = [cols.join(',')];
+  const rows = [cols.map(csvField).join(',')];
   for (const pos of getSortedPortfolio()) {
     const q = quoteData[pos.symbol] || {};
     const price = q.price; const mktVal = price != null ? price * pos.shares : '';
     const dayPL = q.change != null ? q.change * pos.shares : '';
     const totalPL = (price != null && pos.costBasis) ? (price - pos.costBasis) * pos.shares : '';
     const totalPLPct = (totalPL !== '' && pos.costBasis) ? (totalPL / (Math.abs(pos.shares) * pos.costBasis) * 100) : '';
-    const csvVal = v => v == null ? '' : (typeof v === 'string' && v.includes(',') ? '"' + v.replace(/"/g,'""') + '"' : v);
-    rows.push([pos.symbol, csvVal(quoteName(pos.symbol, q)), price||'', q.change||'', q.changePct||'',
+    // Every field goes through csvField \u2014 symbols are sanitized on entry, but
+    // names and notes are free text from data sources and the user.
+    rows.push([pos.symbol, quoteName(pos.symbol, q), price||'', q.change||'', q.changePct||'',
       pos.shares, pos.costBasis||'', pos.purchaseDate||'', mktVal, dayPL, totalPL,
       totalPLPct !== '' ? totalPLPct.toFixed(2) : '', q.prevClose||'', q.open||'',
       q.volume||'', q.marketCap||'', q.pe||'', q.eps||'', q.beta||'',
-      fmtDivYield(q.dividend, q.dividendYield).replace('\u2014',''), csvVal(notes[pos.symbol]||'')].join(','));
+      fmtDivYield(q.dividend, q.dividendYield).replace('\u2014',''), notes[pos.symbol]||'']
+      .map(csvField).join(','));
   }
   const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
@@ -7884,6 +8019,7 @@ function connectFinnhubWebSocket() {
     wsConnected = false;
     wsSubscribedSymbols.clear();
     wsOpenedAt = 0;
+    _wsOpenedRealTime = 0;
     wsLastAnyTrade = 0;
     return;
   }
@@ -7909,8 +8045,14 @@ function connectFinnhubWebSocket() {
   finnhubWs.onopen = () => {
     wsConnected = true;
     wsOpenedAt = Date.now();
+    _wsOpenedRealTime = Date.now(); // never rewritten by syncWsSubscriptions
     wsLastAnyTrade = 0;
-    _wsConsecCloses = 0; // healthy connection — reset the reconnect backoff
+    // NOTE: the reconnect backoff is deliberately NOT reset here. FinnHub accepts
+    // the WebSocket handshake BEFORE validating the token, so an invalid/revoked
+    // key fires onopen and then closes immediately — resetting on open zeroed the
+    // counter every cycle and pinned the delay at 5 s forever, which is the exact
+    // connect/close loop the backoff exists to stop. onclose resets it instead,
+    // gated on the socket having actually stayed up (see WS_HEALTHY_MS).
     console.log('FinnHub WebSocket connected');
     syncWsSubscriptions();
     updateWsIndicator();
@@ -8006,17 +8148,25 @@ function connectFinnhubWebSocket() {
   };
 
   finnhubWs.onclose = () => {
+    // Capture uptime before the state is cleared below.
+    const uptime = _wsOpenedRealTime ? Date.now() - _wsOpenedRealTime : 0;
     wsConnected = false;
     wsSubscribedSymbols.clear();
     wsOpenedAt = 0;
+    _wsOpenedRealTime = 0;
     wsLastAnyTrade = 0;
     console.log('FinnHub WebSocket closed');
     updateWsIndicator();
     // Reconnect if we have a key, with capped exponential backoff: 5s after a
-    // one-off drop (onopen resets the counter), doubling to a 60s ceiling when
-    // closes repeat — e.g. an invalid/revoked key or a FinnHub outage, where the
-    // old fixed 5s delay hammered the endpoint in a connect/close loop all session.
+    // one-off drop, doubling to a 60s ceiling when closes repeat — e.g. an
+    // invalid/revoked key or a FinnHub outage, where the old fixed 5s delay
+    // hammered the endpoint in a connect/close loop all session.
     if (getApiKey()) {
+      // A connection only counts as healthy — and so only clears the backoff —
+      // if it stayed open past WS_HEALTHY_MS. Resetting on onopen (as this used
+      // to) never escalated for the case the backoff is actually for: FinnHub
+      // opens the socket, rejects the token, and closes within milliseconds.
+      if (uptime >= WS_HEALTHY_MS) _wsConsecCloses = 0;
       _wsConsecCloses++;
       const backoff = Math.min(WS_RECONNECT_DELAY * Math.pow(2, _wsConsecCloses - 1), 60000);
       if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
@@ -8452,9 +8602,17 @@ async function refreshAlwaysOnOnly() {
   }
 }
 
+const DEFAULT_REFRESH_SECONDS = 30;
 function setupAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  const userInterval = parseInt(document.getElementById('refresh-interval').value) * 1000;
+  // Guard the parse. Assigning a <select> a value that isn't one of its options
+  // leaves value === '' (e.g. a stale stonks_refresh_interval restored after the
+  // option list changed). parseInt('') is NaN, and setInterval(fn, NaN) coerces
+  // to 0 → a ~4 ms main-thread spin that also makes heavyFloor NaN, so the heavy
+  // refresh never fires again. Fall back to the default instead.
+  const rawInterval = parseInt(document.getElementById('refresh-interval').value, 10);
+  const seconds = (isFinite(rawInterval) && rawInterval > 0) ? rawInterval : DEFAULT_REFRESH_SECONDS;
+  const userInterval = seconds * 1000;
   refreshTimer = setInterval(() => {
     // Refresh the WS indicator every tick so a stalled stream flips to
     // "Live (no data)" within one auto-refresh interval, independent of
@@ -8551,8 +8709,13 @@ for (const pos of portfolio) {
 if (migrated) savePortfolio();
 
 // Restore saved auto-refresh settings
+// Only restore an interval the <select> actually offers — assigning an unknown
+// value silently blanks the select (see setupAutoRefresh's parse guard).
 const savedInterval = localStorage.getItem('stonks_refresh_interval');
-if (savedInterval) document.getElementById('refresh-interval').value = savedInterval;
+if (savedInterval) {
+  const _intervalSel = document.getElementById('refresh-interval');
+  if ([..._intervalSel.options].some(o => o.value === savedInterval)) _intervalSel.value = savedInterval;
+}
 const savedAutoRefresh = localStorage.getItem('stonks_auto_refresh');
 if (savedAutoRefresh !== null) document.getElementById('auto-refresh').checked = savedAutoRefresh === '1';
 
