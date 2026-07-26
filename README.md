@@ -76,14 +76,11 @@ Every refresh runs as three waves, so the table paints as soon as *anything* use
 
 ```mermaid
 flowchart TD
-    T([Refresh tick]) --> W1["Wave 1 — fast, keyless, direct CORS<br/>Stooq, CoinGecko, Coinbase"]
-    T --> W2["Wave 2 — full fan-out<br/>Yahoo via proxy, FinnHub, Alpaca, FMP"]
-    W1 --> P1["Interim paint<br/>~300-500 ms"]
-    W2 --> M["Merge<br/>pick the best-coverage source,<br/>backfill missing fields from the rest"]
-    P1 -.->|fills blank rows only| M
-    M --> P2["Authoritative paint"]
-    P2 --> D["Wave 3 — deferred, per-symbol<br/>fundamentals, performance, after-hours"]
-    D --> P3["Final paint, cached to localStorage"]
+    T([Refresh tick]) --> W1["Wave 1 · keyless, direct CORS<br/>Stooq · CoinGecko · Coinbase"]
+    T --> W2["Wave 2 · full fan-out<br/>Yahoo via proxy · FinnHub · Alpaca · FMP"]
+    W1 -->|"interim paint, ~300-500 ms<br/>blank rows only"| M["Merge · best-coverage source wins,<br/>the rest backfill missing fields<br/>→ authoritative paint"]
+    W2 --> M
+    M --> D["Wave 3 · deferred, per-symbol<br/>fundamentals · performance · after-hours<br/>→ final paint, cached to localStorage"]
 ```
 
 Four problems drove most of the design.
