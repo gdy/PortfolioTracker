@@ -1,254 +1,347 @@
 # STONKS — Portfolio Tracker
 
-A real-time portfolio tracker for stocks, crypto, and commodities that runs entirely in your browser as a single HTML file. No server, no build tools, no dependencies — just open `index.html` and go.
+**A real-time portfolio tracker for stocks, crypto, and commodities that runs entirely in one HTML file.** No server, no build step, no dependencies, no account. Open `index.html` and it works.
 
-**[Open App](https://gdy.github.io/PortfolioTracker/)** · [![Live Demo](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://gdy.github.io/PortfolioTracker/)
+[**▶ Open the live app**](https://gdy.github.io/PortfolioTracker/)
+
 ![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
-![Single file](https://img.shields.io/badge/single-file-blue)
+![Single file](https://img.shields.io/badge/single%20file-index.html-blue)
+![No backend](https://img.shields.io/badge/backend-none-informational)
 ![License](https://img.shields.io/badge/license-MIT-green)
+
+<!-- SCREENSHOT — save the images, then delete this comment and uncomment the two blocks below.
+     docs/screenshot.png       cropped hero: Symbol → P&L %, all rows (~2:1 renders legibly at GitHub's ~850px width)
+     docs/screenshot-wide.png  the full 33-column capture, at native resolution
+
+![STONKS — live portfolio table](docs/screenshot.png)
+
+<details>
+<summary>See the full column set</summary>
+
+<br/>
+
+[![All 33 columns](docs/screenshot-wide.png)](docs/screenshot-wide.png)
+
+</details>
+-->
+
+---
+
+## The problem
+
+Most portfolio trackers want one of three things from you: brokerage credentials, a monthly subscription, or an account. The free ones are usually delayed, ad-supported, or quietly harvesting your holdings.
+
+The constraint I set was: **a genuinely useful real-time tracker where your positions never leave your browser, using only free data.** That rules out a backend (nothing to send data *to*), which in turn rules out the usual answer to every hard problem below — no server-side caching, no API-key proxying, no rate-limit pooling across users. Everything has to work from a static file on GitHub Pages.
+
+Most of what's interesting here is the consequences of that constraint.
+
+---
+
+## Highlights
+
+| | |
+|---|---|
+| **8 data sources, automatic failover** | Picks whichever source covers the most symbols, then backfills individual missing fields from the others. Four are keyless *and* direct-CORS, so the no-API-key path stays alive when the proxy fleet is degraded. |
+| **Real-time streaming** | FinnHub WebSocket for trade-by-trade stock prices; Coinbase Exchange overlay so crypto ticks on a 2-second interval instead of CoinGecko's 30–60 s server-side cycle. |
+| **Works with zero configuration** | No API key required. Keys unlock more columns and streaming, but the app is useful on first open. |
+| **Everything stays local** | `localStorage` only. Data goes to financial APIs and nowhere else. |
+| **33 data columns** | Sortable, reorderable, hideable, with per-symbol notes, price alerts, and multi-portfolio support. |
+| **Genuinely mobile** | The table becomes tap-to-expand cards with inline editing, drag-reorder, and pull-to-refresh — not a squeezed desktop layout. |
+
+---
+
+## Quick start
+
+```
+1. Download index.html  (or clone this repo)
+2. Open it in any modern browser — desktop or mobile
+3. Type a ticker, share count, and cost basis → + Add
+```
+
+That's it. No install, no `npm`, no server.
+
+A **Welcome Guide** walks through setup on first launch, and **Load Sample Data** fills the table with a few well-known positions if you want to see it working before entering your own. Re-open the guide any time from **Settings → Show Welcome Guide**.
+
+**Optional free API keys** (Settings panel) unlock the rest: [FinnHub](https://finnhub.io/register) adds WebSocket streaming plus P/E, EPS, beta, dividends, earnings dates, and analyst ratings; [Alpaca](https://app.alpaca.markets/signup) adds real bid/ask; [FMP](https://site.financialmodelingprep.com/register) adds a third quote fallback.
+
+### Deploying your own
+
+Push to GitHub → **Settings → Pages** → source `main`, folder `/` → visit `https://<user>.github.io/<repo>/`. It's a static file; there is nothing to configure.
+
+---
+
+## How it works
+
+Every refresh runs as three waves, so the table paints as soon as *anything* useful arrives rather than blocking on the slowest source:
+
+```mermaid
+flowchart TD
+    T([Refresh tick]) --> W1["Wave 1 — fast, keyless, direct CORS<br/>Stooq, CoinGecko, Coinbase"]
+    T --> W2["Wave 2 — full fan-out<br/>Yahoo via proxy, FinnHub, Alpaca, FMP"]
+    W1 --> P1["Interim paint<br/>~300-500 ms"]
+    W2 --> M["Merge<br/>pick the best-coverage source,<br/>backfill missing fields from the rest"]
+    P1 -.->|fills blank rows only| M
+    M --> P2["Authoritative paint"]
+    P2 --> D["Wave 3 — deferred, per-symbol<br/>fundamentals, performance, after-hours"]
+    D --> P3["Final paint, cached to localStorage"]
+```
+
+Four problems drove most of the design.
+
+<details>
+<summary><b>Resilience</b> — free APIs fail constantly, so no single source can be load-bearing</summary>
+
+<br/>
+
+Free financial APIs rate-limit, go down, silently return empty results, or drop coverage for individual tickers. The app treats every source as unreliable:
+
+- **Eight sources run concurrently.** The one covering the most requested symbols becomes primary; the rest are merged in field-by-field to fill gaps (a source might have the price but not the 52-week range).
+- **Yahoo Finance has no CORS headers**, so it goes through a rotating pool of 4 public CORS proxies with last-working-proxy memory. If the sticky proxy fails, the remaining proxies are **raced in parallel** rather than walked sequentially — bounding worst-case latency at roughly two timeouts instead of four.
+- **Four sources are keyless *and* direct-CORS** (Stooq, CoinGecko, Coinbase, CryptoCompare). Yahoo is also keyless but depends on the proxy fleet, so these four give the no-key path a fallback chain that doesn't share Yahoo's fragility.
+- **Circuit breakers.** Three consecutive all-symbol failures on the Coinbase overlay trigger a 30 s cooldown, automatically falling back to CryptoCompare. FinnHub's public demo token is dead upstream, so its first 401 latches that path off for the session rather than paying a doomed round-trip every refresh.
+- **Jittered retries.** When *every* source fails — usually a proxy-fleet hiccup affecting many users at once — a single retry is scheduled ~8 s later with ±2 s of randomness, so recovering proxies don't get a synchronized thundering herd.
+
+</details>
+
+<details>
+<summary><b>Freshness</b> — polling a 30-second cache every 2 seconds doesn't make it faster</summary>
+
+<br/>
+
+- **WebSocket streaming.** FinnHub's WebSocket gives trade-by-trade stock prices with no proxy involved. Free tier caps at 50 symbols, so past that the app streams the **largest positions by cost basis** and lets the rest fall back to REST polling. Ranking by cost basis rather than live market value is deliberate: market value wobbles across the 50/51 boundary and would thrash subscriptions all day.
+- **Crypto needed a different fix.** CoinGecko's free endpoint updates server-side only every 30–60 s, so a 2 s poll returns identical data. Coinbase Exchange's public ticker is real-time and direct-CORS, so it's layered on top: CoinGecko supplies slow-moving fields (24h high/low, market cap, volume), Coinbase patches price/bid/ask every tick. Past 10 coins the per-symbol fan-out switches to one batched CryptoCompare call, since browsers cap ~6 connections per origin and a large fan-out would just serialize.
+- **Real-time gold via a tokenized proxy.** Free futures feeds are 10–15 min delayed at source, and real-time futures data genuinely requires a paid subscription. For gold specifically, the app fetches `PAXG-USD` from Coinbase — PAX Gold is a redeemable claim on one troy ounce, trades 24/7, and tracks spot within ~1%. Its 24h open doubles as a previous close, so gold shows a real day change and range even on weekends when Yahoo isn't queried. No other commodity has an equivalent token with a clean peg and a Coinbase listing, so the rest stay on the delayed feed.
+- **Tiered scheduling.** Active hours (4 AM–8 PM ET weekdays) poll everything. Off-hours poll only crypto and commodities. Weekends pause entirely unless you hold 24/7 assets.
+
+</details>
+
+<details>
+<summary><b>Scale</b> — a 50-position portfolio can't fan out 50× per tick</summary>
+
+<br/>
+
+- **Price fetching is batched** — one call each for Yahoo v7, Stooq, CoinGecko, Alpaca, and FMP — so prices and day P&L scale regardless of portfolio size.
+- **The expensive part is per-symbol enrichment.** Yahoo has no batch endpoint for fundamentals or historical performance, so above ~25 positions the app enriches only the rows **currently on screen** and fetches the rest as they scroll into view. Off-screen rows still show live price and day P&L from the batch — they're just missing P/E, 52-week range, and YTD/6M/1Y until visible.
+- **Adaptive heavy-refresh cadence.** A full fan-out can't finish inside a 2 s tick on a large portfolio, so heavy refreshes are spaced at least ⌈stocks ÷ 15⌉ seconds apart (never below your chosen interval). Between them, lightweight crypto-only and commodity-only ticks keep 24/7 assets moving on your actual interval.
+- **Rendering is tiered too.** A full table redraw costs ~15–20 ms; the targeted price-cell patch used by WebSocket and light ticks costs well under 1 ms. Full redraws happen on a throttle, or immediately when the active sort depends on live prices and row order could change.
+
+</details>
+
+<details>
+<summary><b>Trust</b> — third-party CORS proxies can see and modify every response</summary>
+
+<br/>
+
+Routing Yahoo through public proxies means an untrusted intermediary controls the response body. That shapes several decisions:
+
+- **Response key guarding.** Quote payloads can only populate symbols the app actually requested. A compromised proxy returning a crafted symbol like `__proto__` is discarded before it can become an object key — otherwise it would pollute `Object.prototype` application-wide. The same guard applies to WebSocket trade messages via an explicit `hasOwnProperty` check.
+- **API keys never touch a proxy.** FinnHub, Alpaca, and FMP are all direct-CORS, so keys go only to their own origins.
+- **Strict CSP.** A `Content-Security-Policy` meta tag blocks remote scripts, `eval`, and object/embed content, and limits `connect-src` to `https:`/`wss:`. `referrer` is `no-referrer`, so navigating away doesn't leak a shared-portfolio URL (which carries positions in its hash).
+- **Untrusted input is escaped at the render site**, including CSV fields in the import preview and dates from shared URLs — a raw date flows into an HTML `value=""` attribute, so it's both validated on ingestion (`YYYY-MM-DD`) and escaped on render.
+
+</details>
 
 ---
 
 ## Features
 
-### Real-Time Market Data
-- **WebSocket streaming** — real-time trade-by-trade price updates for stocks via FinnHub WebSocket (up to 50 symbols on the free tier — a FinnHub hard limit). When a portfolio holds more than 50 stocks, the **largest positions by value** are streamed and the rest fall back to REST polling, so the symbols that matter most stay live. No proxy needed — bypasses CORS entirely. Auto-reconnects on disconnect with capped exponential backoff (5 s doubling to a 60 s ceiling, reset on a healthy connection), so an invalid key or a FinnHub outage doesn't hammer the endpoint in a connect/close loop. Renders are debounced via `requestAnimationFrame` for smooth performance under high-frequency trades. A green **● Live** badge appears in the toolbar when streaming is active; if the socket is connected but no trades have arrived for 60+ seconds during active market hours (a common symptom of a FinnHub free-plan restriction on realtime US equities), the badge flips to amber **● Live (no data)** with an explanatory tooltip — REST polling continues in the background either way.
-- **Multi-source price fetching** — fetches from Yahoo Finance, FinnHub, Alpaca Markets, Financial Modeling Prep, Stooq, CoinGecko, Coinbase Exchange, and CryptoCompare simultaneously, picks the source with the most coverage, and fills individual missing fields from secondary sources. Four of the eight sources (Stooq, CoinGecko, Coinbase, CryptoCompare) are completely keyless, so the no-API-key path has its own redundant primary + fallback chain instead of depending on Yahoo's proxy fleet alone. On each refresh the fast keyless sources (Stooq for stocks and futures, CoinGecko + Coinbase for crypto) are awaited first and paint an interim preview the moment they return — usually a few hundred milliseconds — so the table fills in without blocking on the slower proxied Yahoo batch; an authoritative pass then merges every source and finalizes each row.
-- **Automatic source fallback** — if one API is down or rate-limited, data is pulled from the next available source automatically, with no user action required.
-- **Auto-refresh** — configurable polling intervals (2s / 3s / 5s / 10s / 15s / 30s / 60s). REST polling always runs on the selected interval during active market hours, regardless of WebSocket state — WS ticks supplement the table with real-time prices between polls, and a stale or restricted WS stream never freezes the table. Overlapping refreshes are prevented by a `refreshInProgress` guard, so a short interval on a slow network simply skips a tick instead of stacking requests. At aggressive intervals (2–5 s) on portfolios with many stocks, when the heavy refresh is mid-flight on a tick boundary the app fires a lightweight crypto-only update instead — so BTC/ETH stay on the user's chosen interval while stocks update at the heavy refresh's natural pace.
-- **Three-phase refresh scheduling** — during active market hours (4 AM–8 PM ET weekdays) all sources are polled; outside those hours, only crypto and commodity positions (24/7 markets) are refreshed on a lightweight path; on weekends, auto-refresh pauses unless you hold crypto or commodities. Switching portfolios (or Clear All) aborts any in-flight refresh to avoid stale data bleeding across portfolios — and the abort signal is threaded through the proxy layer and per-symbol enrichment, so a superseded refresh's network calls are actually cancelled (releasing the shared proxy pool immediately) rather than left running to their timeouts.
-- **Pre-market and after-hours pricing** — displayed inline per row with change indicators. Sourced from Yahoo Finance v7 batch (one proxy call for all symbols), with a v8 chart candle fallback for any symbols not covered. Correctly handles the 2 AM overnight case where Yahoo's `currentTradingPeriod` points to the next session. The dedicated after-hours pass pauses while the market is open — there's no fresh pre/post data to find mid-session — and resumes automatically the moment the session flips. The After-Hours column is also blanked during the regular session (keyed off the live `marketState`, with an ET-clock fallback), so yesterday's post-market price never lingers in the column through the next trading day.
-- **Price flash animations** — green/red flashes on price changes (from both WebSocket updates and polling). WebSocket updates use targeted in-place DOM patching to avoid disrupting fields being edited.
-- **Source attribution** — the status bar shows which data sources are active and whether WebSocket streaming is live (e.g. "Data via FinnHub + CoinGecko | WS streaming").
-- **Smart CORS proxy rotation** — 4 proxy endpoints with last-working-proxy memory and automatic failover: if the sticky proxy fails, the remaining proxies are raced in parallel rather than walked sequentially, bounding worst-case latency at roughly two timeouts. Proxy error responses are validated (HTML pages, rate-limit strings, and proxy-specific JSON error bodies are rejected before a response is accepted). Quote responses are additionally guarded against tampering: symbols a proxy returns that were never requested are discarded, so a compromised proxy can't inject keys (e.g. `__proto__`) into the app's quote state.
-- **Instant paint on reload** — the latest quotes are cached to `localStorage` and restored into the table before the first network request, so reopening the app shows your last-known prices immediately (with the saved timestamp) instead of a wall of "loading…". The first live refresh overwrites them, and that initial refresh's flash is suppressed so prices that drifted while the tab was closed don't strobe the whole table green/red. Only prices are restored — deferred fields (performance, fundamentals, analyst rating, after-hours) are re-derived fresh each session, so a cached value can never go permanently stale.
+<details open>
+<summary><b>Market data</b></summary>
 
-### Portfolio Management
-- **30+ data columns** — last price, $ change, % change, after-hours, quantity, cost basis, purchase date, market value, day P&L, dividend/yield, ex-div date, next earnings, YTD/6M/1Y performance, total P&L, P&L %, previous close, open, bid, ask, day range, 52-week range, volume, avg volume, market cap, P/E, EPS, beta, **analyst rating** (Strong Buy / Buy / Hold / Sell / Strong Sell consensus from FinnHub `/stock/recommendation` with a Yahoo `financialData` fallback — color-tinted by score; click the cell to open a popover showing the 1–5 score on a green-to-red scale and a stacked breakdown bar of the Strong Buy / Buy / Hold / Sell / Strong Sell counts with source attribution and reporting period), notes
-- **Multiple portfolios** — switch between unlimited named portfolios (e.g. "Long-term", "Trading", "Crypto") via the portfolio bar above the toolbar. The bar is **hidden by default to save vertical space** — enable **Show multiple-portfolio selector bar** in Settings to reveal it (it auto-shows for anyone who already has more than one portfolio). Create, rename, and delete portfolios on the fly. Each portfolio has its own positions, notes, and undo history. Switching is instant: loaded quotes are kept in the background (keyed by symbol) rather than wiped, so flipping between portfolios doesn't force a "loading…" reload — a quick refresh on switch just updates prices. The active portfolio is remembered across sessions.
-- **Inline editing** — click any quantity, cost basis, date, or notes field to edit directly in the table. Changes are saved instantly.
-- **Quick actions** — click a position's symbol or company name for a small popup menu with **Set price alert**, **Copy symbol**, and **Remove position** (undoable).
-- **Sample data** — a **Load Sample Data** button (in the first-run Welcome guide and in Settings) populates the table in one click with two randomly chosen big-tech stocks, a commodity, and a crypto, so you can see it working before entering your own positions. For first-time visitors the sample's quotes are prefetched in the background while the Welcome guide is open, so the click paints instantly instead of showing a wall of "loading…".
-- **Drag-to-reorder** — grab any row in the desktop table or any mobile card (via the ☰ handle) to manually rearrange positions. Switching to a sorted column disables manual order; clearing the sort restores it.
-- **Column visibility toggle** — click **Columns** in the toolbar to hide/show any of the 30+ columns. Essential fields (symbol, name, price, change, quantity, cost basis) are locked and cannot be hidden. Selection is persisted to localStorage.
-- **Drag-to-reorder columns** — grab any column header in the desktop table to rearrange columns directly, or use the drag handles in the **Columns** picker. Order is persisted per browser; use **Reset Order** in the picker to restore the default.
-- **Allocation donut chart** — toggleable SVG donut showing allocation by symbol, sorted largest first, with a 24-color palette tuned for dark backgrounds (mostly cool tones with warm accents interleaved for distinction at 20+ positions). The center shows live totals (portfolio value, position count, day P&L) with clip-safe text fitting — long totals shrink, then compact to `$x.xM`, before they can touch the ring. Slices and legend rows highlight each other on hover (tap on mobile) with a value/percent tooltip; clicking a legend row jumps to that position in the table. Positions under 1.5% group into a gray "Other" slice on larger portfolios so slivers don't clutter the ring. The whole panel slides open and closed with a smooth height transition (the same animation as the Settings and Welcome panels), and the donut sweeps in on open (both static under `prefers-reduced-motion`); updates live as prices change. Click **Show Chart** in the summary bar to show/hide.
-- **Price alerts** — set above/below price thresholds per symbol. A 🔔 icon appears next to alerted symbols; rows pulse when triggered. Browser notifications fire on threshold cross (requires notification permission — the bell tooltip shows current permission status). Set from the symbol bell on desktop or the Alert fields in the mobile expanded card.
-- **Export CSV** — one-click download of the current portfolio as CSV (filename includes the portfolio name and date), respecting your current sort order.
-- **Export / Import settings** — save and restore your API keys, column visibility, column order, price alerts, and refresh preferences as a JSON file. Found in the Settings panel.
-- **Share via URL** — generate a shareable URL containing your portfolio (symbols, shares, cost basis, dates) encoded in the hash (up to 99 positions). Recipients are prompted before any positions replace their current portfolio. Shared symbols are sanitized and length-validated on import.
-- **Undo / Redo** — `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) undoes and redoes any portfolio change: add, remove, edit shares/cost/date, import, reorder, or clear all. Up to 50 levels of history. Visible **Undo** and **Redo** buttons in the toolbar auto-enable/disable as the stacks change, so the feature is discoverable without needing the shortcut.
-- **Short selling** — negative share quantities track short positions with correct P&L math (gains when price falls, market value carried as a negative/liability in the summary).
-- **Smart lot merging** — adding to an existing position (manually or via import) averages same-side lots by a share-weighted cost basis, while an opposite-side lot is treated as a partial/full close: the surviving side keeps its cost basis instead of blending the closing price into a meaningless average. Manual adds and CSV imports share one merge routine so they can't drift apart.
-- **Adaptive price precision** — per-share prices scale their decimal places to magnitude: normal prices show 2 decimals, sub-dollar 4, sub-cent 6, and microcap tokens up to 8 — so a sub-penny coin like SHIB displays `0.00002341` instead of being rounded to `$0.00`. Dollar aggregates (market value, P&L) stay at 2 decimals.
-- **Per-position notes** — free-text notes column for each ticker.
-- **Purchase date tracking** — records when each position was opened, sortable and editable inline.
-- **Summary bar** — total market value, day P&L, total P&L, total P&L %, and position count across the whole portfolio.
-- **Estimated bid/ask** — when real bid/ask data isn't available from Alpaca, estimates are computed from the last trade price with a spread appropriate for the price range (marked with `~` and dimmed).
-- **Name tooltips** — hover truncated company names to see the full name.
+<br/>
 
-### Import System
-- **CSV import** from major brokerages:
-  - Robinhood · E\*Trade · Fidelity · Charles Schwab · Webull · Vanguard
-- **Auto-detects column headers** — maps Symbol, Shares/Quantity, Cost Basis (per-share or total), Purchase Date, Last Price, and Type/Side automatically.
-- **Drag-and-drop** — drop a `.csv` file directly onto the import modal.
-- **Paste support** — paste CSV data directly into the text area.
-- **Simple CSV** — also accepts `Symbol, Shares, Cost, Date` with no headers.
-- **Live preview** — parsed positions are shown in real time as you type or drop a file, with column mapping diagnostics.
-- **Short detection** — recognises negative shares or `Short` / `Sell` / `Sell Short` in a Type column.
-- **Smart merging** — duplicate symbols are merged by side. Two long lots (or two short lots) are combined with a weighted-average cost basis. A long lot imported on top of an existing short position (or vice versa) is treated as a closing trade: the remaining side keeps its cost basis instead of mixing long and short prices into a meaningless average.
-- **Price seeding** — imported last prices display immediately before APIs respond.
+- **WebSocket streaming** — real-time stock prices via FinnHub (up to 50 symbols; largest positions prioritized). Renders debounced via `requestAnimationFrame`. A green **● Live** badge shows when streaming; if the socket is connected but silent for 60+ seconds during market hours — a common symptom of the free plan's realtime-equities restriction — it flips to amber **● Live (no data)** with an explanatory tooltip. REST polling continues either way.
+- **Auto-reconnect with capped exponential backoff** — 5 s doubling to a 60 s ceiling, cleared only after a connection stays up 30 s. (FinnHub accepts the WebSocket handshake *before* validating the token, so an invalid key opens and immediately closes; resetting on open would pin the delay at 5 s forever.)
+- **Auto-refresh** — 2 / 3 / 5 / 10 / 15 / 30 / 60 second intervals, with an overlap guard so a short interval on a slow network skips a tick instead of stacking requests.
+- **Pre-market and after-hours pricing** — inline per row with change indicators, from Yahoo v7 batch with a v8 chart-candle fallback. Blanked during the regular session (keyed off live `marketState`, with an ET-clock fallback) so yesterday's post-market price never lingers into the next trading day.
+- **Price flash animations** — green/red on change, using targeted in-place DOM patching so a field you're editing isn't destroyed mid-keystroke.
+- **Instant paint on reload** — last-known quotes are cached and restored before the first network request, so reopening shows prices immediately instead of a wall of "loading…". Only prices are cached; deferred fields re-derive fresh each session so nothing can go permanently stale.
+- **Source attribution** — the status bar names the live sources, e.g. `Data via FinnHub + CoinGecko | WS streaming`.
 
-### Asset Classes
-| Type | Ticker format | Data source |
-|------|--------------|-------------|
-| Stocks | `AAPL`, `MSFT`, … | Yahoo Finance, FinnHub, Alpaca, FMP |
-| Crypto | `BTC`, `ETH`, `SOL`, `BONK`, `PEPE`, `WIF`, `TRX`, `SUI` … (37 coins auto-map to `-USD`) | CoinGecko + Coinbase + CryptoCompare (all direct CORS, no proxy) |
-| Commodity futures | `GOLD`, `OIL`, `SILVER`, `COPPER` … (auto-map to `GC=F`, `CL=F`, … with friendly display names) | Stooq (`gc.f`, keyless) + Yahoo v8 chart (via CORS proxy) + Coinbase PAXG for real-time gold |
+</details>
 
-Commodity futures symbols containing `=` are handled carefully: `=` is kept raw in URL path segments (`yfPath`) but percent-encoded in query string parameters (`yfEnc`) to avoid ambiguity. Commodities that fail on the initial fetch are automatically retried by the main commodity retry pass (using an alternate Yahoo CDN domain) and a deferred background retry that staggers requests across proxies with a 1.5-second initial delay (± 400 ms jitter) to let rate limits recover and to desynchronize concurrent users after a proxy fleet hiccup. Every commodity also has a built-in friendly display name (`Gold`, `Silver`, `Copper`, `Crude Oil`, …), so a commodity added off-hours shows its name immediately instead of the bare futures symbol even when Yahoo — which would otherwise supply the name — isn't reachable.
+<details>
+<summary><b>Portfolio management</b></summary>
 
-### Sorting & UI
-- **Click any column header to sort** — ascending/descending toggle with a sort indicator arrow. Change, P&L, and performance columns lead with the **best** value first, so a single click on **% Chg** puts the day's biggest gainer at the top and the biggest loser at the bottom (click again to flip). Because these are live-price columns, that ranking then re-sorts automatically as prices move through the day. Text columns (symbol, name) still sort A→Z first. Your sort column and direction are remembered across sessions.
-- **Sticky headers** — column headers stay visible while scrolling horizontally.
-- **Frozen symbol column** — the leftmost (symbol) column stays pinned to the left edge while you scroll the wide table sideways, so every row stays identifiable.
-- **Persistent horizontal scrollbar** — a sticky scrollbar pinned to the bottom of the viewport lets you scroll the wide table sideways from anywhere on the page, without first scrolling down to the table's bottom edge.
-- **Zebra striping** — alternating row backgrounds plus a strengthened row divider make it easy to track a single row across the wide table at a glance, without adding any vertical padding or row height.
-- **Keyboard shortcuts** — `Tab` moves between toolbar inputs (ticker → shares → cost → date); `Enter` adds a position; `Ctrl+Z` / `Ctrl+Y` undo/redo; `?` opens the keyboard shortcuts help overlay; `Esc` closes overlays.
-- **Dark theme** — terminal-style monospace UI with `color-scheme: dark` applied at the root so native browser widgets (date picker, scrollbars) match the theme.
+<br/>
 
-### Accessibility
-- **Colorblind-safe P&L** — every gain/loss cell shows a subtle ▲ / ▼ glyph in addition to the green/red tint, so direction is readable without color perception.
-- **Screen-reader hooks** — the status bar, summary bar, and live indicator are `aria-live="polite"` regions, so price and status changes are announced automatically. The main table carries an `aria-label`, and every icon-only toolbar button (New/Rename/Delete portfolio, Undo, Redo, Refresh, Import, Export, Columns, Settings, Share, Clear All) has an explicit `aria-label`.
-- **Keyboard focus ring** — a high-contrast `:focus-visible` outline makes keyboard navigation obvious against the dark theme while staying invisible for mouse clicks.
+- **33 data columns** — price, change, % change, after-hours, quantity, cost basis, purchase date, market value, day P&L, total P&L, P&L %, dividend/yield, ex-div, earnings date, YTD/6M/1Y performance, prev close, open, bid, ask, day range, 52-week range, volume, avg volume, market cap, P/E, EPS, beta, analyst rating, and notes. Seven are locked as essential (symbol, name, price, change, % change, quantity, cost basis) and can't be hidden.
+- **Analyst ratings** — Strong Buy → Strong Sell consensus from FinnHub with a Yahoo fallback, color-tinted by score. Click for a popover with the 1–5 score on a green-to-red scale and a stacked breakdown of analyst counts.
+- **Multiple portfolios** — unlimited named portfolios with their own positions, notes, and undo history. Switching keeps loaded quotes in memory (keyed by symbol), so flipping between portfolios doesn't force a reload. The selector bar is hidden by default to save vertical space; enable it in Settings (auto-shown if you already have more than one).
+- **Inline editing** — quantity, cost basis, date, and notes edit directly in the table or card.
+- **Smart lot merging** — same-side lots average by share-weighted cost basis; an opposite-side lot is treated as a partial or full close, where the surviving side keeps its basis instead of blending a closing price into a meaningless average. Manual adds and CSV imports share one routine so they can't drift.
+- **Short selling** — negative quantities track shorts with correct P&L (gains when price falls) and carry market value as a negative in the summary.
+- **Undo / redo** — `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) across every portfolio change, 50 levels deep, with toolbar buttons that enable and disable as the stacks change.
+- **Price alerts** — per-symbol above/below thresholds with a 🔔 marker, row pulse, sound, and browser notification on cross. *Alerts are global, shared across all portfolios.*
+- **Allocation donut** — SVG chart with a 24-color palette tuned for dark backgrounds. Live totals in the center, hover/tap highlighting between slices and legend, click a legend row to jump to that position. Positions under 1.5% group into an "Other" slice on larger portfolios.
+- **Adaptive price precision** — decimals scale to magnitude (2 → 4 → 6 → 8), so SHIB shows `0.00002341` instead of `$0.00`. Dollar aggregates stay at 2.
+- **Export CSV** — respects your current sort; re-imports cleanly into the app.
+- **Export / import settings** — API keys, column layout, alerts, and preferences as a JSON file.
+- **Share via URL** — portfolio encoded in the URL hash (up to 99 positions), gated behind a confirmation prompt on the recipient's side.
+- **Estimated bid/ask** — when Alpaca isn't available, derived from last trade with a price-appropriate spread, marked `~` and dimmed.
 
-### Mobile Responsive
-- **Card view** — on screens ≤768px, the data table is replaced with a tap-to-expand card layout. Each card shows symbol, name, price, change, shares, and cost at a glance. Tapping a card expands it to reveal all 30+ data fields, inline editing for quantity/cost/date/notes/alerts, and a delete button. Cards alternate background bands (striped by visual order) with a strong divider so individual positions stay easy to separate.
-- **Sortable cards** — a sort dropdown above the cards lets you sort by any field, with an ascending/descending toggle button.
-- **Drag-to-reorder cards** — long-press the ☰ handle on any card to drag it to a new position. The handle hides automatically when sorting is active.
-- **Pull-to-refresh** — pull down on the card list to trigger a data refresh.
-- **No iOS zoom** — all inputs use ≥16px font size to prevent Safari's auto-zoom on focus.
-- **Safe areas** — padding adapts to notched devices (iPhone X+) via `env(safe-area-inset-*)`.
-- **Toolbar** — stacks into a 2-column grid with descriptive placeholders; action buttons wrap responsively. The **+ Add** button becomes a full-width solid-green CTA, and a successful add dismisses the on-screen keyboard instead of re-focusing the ticker field (the desktop behavior, kept for rapid multi-entry).
-- **"Ready to add" nudge** — once ticker, shares, and cost are filled in but not yet confirmed, the + Add button gently pulses (on all screen sizes) to encourage the confirming tap. Static highlight under `prefers-reduced-motion`.
-- **Full-screen import** — import modal fills the viewport on mobile for easier CSV paste and file drop.
-- **Extra-small breakpoint** at 380px for iPhone SE.
+</details>
 
----
+<details>
+<summary><b>CSV import</b></summary>
 
-## Data Sources
+<br/>
 
-| Source | Key required | Rate limit | What it provides |
-|--------|-------------|-----------|-----------------|
-| Yahoo Finance | No | Via CORS proxies | Quotes (v7 batch → v8 chart → v6 fallback), quoteSummary fundamentals, after-hours/pre-market, historical performance (YTD/6M/1Y) |
-| FinnHub | Free key (required for WS) | 60 req/min REST + WebSocket | Real-time WebSocket streaming (stocks only), REST quotes, profiles, P/E, EPS, beta, dividends, earnings dates, 52-week performance, analyst recommendations |
-| Alpaca Markets | Free key | 200 req/min | Real-time IEX snapshots, real bid/ask, avg volume, 52-week range from historical bars |
-| Financial Modeling Prep | Free key | 250 req/day | Quotes with after-hours data, fundamentals |
-| Stooq | No | Generous (CSV mirror) | Keyless backup for US stocks (`AAPL` → `aapl.us`) and commodity futures (`GC=F` → `gc.f`). Single batched CSV call covers the whole portfolio, ~15 min delayed. Tries direct CORS first; falls through to the proxy fleet if blocked. Critical for the no-key path — gives stocks a redundant source that doesn't share Yahoo's proxy fragility. |
-| CoinGecko | No | ~30 req/min | Crypto 24h high/low, market cap, volume; 1-year chart for 52-week range and YTD/6M/1Y performance |
-| Coinbase Exchange | No | 10 req/s | Real-time crypto price/bid/ask overlay — patched on top of CoinGecko on every refresh tick so BTC/ETH actually move on a 2–5 s interval instead of waiting for CoinGecko's free-tier 30–60 s server-side update cycle. Per-symbol overlay for up to 10 portfolio cryptos; larger portfolios switch to one batched CryptoCompare call per tick |
-| CryptoCompare | No | ~100k req/mo | Batched crypto price overlay for portfolios above 10 coins, and automatic fallback when the Coinbase circuit breaker trips (3 consecutive all-fails → 30 s cooldown). Keeps crypto prices ticking even during a Coinbase Exchange outage. Direct CORS (wildcard origin), one batched `pricemulti` call, no auth — uses bare tickers, so the `-USD` suffix is simply stripped. (Replaced the former CoinCap v2 overlay, whose free API host was decommissioned.) |
+Auto-detects exports from **Robinhood · E\*Trade · Fidelity · Charles Schwab · Webull · Vanguard**, and accepts a bare `Symbol, Shares, Cost, Date` with no headers.
 
-### API Call Strategy
+- **Header auto-detection** maps Symbol, Shares/Quantity, Cost Basis (per-share *or* total, derived per share when only a total is present), Purchase Date, Last Price, and Type/Side. Candidate names are matched most-specific-first, so `Total Cost Basis` wins over a vaguer column regardless of column order.
+- **Drag-and-drop or paste**, with a live preview and column-mapping diagnostics so you can see exactly which column became which field before committing.
+- **Short detection** from negative quantities or `Short` / `Sell` / `Sell Short` in a type column.
+- **Quote-aware parsing** handles quoted fields containing commas, escaped quotes, and embedded newlines.
+- **Price seeding** — imported last prices display immediately, before any API responds.
 
-**Large portfolios (50+ positions)** — the primary price fetch is batched (one call each for Yahoo v7, Stooq, CoinGecko, Alpaca, FMP), so prices and day P&L scale fine regardless of size. The expensive part is the *per-symbol* deferred enrichment (Yahoo fundamentals + historical performance have no batch endpoint), so above ~25 positions the app only enriches the rows **currently on screen** and fetches the rest as they scroll into view — off-screen rows still show live price and day P&L from the batch, just not P/E, 52-week, YTD/6M/1Y, etc. until visible. Heavy refreshes are also **spaced adaptively** (at least ~⌈stocks ÷ 15⌉ seconds apart, never below your chosen interval) so a fan-out that can't finish within a 2–3 s tick doesn't stack proxy load; crypto and commodities keep ticking on your interval in between. The largest 50 stock positions stream over the WebSocket; the kept quote caches are pruned to symbols that still exist in some portfolio, and only price fields are persisted.
+</details>
 
-**Proxy efficiency** — Yahoo Finance requests go through CORS proxies. The code uses a single rotating proxy list (`lastWorkingProxy` cache) with HTML-page, rate-limit-string, and proxy-error-JSON detection to skip bad responses. Proxy-dependent tasks (fundamentals, performance history) run sequentially to avoid saturating the shared proxy pool, while direct-CORS tasks (Alpaca, CoinGecko) run in parallel:
-- Performance history (YTD/6M/1Y): processed one symbol at a time with configurable gaps
-- Commodity retry: staggered in the main pass; deferred background retry with overlap prevention via `AbortController`
-- FinnHub free quotes: 200 ms between symbols, stops on HTTP 429; the public demo token is dead upstream, so its first 401 latches the whole path off for the rest of the session
+<details>
+<summary><b>Interface</b></summary>
 
-**Yahoo crumb** — fetched once and cached for 30 minutes (crumbs expire ~30 min). Automatically refreshed on expiry rather than failing silently with stale auth. It's also prewarmed in the background at startup (when the portfolio holds stocks or commodities) so the first quote batch doesn't pay a serial crumb round-trip on the critical path, and concurrent callers are de-duplicated onto a single in-flight fetch.
+<br/>
 
-**Yahoo v7 batch** — tried first for all symbols in one proxy request. If it fails, a 3-minute cooldown prevents permanently falling back to the slower per-symbol v8 path. After the cooldown, v7 is retried automatically.
+- **Sort any column** — change, P&L, and performance columns lead with the *best* value first, so one click on **% Chg** puts the day's biggest gainer on top; because those are live-price columns the ranking then re-sorts itself as prices move. Sort persists across sessions.
+- **Sticky header row** stays visible as you scroll down; the **symbol column is frozen** to the left edge as you scroll the wide table sideways.
+- **Persistent horizontal scrollbar** pinned to the bottom of the viewport, so you can scroll the table sideways from anywhere on the page.
+- **Drag-to-reorder** rows and columns; column layout and visibility persist per browser.
+- **Zebra striping** with a strengthened divider, so a single row stays traceable across a wide table without adding row height.
+- **Keyboard shortcuts** — `Tab` through toolbar inputs, `Enter` to add, `Ctrl+Z`/`Ctrl+Y` undo/redo, `?` for help, `Esc` to close overlays.
+- **Dark terminal theme** with `color-scheme: dark` at the root, so native date pickers and scrollbars match.
 
-**`fundamentalsCache` skip** — `fillFundamentals` skips symbols whose FinnHub fundamentals cache already contains P/E, beta, and market cap, avoiding redundant quoteSummary proxy calls. Keyless quoteSummary attempts are additionally capped at two failures per symbol per session — Yahoo gates the endpoint hard without consent cookies, so endless retries only burned the shared proxy budget.
+</details>
 
-**FinnHub fundamentals** — fetched once per symbol per session (profile + metrics + earnings + dividend + recommendation) and cached in `fundamentalsCache`. Per-refresh calls are only the lightweight `/quote` endpoint.
+<details>
+<summary><b>Accessibility</b></summary>
 
-**Fast new-ticker fetch** — when a position is added, `fetchOneSymbolNow` races several independent paths in parallel and applies whichever resolves first with a valid price: FinnHub `/quote` and Alpaca snapshot (direct CORS, ~200–700 ms when keyed), Stooq's CSV (direct CORS, keyless — covers US stocks and commodity futures), a Coinbase PAXG lookup for real-time gold, and Yahoo v8 chart (proxied, ~1–3 s; covers tickers the others miss). The new row appears in the table the same tick it's added — `bumpPortfolioVersion()` runs synchronously in `savePortfolio` so `getSortedPortfolio`'s cache invalidates immediately, ahead of the 250 ms localStorage-write debounce. Right after the price lands, a background fundamentals warmer fires the same 5 parallel FinnHub endpoints that `refreshAll` would eventually run — minus the inter-batch delays — so PE / EPS / beta / market cap / analyst rating arrive in ~700 ms–1.5 s instead of waiting for the next refresh cycle. Guarded by `_fundamentalsWarmInFlight` and an early-bail check on `fetchedFundamentals` so it can never double-fetch with the refresh path.
+<br/>
 
-**CoinGecko + Coinbase overlay** — CoinGecko's free `/coins/markets` payload is updated server-side only every 30–60 s, so polling it more often returns the same data. We layer Coinbase Exchange's public ticker on top: CoinGecko provides the slow-changing 24h high/low, market cap, and volume (cached locally with a TTL that scales to portfolio size — 3 s floor for ≤ 5 cryptos, 30 s for larger portfolios), and Coinbase's real-time `/products/{sym}/ticker` endpoint patches the price, bid, and ask on every refresh tick. Past 10 portfolio cryptos the per-symbol fan-out switches to a single batched CryptoCompare call per tick — browsers cap ~6 connections per origin, so a large fan-out would serialize into several rounds anyway — with bid/ask falling back to spread estimates. Coinbase product IDs match our `BTC-USD` symbol format directly; per-symbol failures (coin not listed on Coinbase Exchange) silently leave the CoinGecko price in place. The CoinGecko TTL also subtracts a 1 s alignment buffer so the cache reliably expires before the next refresh tick fires (without it, response latency would push the cache past the tick boundary and skip every other fetch). Coinbase fetches use a 1.5 s timeout, a 1 s per-symbol cache to dedupe rapid-fire calls, and a circuit breaker that skips the overlay for 30 s after 3 consecutive all-symbol failures so a Coinbase outage can't permanently add latency to every refresh tick.
+- **Colorblind-safe P&L** — gain/loss values carry a ▲ / ▼ glyph alongside the green/red tint in the desktop table cells, the summary bar, and mobile card detail rows, so direction survives without color perception. *(Not yet applied to the mobile card's headline price/change line or inline after-hours spans — see [Known gaps](#known-gaps).)*
+- **Screen-reader hooks** — status bar, summary bar, and live indicator are `aria-live="polite"`; the table carries an `aria-label`; every icon-only toolbar button has an explicit `aria-label`.
+- **Keyboard focus ring** — a high-contrast `:focus-visible` outline, visible for keyboard navigation and suppressed for mouse clicks.
+- **Reduced motion** — flash animations, the donut sweep-in, and the "ready to add" pulse all fall back to static styling under `prefers-reduced-motion`.
 
-**Crypto + commodities fast tick** — at aggressive refresh rates (2–5 s) on portfolios with many stocks, the heavy `refreshAll` fan-out (Yahoo via proxy, FinnHub `/quote` batches, Alpaca, FMP) can take 2–4 s. Without help, that means a 2 s setting effectively becomes the slowest source's pace and BTC/ETH/gold/oil stall. The auto-refresh tick checks `refreshInProgress` — if a heavy refresh is mid-flight on a tick boundary, it fires lightweight asset-class-only updates (`refreshCryptoOnly` via Coinbase, `refreshCommoditiesOnly` via Stooq's batched CSV) instead of stacking another full refresh. Crypto and commodities then keep ticking on the user's chosen interval while stocks update at the heavy refresh's natural pace. Off-hours (when stock APIs are paused), the same Stooq path replaces the previous slow per-symbol Yahoo proxy loop, so gold/oil now refresh every interval instead of every 60 s. `/coins/markets` is used for prices + 24h data; `/coins/{id}/market_chart?days=365` is used once per crypto symbol for 52-week range and performance metrics (with 1.5 s between requests).
+</details>
 
-**Real-time gold via PAXG** — Yahoo's free futures feed (and Stooq's free CSV) are both 10–15 min delayed at-source for commodity futures. Free real-time futures data simply isn't available without a paid market-data subscription. As a workaround for gold specifically, every refresh path additionally fetches `PAXG-USD` from Coinbase Exchange — PAX Gold is a tokenized claim on 1 troy ounce of LBMA-certified gold, trades 24/7 against USD, and tracks gold spot within a small premium (typically <1%). The overlay reads Coinbase's `/stats` endpoint, so beyond the live price it also carries the 24-hour open (used as a previous close) and the 24h high/low — which means gold shows a real day change and range even off-hours and on weekends, when Yahoo (the usual source of a futures previous close) isn't queried at all. These only backfill when a fresher Yahoo/Stooq previous close is absent, so the weekday futures day-change is preserved. The PAXG price overlays whatever Stooq/Yahoo returned for `GC=F` so the gold row ticks in real time alongside crypto. Other commodities (oil, silver, copper, etc.) don't have an equivalent token with a clean spot peg + Coinbase listing, so they remain on the delayed feed; the row still updates every interval, just from delayed data. The PAXG overlay shares the Coinbase circuit breaker — if Coinbase Exchange goes down, gold falls back to the Stooq/Yahoo delayed price like any other commodity.
+<details>
+<summary><b>Mobile</b></summary>
 
-**Jittered deferred retry** — when every primary data source fails (typical sign of a public CORS proxy fleet hiccup), the app schedules a single retry ~8 s later, with ±2 s of randomness so concurrent users don't all retry on the exact same tick and stack a thundering herd back onto the recovering proxies. The deferred commodity retry uses the same pattern with ±400 ms jitter on its initial delay.
+<br/>
+
+- **Card view** below 768px — the table becomes tap-to-expand cards showing symbol, name, price, change, shares, and cost at a glance, expanding to all 30+ fields with inline editing and delete.
+- **Sortable** by any field via a dropdown with a direction toggle.
+- **Drag-to-reorder** via the ☰ handle (auto-hidden while a sort is active), and **pull-to-refresh** on the card list.
+- **No iOS zoom** — every input reachable on mobile is ≥16px, so Safari doesn't auto-zoom on focus.
+- **Safe areas** for notched devices via `env(safe-area-inset-*)`, plus an extra breakpoint at 380px for iPhone SE.
+- **Toolbar** collapses to a 2-column grid; **+ Add** becomes a full-width CTA that dismisses the keyboard on success rather than re-focusing the ticker field.
+
+</details>
 
 ---
 
-## Getting Started
+## Data sources
 
-1. **Download** `index.html` (or clone this repo)
-2. **Open** the file in any modern browser — desktop or mobile
-3. A **Welcome Guide** walks you through setup on first launch
-4. **Add API keys** — click **Settings** to enter free API keys (strongly recommended for full data)
-5. **Add a position** — enter a ticker, share count (negative for short), cost basis, and optional purchase date → click **+ Add**
+| Source | Key | Rate limit | Provides |
+|---|---|---|---|
+| **Yahoo Finance** | — | via CORS proxies | Quotes (v7 batch → v8 chart → v6), fundamentals, after-hours, historical performance |
+| **FinnHub** | free | 60/min + WebSocket | WebSocket streaming (stocks), quotes, profiles, P/E, EPS, beta, dividends, earnings, analyst ratings |
+| **Alpaca Markets** | free | 200/min | IEX snapshots, real bid/ask, avg volume, historical bars |
+| **Financial Modeling Prep** | free | 250/day | Quotes with after-hours, fundamentals |
+| **Stooq** | — | generous | Keyless backup for US stocks and commodity futures. One batched CSV covers the whole portfolio, ~15 min delayed. Direct CORS first, proxy fallback. |
+| **CoinGecko** | — | ~30/min | Crypto 24h high/low, market cap, volume, 1-year chart for 52-week range and performance |
+| **Coinbase Exchange** | — | 10/s | Real-time crypto price/bid/ask overlay; PAXG for real-time gold |
+| **CryptoCompare** | — | ~100k/mo | Batched crypto overlay above 10 coins, and automatic fallback when the Coinbase breaker trips |
 
-No install, no `npm`, no server required.
+<details>
+<summary>Implementation notes — caching, cooldowns, and call budgets</summary>
 
-> **Tip:** Re-open the Welcome Guide any time from the **Show Welcome Guide** button inside the Settings panel (it flips to **Close Welcome Guide** while the guide is open). The guide closes from its own **Close Welcome Guide** button.
+<br/>
 
-### Deploying with GitHub Pages
+- **Yahoo crumb** — fetched once, cached 30 min, prewarmed at startup so the first quote batch doesn't pay a serial round-trip. Concurrent callers de-duplicate onto one in-flight request.
+- **Yahoo v7 batch** — tried first for all symbols in one request. On failure a 3-minute cooldown prevents permanently degrading to the slower per-symbol v8 path.
+- **Keyless `quoteSummary`** is capped at two failures per symbol per session — Yahoo gates it hard without consent cookies, so endless retries only burn shared proxy budget.
+- **FinnHub fundamentals** — profile, metrics, earnings, dividends, and recommendations fetched once per symbol per session and cached. Per-refresh calls hit only the lightweight `/quote`.
+- **CoinGecko TTL** scales with portfolio size — a 3 s floor for ≤5 coins, 30 s for larger — minus a 1 s alignment buffer so the cache expires *before* the next tick rather than skipping every other fetch.
+- **Fast new-ticker fetch** — adding a position races FinnHub, Alpaca, Stooq, a Coinbase PAXG lookup for gold, and proxied Yahoo in parallel, applying whichever returns a valid price first. A background warmer then fires the five FinnHub fundamentals endpoints without the inter-batch delays, so P/E and analyst rating land in ~1 s rather than at the next refresh.
+- **Abort propagation** — switching portfolios or clearing positions aborts the in-flight refresh, and the signal is threaded through the proxy layer and per-symbol enrichment so superseded calls are genuinely cancelled, releasing the shared proxy pool immediately.
 
-1. Fork or push this repo to GitHub
-2. Go to **Settings → Pages**
-3. Set Source to `main` branch, folder `/` (root)
-4. Visit `https://<your-username>.github.io/<repo-name>/`
-
-The app runs entirely client-side — no backend needed.
-
----
-
-## Importing Positions
-
-1. Export a CSV from your brokerage
-2. Click **Import** in the toolbar
-3. Drag-and-drop the file or paste the CSV text — positions preview automatically
-4. Click **Import Positions**
-
-> **Note:** Large imports (20+ positions) may take a moment to fully load as live data is fetched sequentially through CORS proxies to avoid rate limiting. Prices and fundamentals will fill in progressively.
-
-Simple format (no headers required):
-```csv
-Symbol,Shares,Cost,Date
-AAPL,100,150.00,2024-06-15
-MSFT,50,380.50,2024-03-20
-TSLA,-25,240.00,2024-08-01
-```
-
-Negative shares = short position.
+</details>
 
 ---
 
-## Data Storage
+## Data storage
 
-Everything lives in your browser's `localStorage` — nothing is sent to any server other than the financial APIs listed above. Writes to `localStorage` are debounced on a trailing 250 ms timer (and flushed on `beforeunload`), so rapid keystrokes in the cost/share/notes fields don't block the main thread, and a full-quota write only happens once per burst.
+Everything lives in `localStorage`. Nothing is transmitted anywhere except the financial APIs above. Writes are debounced on a trailing 250 ms timer and flushed on `beforeunload`, `pagehide`, and `visibilitychange` — the last two matter because iOS routinely skips `beforeunload` when you switch apps.
 
 | Key | Contents |
-|-----|----------|
-| `stonks_portfolios` | All named portfolios: `{ name: { portfolio: [...], notes: {...} } }` |
-| `stonks_active_portfolio` | Currently selected portfolio name |
-| `stonks_portfolio` | Active portfolio's positions array (mirrored for backward compat) |
-| `stonks_notes` | Active portfolio's per-symbol notes (mirrored for backward compat) |
-| `stonks_quotes` | Last-known quotes for the active portfolio's symbols, so the table paints instantly on reload instead of showing "loading…" until the first refresh. Pruned to current holdings; rewritten on each refresh and flushed on `beforeunload`. |
-| `stonks_hidden_columns` | Array of column keys hidden via the Columns picker |
-| `stonks_column_order` | User-defined column order (array of column keys); empty = default order |
-| `stonks_alloc_visible` | Allocation pie chart show/hide state |
-| `stonks_alerts` | Per-symbol price alert thresholds: `{ symbol: { above, below } }` |
-| `stonks_finnhub_key` | FinnHub API key |
-| `stonks_alpaca_key_id` | Alpaca Key ID |
-| `stonks_alpaca_secret` | Alpaca Secret Key |
-| `stonks_fmp_key` | FMP API key |
-| `stonks_refresh_interval` | Auto-refresh interval |
-| `stonks_auto_refresh` | Auto-refresh on/off toggle |
-| `stonks_welcome_dismissed` | Welcome guide dismissed state |
+|---|---|
+| `stonks_portfolios` | All named portfolios: `{ name: { portfolio, notes } }` |
+| `stonks_active_portfolio` | Currently selected portfolio |
+| `stonks_portfolio` · `stonks_notes` | Active portfolio's positions and notes (mirrored for backward compatibility) |
+| `stonks_quotes` | Last-known quotes for instant paint on reload; pruned to current holdings |
+| `stonks_alerts` | Price alert thresholds, `{ symbol: { above, below } }` — global across portfolios |
+| `stonks_hidden_columns` · `stonks_column_order` | Column visibility and order |
+| `stonks_sort` | Active sort column and direction |
+| `stonks_alloc_visible` | Allocation chart show/hide |
+| `stonks_show_portfolio_bar` | Portfolio selector bar visibility |
+| `stonks_finnhub_key` · `stonks_alpaca_key_id` · `stonks_alpaca_secret` · `stonks_fmp_key` | API keys |
+| `stonks_refresh_interval` · `stonks_auto_refresh` | Refresh preferences |
+| `stonks_welcome_dismissed` | Welcome guide state |
+| `stonks_debug` | Verbose logging flag (see below) |
 
-Clearing browser data resets everything.
+Corrupt entries are detected on load: the bad key is removed and the app boots with an empty fallback rather than crashing. Clearing browser data resets everything.
 
 ---
 
-## Browser Compatibility
+## Known gaps
 
-Chrome, Firefox, Edge, Safari (any modern version supporting ES2020+). Responsive on iOS and Android. No IE support.
+Being honest about what isn't done, and why:
+
+- **Commodities other than gold are 10–15 minutes delayed.** Real-time futures data requires a paid market-data subscription. Gold gets around this via PAXG; oil, silver, and copper have no equivalent token with a clean spot peg and a Coinbase listing.
+- **Yahoo depends on public CORS proxies**, which are the least reliable link in the chain. The keyless direct-CORS sources exist specifically to limit the blast radius, but a total proxy-fleet outage still degrades fundamentals and historical performance.
+- **Price alerts are global, not per-portfolio.** They're keyed by symbol alone, so the same threshold applies everywhere.
+- **Colorblind ▲/▼ glyphs don't reach the mobile card's headline price/change line** — only the detail rows, table cells, and summary bar.
+- **No automated test suite.** Verification is manual against a local static server. For a single file with no build step this has been a reasonable trade so far; it would not scale to a second contributor.
 
 ---
 
-## Debugging
+## Compatibility & debugging
 
-Per-symbol and per-proxy fetch warnings are silenced by default — a single refresh races multiple proxies × symbols and most non-winners produce expected errors that would otherwise flood the console. To turn the verbose log stream back on (proxy race losses, per-symbol Yahoo / FinnHub / Alpaca / CoinGecko fallback failures, abort traces):
+**Browsers** — Chrome/Edge 103+, Firefox 100+, Safari 16+ (mid-2022 and newer). The binding constraint is `AbortSignal.timeout`, used on every network call to prevent a hung fetch from freezing the refresh loop. `structuredClone` (Safari 15.4+) and `Promise.any` are also required. `AbortSignal.any` is feature-detected and degrades gracefully on older browsers. No IE support.
+
+**Debugging** — per-symbol and per-proxy fetch warnings are silenced by default, since one refresh races several proxies × symbols and most non-winners produce expected errors. To turn the verbose stream back on:
 
 ```js
 localStorage.setItem('stonks_debug', '1');
 location.reload();
 ```
 
-Source-level events (auth failures, rate limit hits, WebSocket connect/close, localStorage quota errors, top-level refresh exceptions) always log regardless of this flag.
+Source-level events — auth failures, rate limits, WebSocket connect/close, quota errors, and top-level refresh exceptions — always log regardless.
 
 ---
 
 ## Security
 
-The app ships with a strict `Content-Security-Policy` meta tag that disallows remote scripts, `eval`, object/embed content, and arbitrary framing. `connect-src` is limited to `https:` / `wss:` so data still flows to the financial APIs and CORS proxies, but nothing else. A `referrer` policy of `no-referrer` is also set, so navigating away from the app does not leak the URL (which for a shared portfolio could otherwise expose the positions encoded in the hash).
+<details>
+<summary>Threat model and mitigations</summary>
 
-All user-visible strings that originate outside the app are escaped before being written to the DOM:
-- Imported CSV fields (symbol, date, header preview, raw header line, column labels) are escaped in the import preview.
-- Column picker entries do not use inline `onclick`/`onchange` with interpolated keys — the change handler is attached via `addEventListener` and reads the key from a `data-` attribute.
-- External links open with `target="_blank" rel="noopener noreferrer"`.
+<br/>
 
-API and proxy responses are treated as untrusted input. Quote payloads can only populate symbols the app actually requested — a compromised CORS proxy returning a crafted symbol such as `__proto__` is discarded before it can become an object key (which would otherwise pollute `Object.prototype` app-wide). API keys (FinnHub, Alpaca, FMP) are only ever sent directly to their own services, never through the CORS proxies.
+The interesting property of this app is that it has no backend, so the attack surface is entirely client-side plus the untrusted CORS proxies in front of Yahoo.
 
-Portfolio imports from shared URLs are parsed with a symbol whitelist (`[A-Z0-9.\-=]`), a length cap of 10 characters, numeric coercion for shares and cost, and a strict `YYYY-MM-DD` date validation (the date field flows into an HTML `value=""` attribute, so an unvalidated value could otherwise break out of the attribute), and are always gated behind a confirmation dialog. Positions that don't pass validation are dropped before any state is replaced. As defense-in-depth, date values are also `escAttr`-escaped at every render site regardless of ingestion path.
+**Content Security Policy** — a meta-tag CSP sets `default-src 'self'`, blocks remote scripts, `eval`, and `object`/`embed` content, restricts `connect-src` to `https:`/`wss:`, and sets `frame-src 'none'` so the app cannot load third-party frames. Note that this does *not* prevent the app from being framed by someone else — that requires a `frame-ancestors` directive, which browsers ignore in a meta tag and which would need an HTTP response header. `referrer` is `no-referrer`, so a shared-portfolio URL (positions in the hash) isn't leaked on navigation.
 
-Corrupt `localStorage` entries are detected on load: the bad key is removed and the app boots with an empty fallback instead of crashing.
+**Untrusted API and proxy responses** — quote payloads can only populate symbols the app requested, so a crafted key such as `__proto__` from a compromised proxy is discarded before it can pollute `Object.prototype`. WebSocket trade messages use an explicit `hasOwnProperty` check for the same reason. API keys go only to their own origins, never through a proxy.
+
+**Untrusted user input** — imported CSV fields are escaped in the preview. The column picker attaches handlers via `addEventListener` and reads keys from `data-` attributes rather than interpolating them into inline `onclick`. External links use `rel="noopener noreferrer"`.
+
+**Shared-URL imports** — parsed with a symbol whitelist (`[A-Z0-9.\-=]`), a 10-character cap, numeric coercion, and strict `YYYY-MM-DD` date validation, then gated behind a confirmation dialog. The date matters specifically because it flows into an HTML `value=""` attribute; it's validated on ingestion *and* escaped at every render site.
+
+</details>
 
 ---
 
 ## Author
 
-Made by [Grant](https://github.com/gdy)
-
-## License
-
-MIT
+Built by [Grant](https://github.com/gdy) · MIT licensed

@@ -1501,7 +1501,7 @@
         <div class="welcome-tips-body"><div class="welcome-tips-body-inner">
           <div class="step">
             <span class="step-num">&bull;</span>
-            <span><strong>Multiple portfolios</strong> &mdash; Turn on <strong>Show multiple-portfolio selector bar</strong> in <strong>Settings</strong> to reveal the portfolio bar above the toolbar, where you can create, switch, rename, and delete named portfolios (e.g. <em>Long-term</em>, <em>Trading</em>, <em>Crypto</em>). Each has its own positions, notes, and price alerts.</span>
+            <span><strong>Multiple portfolios</strong> &mdash; Turn on <strong>Show multiple-portfolio selector bar</strong> in <strong>Settings</strong> to reveal the portfolio bar above the toolbar, where you can create, switch, rename, and delete named portfolios (e.g. <em>Long-term</em>, <em>Trading</em>, <em>Crypto</em>). Each has its own positions and notes. Price alerts are keyed by symbol and shared across every portfolio.</span>
           </div>
           <div class="step">
             <span class="step-num">&bull;</span>
@@ -8592,9 +8592,22 @@ async function refreshAlwaysOnOnly() {
     // Same light-tick render policy as refreshCryptoOnly — matters most here:
     // on weekends this path is the only thing updating the table.
     renderLightTick();
+    // Dedupe across the two label groups before joining. Either label can
+    // already be a compound string — crypto returns "CoinGecko + Coinbase" while
+    // the commodity path returns a bare "Coinbase" when Stooq came back empty and
+    // only the PAXG overlay landed — so a naive join rendered
+    // "Data via CoinGecko + Coinbase + Coinbase (off-hours)". Split on the same
+    // separator we join with, then keep first occurrences. _refreshAll builds its
+    // attribution through a Set for exactly this reason; this was the one path
+    // still concatenating raw labels.
     const sources = [];
-    if (cryptoSourceLabel) sources.push(cryptoSourceLabel);
-    if (commoditySourceLabel) sources.push(commoditySourceLabel);
+    for (const label of [cryptoSourceLabel, commoditySourceLabel]) {
+      if (!label) continue;
+      for (const part of label.split(' + ')) {
+        const name = part.trim();
+        if (name && !sources.includes(name)) sources.push(name);
+      }
+    }
     setStatus('Data via ' + sources.join(' + ') + ' (off-hours)', 'live');
     updateWsIndicator();
     document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
