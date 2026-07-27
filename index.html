@@ -693,7 +693,11 @@
   /* ==================== ALLOCATION CHART ==================== */
   .allocation-wrap {
     background: #0f0f1f; border-bottom: 1px solid #222; padding: 14px 16px;
-    display: flex; align-items: flex-start; justify-content: center; gap: 22px;
+    /* stretch, not flex-start: the three panels hold different amounts of
+       content (a 200px donut vs. a 16px stacked bar), so top-aligning them left
+       a ragged band of 239 / 188 / 119px. Equal-height cards read as one
+       deliberate row instead of three loose stacks. */
+    display: flex; align-items: stretch; justify-content: center; gap: 18px;
     flex-wrap: wrap; position: relative;
   }
   /* Three side-by-side panels. Each grows to share the row on wide screens but
@@ -702,12 +706,17 @@
   .alloc-panel {
     display: flex; flex-direction: column; gap: 8px;
     flex: 1 1 300px; min-width: 250px; max-width: 400px;
+    background: #12122a; border: 1px solid #1e1e38; border-radius: 6px;
+    padding: 10px 12px;
   }
   .alloc-panel-donut { flex: 1 1 470px; max-width: 560px; }
   .alloc-panel-title {
     font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
     color: #6a6a85; padding-left: 2px; white-space: nowrap;
   }
+  /* Bodies fill the equalised card so short panels can pin a footer to the
+     bottom edge rather than leaving a gap under the last row. */
+  .alloc-panel-body, .alloc-stack { flex: 1; min-height: 0; }
   .alloc-panel-donut .alloc-panel-body {
     display: flex; align-items: center; justify-content: center; gap: 22px;
   }
@@ -739,10 +748,19 @@
   .ac-swatch { width: 10px; height: 10px; border-radius: 2px; }
   .ac-val { color: #8888a0; text-align: right; font-variant-numeric: tabular-nums; }
   .ac-pct { text-align: right; font-variant-numeric: tabular-nums; }
+  /* margin-top:auto pins the footer to the bottom of the equalised card, so the
+     slack from being the shortest panel lands in one deliberate gap rather than
+     trailing under the last row. */
+  .ac-foot { margin-top: auto; padding-top: 8px; }
   .ac-stat {
     display: flex; justify-content: space-between; font-size: 11px; color: #8888a0;
-    border-top: 1px solid #22223a; margin-top: 5px; padding: 7px 4px 0;
+    border-top: 1px solid #22223a; padding: 7px 4px 0;
   }
+  .ac-extreme {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 8px;
+    align-items: center; font-size: 11px; color: #8888a0; padding: 3px 4px 0;
+  }
+  .ac-extreme .ac-ex-sym { color: #d0d0e0; font-weight: bold; text-align: right; }
   /* Donut slices: stroked circles. Hover/tap thickens the slice in place. */
   .alloc-seg { transition: stroke-width 0.15s ease; cursor: pointer; }
   .alloc-seg.hot { stroke-width: 32; }
@@ -1565,7 +1583,7 @@
           </div>
           <div class="step">
             <span class="step-num">&bull;</span>
-            <span><strong>Allocation chart</strong> &mdash; Click <strong>Show Chart</strong> in the summary bar (next to Positions) to toggle a live pie chart showing percent allocation by symbol.</span>
+            <span><strong>Analytics charts</strong> &mdash; Click <strong>Show Charts</strong> in the summary bar (next to Positions) to toggle a live panel with allocation by position, the day's biggest movers, and exposure by asset class.</span>
           </div>
           <div class="step">
             <span class="step-num">&bull;</span>
@@ -1619,7 +1637,7 @@
     <span class="summary-label">Positions:</span>
     <span class="summary-value" id="total-positions">0</span>
   </div>
-  <button class="alloc-toggle" id="alloc-toggle" onclick="toggleAllocationChart()" style="display:none;" aria-label="Toggle allocation pie chart">Show Chart</button>
+  <button class="alloc-toggle" id="alloc-toggle" onclick="toggleAllocationChart()" style="display:none;" aria-label="Toggle portfolio analytics charts">Show Charts</button>
 </div>
 
 <div class="slide-wrap" id="allocation-slide">
@@ -7443,7 +7461,7 @@ function toggleAllocationChart() {
 // loser doesn't flatten every gainer into invisibility. Capped at MOVERS_MAX
 // rows so a 50-position portfolio doesn't turn the panel into a scroll pit —
 // the extremes are what matter here, and the full set is in the table.
-const MOVERS_MAX = 9;
+const MOVERS_MAX = 11;
 function _renderMovers(movers) {
   const el = document.getElementById('alloc-movers');
   if (!el) return;
@@ -7486,7 +7504,7 @@ const ALLOC_CLASS_DEFS = [
   { key: 'crypto',    label: 'Crypto',      color: '#b86fff' },
   { key: 'commodity', label: 'Commodities', color: '#ffc14a' },
 ];
-function _renderAssetClasses(items, total, advancing, declining) {
+function _renderAssetClasses(items, total, advancing, declining, extremes) {
   const el = document.getElementById('alloc-classes');
   if (!el) return;
   if (!total || items.length === 0) { el.innerHTML = ''; return; }
@@ -7510,9 +7528,22 @@ function _renderAssetClasses(items, total, advancing, declining) {
       + `<span class="ac-pct">${pct.toFixed(1)}%</span></div>`;
   }).join('');
   const plural = n => n === 1 ? '' : 's';
+  // Best / worst by total P&L % — the one cut of the data that isn't already in
+  // the summary bar or either other panel (which both key off the DAY's move).
+  const extremeRow = (label, e) => {
+    if (!e) return '';
+    const cls = e.pct >= 0 ? 'pos' : 'neg';
+    const val = (e.pct >= 0 ? '+' : '') + e.pct.toFixed(1) + '%';
+    return `<div class="ac-extreme"><span>${label}</span>`
+      + `<span class="ac-ex-sym">${esc(e.symbol)}</span>`
+      + `<span class="${cls}">${val}</span></div>`;
+  };
   el.innerHTML = `<div class="ac-bar">${segs}</div>${rows}`
+    + `<div class="ac-foot">`
+    + extremeRow('Best', extremes && extremes.best)
+    + extremeRow('Worst', extremes && extremes.worst)
     + `<div class="ac-stat"><span class="pos">${advancing} position${plural(advancing)} up</span>`
-    + `<span class="neg">${declining} down</span></div>`;
+    + `<span class="neg">${declining} down</span></div></div>`;
 }
 
 function renderAllocationChart() {
@@ -7529,7 +7560,7 @@ function renderAllocationChart() {
   // Fast path: if chart is hidden, skip the items computation entirely.
   // On high-frequency WS trades this avoids building arrays for no visible effect.
   if (!allocationVisible) {
-    if (toggleBtn) toggleBtn.textContent = 'Show Chart';
+    if (toggleBtn) toggleBtn.textContent = 'Show Charts';
     if (slide) slide.classList.remove('show'); // animate closed
     _lastAllocSig = '';
     _lastAllocCheap = '';
@@ -7565,6 +7596,7 @@ function renderAllocationChart() {
   const movers = [];              // per-position day P&L, for the movers panel
   let total = 0, dayPL = 0, hasPL = false;
   let advancing = 0, declining = 0;
+  let best = null, worst = null;  // by total P&L %, for the asset-class footer
   for (const pos of portfolio) {
     const q = quoteData[pos.symbol];
     if (q && q.price != null) {
@@ -7577,15 +7609,26 @@ function renderAllocationChart() {
         movers.push({ symbol: pos.symbol, dayPL: d });
         if (d > 0) advancing++; else if (d < 0) declining++;
       }
+      // Same formula the table's P&L % column uses, so shorts get the correct
+      // sign (a short is up when price falls) instead of an inverted one.
+      if (pos.costBasis) {
+        const pct = (((q.price - pos.costBasis) * pos.shares) / (Math.abs(pos.shares) * pos.costBasis)) * 100;
+        if (isFinite(pct)) {
+          if (!best || pct > best.pct) best = { symbol: pos.symbol, pct };
+          if (!worst || pct < worst.pct) worst = { symbol: pos.symbol, pct };
+        }
+      }
     }
   }
+  // With a single priced position best and worst are the same row — show it once.
+  const extremes = (best && worst && best.symbol === worst.symbol) ? { best, worst: null } : { best, worst };
   movers.sort((a, b) => b.dayPL - a.dayPL); // biggest gainer first
   const possible = portfolio.length > 0 && total > 0;
 
   // Show/hide the toggle button based on possibility
   if (toggleBtn) {
     toggleBtn.style.display = possible ? '' : 'none';
-    toggleBtn.textContent = 'Hide Chart';
+    toggleBtn.textContent = 'Hide Charts';
   }
 
   if (!possible) {
@@ -7611,7 +7654,11 @@ function renderAllocationChart() {
     .sort((a, b) => a.symbol.localeCompare(b.symbol))
     .map(it => it.symbol + ':' + ((it.value / total) * 1000 | 0))
     .join('|') + '|T' + Math.round(total) + '|P' + (hasPL ? Math.round(dayPL) : 'x')
-    + '|M' + movers.map(m => m.symbol + ':' + Math.round(m.dayPL)).join(',');
+    + '|M' + movers.map(m => m.symbol + ':' + Math.round(m.dayPL)).join(',')
+    // Best/worst are driven by total P&L %, which can change ranking without
+    // moving any value percentage past the 0.1% rounding above.
+    + '|E' + (extremes.best ? extremes.best.symbol + extremes.best.pct.toFixed(1) : '')
+    + '/' + (extremes.worst ? extremes.worst.symbol + extremes.worst.pct.toFixed(1) : '');
   if (sig === _lastAllocSig) return;
   _lastAllocSig = sig;
 
@@ -7690,7 +7737,7 @@ function renderAllocationChart() {
   // Companion panels — same data pass, same signature gate, so they can't drift
   // out of sync with the donut or re-render independently on a WS tick.
   _renderMovers(movers);
-  _renderAssetClasses(items, total, advancing, declining);
+  _renderAssetClasses(items, total, advancing, declining, extremes);
   _initAllocInteractions();
 }
 
