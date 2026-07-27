@@ -170,7 +170,12 @@ Routing Yahoo through public proxies means an untrusted intermediary controls th
 - **Short selling** — negative quantities track shorts with correct P&L (gains when price falls) and carry market value as a negative in the summary.
 - **Undo / redo** — `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) across every portfolio change, 50 levels deep, with toolbar buttons that enable and disable as the stacks change.
 - **Price alerts** — per-symbol above/below thresholds with a 🔔 marker, row pulse, sound, and browser notification on cross. *Alerts are global, shared across all portfolios.*
-- **Allocation donut** — SVG chart with a 24-color palette tuned for dark backgrounds. Live totals in the center, hover/tap highlighting between slices and legend, click a legend row to jump to that position. Positions under 1.5% group into an "Other" slice on larger portfolios.
+- **Analytics panel** — three linked views that open together above the table:
+  - *Allocation by position* — SVG donut with a 24-color palette tuned for dark backgrounds, live totals in the center, and hover/tap highlighting shared with its legend. Positions under 1.5% group into an "Other" slice on larger portfolios.
+  - *Today's movers* — day P&L per position as bars diverging from a zero axis, picked by largest absolute move so gainers and losers both appear, then ordered best to worst.
+  - *Exposure by asset class* — stocks / crypto / commodities as a stacked bar, plus an advancing-vs-declining count for the day.
+
+  Clicking any legend or mover row jumps to that position in the table. All three render from one data pass behind a shared signature gate, so they can't drift out of sync or re-render independently on a WebSocket tick.
 - **Adaptive price precision** — decimals scale to magnitude (2 → 4 → 6 → 8), so SHIB shows `0.00002341` instead of `$0.00`. Dollar aggregates stay at 2.
 - **Export CSV** — respects your current sort; re-imports cleanly into the app.
 - **Export / import settings** — API keys, column layout, alerts, and preferences as a JSON file.
@@ -214,7 +219,7 @@ Auto-detects exports from **Robinhood · E\*Trade · Fidelity · Charles Schwab 
 
 <br/>
 
-- **Colorblind-safe P&L** — gain/loss values carry a ▲ / ▼ glyph alongside the green/red tint in the desktop table cells, the summary bar, and mobile card detail rows, so direction survives without color perception. *(Not yet applied to the mobile card's headline price/change line or inline after-hours spans — see [Known gaps](#known-gaps).)*
+- **Colorblind-safe P&L** — gain/loss values carry a ▲ / ▼ glyph alongside the green/red tint in the desktop table cells, the summary bar, the movers panel, and mobile card detail rows, so direction survives without color perception. *(Not yet applied to the mobile card's headline price/change line or inline after-hours spans — see [Known gaps](#known-gaps).)*
 - **Screen-reader hooks** — status bar, summary bar, and live indicator are `aria-live="polite"`; the table carries an `aria-label`; every icon-only toolbar button has an explicit `aria-label`.
 - **Keyboard focus ring** — a high-contrast `:focus-visible` outline, visible for keyboard navigation and suppressed for mouse clicks.
 - **Reduced motion** — flash animations, the donut sweep-in, and the "ready to add" pulse all fall back to static styling under `prefers-reduced-motion`.
