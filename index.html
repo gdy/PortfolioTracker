@@ -276,9 +276,11 @@
      pick up a duplicate arrow. */
   td.pos::before,
   .summary-value.pos::before,
+  .mv-val.pos::before,
   .mobile-detail-value.pos::before { content: "\25B2\00A0"; font-size: 0.8em; opacity: 0.75; }
   td.neg::before,
   .summary-value.neg::before,
+  .mv-val.neg::before,
   .mobile-detail-value.neg::before { content: "\25BC\00A0"; font-size: 0.8em; opacity: 0.75; }
 
   /* Focus ring for keyboard users — visible on dark theme, not shown on mouse
@@ -691,8 +693,55 @@
   /* ==================== ALLOCATION CHART ==================== */
   .allocation-wrap {
     background: #0f0f1f; border-bottom: 1px solid #222; padding: 14px 16px;
-    display: flex; align-items: center; justify-content: center; gap: 26px;
+    display: flex; align-items: flex-start; justify-content: center; gap: 22px;
     flex-wrap: wrap; position: relative;
+  }
+  /* Three side-by-side panels. Each grows to share the row on wide screens but
+     caps out, so a 4K display gets a balanced ~1300px band rather than three
+     hugely stretched charts (or one donut marooned in whitespace). */
+  .alloc-panel {
+    display: flex; flex-direction: column; gap: 8px;
+    flex: 1 1 300px; min-width: 250px; max-width: 400px;
+  }
+  .alloc-panel-donut { flex: 1 1 470px; max-width: 560px; }
+  .alloc-panel-title {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: #6a6a85; padding-left: 2px; white-space: nowrap;
+  }
+  .alloc-panel-donut .alloc-panel-body {
+    display: flex; align-items: center; justify-content: center; gap: 22px;
+  }
+  .alloc-stack { display: flex; flex-direction: column; gap: 2px; }
+  .alloc-empty { font-size: 11px; color: #66667e; padding: 10px 4px; }
+
+  /* ---- Today's movers: day P&L as bars diverging from a zero axis ---- */
+  .mv-row {
+    display: grid; grid-template-columns: 56px 1fr 76px; gap: 8px;
+    align-items: center; font-size: 11px; color: #b8b8cc;
+    padding: 2px 4px; border-radius: 3px; cursor: pointer;
+  }
+  .mv-row:hover { background: rgba(74, 158, 255, 0.10); color: #e8e8f0; }
+  .mv-sym { font-weight: bold; color: #d0d0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mv-track { position: relative; height: 13px; background: #16162c; border-radius: 2px; }
+  .mv-track::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #33334d; }
+  .mv-bar { position: absolute; top: 2px; bottom: 2px; border-radius: 2px; }
+  .mv-bar.pos { background: #00c853; }
+  .mv-bar.neg { background: #ff1744; }
+  .mv-val { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* ---- Exposure by asset class: stacked bar + rows ---- */
+  .ac-bar { display: flex; height: 16px; border-radius: 3px; overflow: hidden; background: #16162c; }
+  .ac-seg { min-width: 2px; }
+  .ac-row {
+    display: grid; grid-template-columns: 10px 1fr auto 46px; gap: 8px;
+    align-items: center; font-size: 11px; color: #b8b8cc; padding: 2px 4px;
+  }
+  .ac-swatch { width: 10px; height: 10px; border-radius: 2px; }
+  .ac-val { color: #8888a0; text-align: right; font-variant-numeric: tabular-nums; }
+  .ac-pct { text-align: right; font-variant-numeric: tabular-nums; }
+  .ac-stat {
+    display: flex; justify-content: space-between; font-size: 11px; color: #8888a0;
+    border-top: 1px solid #22223a; margin-top: 5px; padding: 7px 4px 0;
   }
   /* Donut slices: stroked circles. Hover/tap thickens the slice in place. */
   .alloc-seg { transition: stroke-width 0.15s ease; cursor: pointer; }
@@ -1007,6 +1056,9 @@
     /* Allocation chart */
     .allocation-wrap { flex-direction: column; }
     .allocation-legend { width: 100%; max-width: 100%; min-width: 0; }
+    /* Panels stack full-width on phones rather than squeezing side by side. */
+    .alloc-panel, .alloc-panel-donut { max-width: 100%; width: 100%; min-width: 0; }
+    .alloc-panel-donut .alloc-panel-body { flex-direction: column; gap: 12px; }
 
     /* Hide table, show cards */
     .table-wrap { display: none; }
@@ -1573,8 +1625,23 @@
 <div class="slide-wrap" id="allocation-slide">
   <div class="slide-inner">
     <div id="allocation-wrap" class="allocation-wrap">
-      <div id="allocation-chart"></div>
-      <div id="allocation-legend" class="allocation-legend"></div>
+      <div class="alloc-panel alloc-panel-donut">
+        <div class="alloc-panel-title">Allocation by position</div>
+        <div class="alloc-panel-body">
+          <div id="allocation-chart"></div>
+          <div id="allocation-legend" class="allocation-legend"></div>
+        </div>
+      </div>
+      <div class="alloc-panel">
+        <div class="alloc-panel-title">Today's movers</div>
+        <div id="alloc-movers" class="alloc-stack"></div>
+      </div>
+      <div class="alloc-panel">
+        <div class="alloc-panel-title">Exposure by asset class</div>
+        <div id="alloc-classes" class="alloc-stack"></div>
+      </div>
+      <!-- Tooltip stays a direct child of the wrap: it's absolutely positioned
+           against it, and the wrap is the delegation root for hover/click. -->
       <div id="alloc-tooltip"></div>
     </div>
   </div>
@@ -5326,32 +5393,43 @@ async function _refreshAll(signal) {
         }
       }
     }
-    // Build accurate source attribution from what actually provided data
+    // Build accurate source attribution from what actually provided data.
+    // Labels can be COMPOUND — cryptoResult.source is 'CoinGecko + Coinbase'
+    // whenever the real-time overlay patched a price — so they're split on the
+    // same separator used to join. Adding a compound string whole made the Set
+    // useless for dedupe: 'CoinGecko + Coinbase' and a later bare 'Coinbase'
+    // (credited for the PAXG commodity overlay) are different entries, and the
+    // status bar rendered "Data via ... + Coinbase + Coinbase".
     const sourceNames = new Set();
-    if (result) sourceNames.add(result.source.split('(')[0].trim());
+    const addSource = (label) => {
+      if (!label) return;
+      for (const part of String(label).split(' + ')) {
+        const name = part.split('(')[0].trim();
+        if (name) sourceNames.add(name);
+      }
+    };
+    if (result) addSource(result.source);
     for (const src of mergeSources) {
       if (!src) continue;
       for (const sym of symbols) {
         if (src.data[sym] && quoteData[sym]) {
-          sourceNames.add(src.source.split('(')[0].trim());
+          addSource(src.source);
           break; // only need one match to credit this source
         }
       }
     }
     // Always credit the crypto source (CoinGecko, possibly with a Coinbase
-    // real-time price overlay) if it provided data. cryptoResult.source can be
-    // 'CoinGecko' or 'CoinGecko + Coinbase' depending on whether the overlay
-    // patched at least one symbol.
+    // real-time price overlay) if it provided data.
     if (cryptoResult && symbols.some(s => cryptoResult.data[s])) {
-      sourceNames.add(cryptoResult.source || 'CoinGecko');
+      addSource(cryptoResult.source || 'CoinGecko');
     }
     // Credit Yahoo if commodity retry provided data
     if (missingCommodities.some(s => quoteData[s])) {
-      sourceNames.add('Yahoo Finance');
+      addSource('Yahoo Finance');
     }
     // Credit Coinbase if it provided a real-time gold (PAXG) overlay
     if (realtimeCommodityOverlay && Object.keys(realtimeCommodityOverlay).length > 0) {
-      sourceNames.add('Coinbase');
+      addSource('Coinbase');
     }
     setStatus('Data via ' + [...sourceNames].join(' + '), 'live');
     updateWsIndicator();
@@ -7359,6 +7437,84 @@ function toggleAllocationChart() {
   _lastAllocCheap = '';
   renderAllocationChart();
 }
+// ---- Panel 2: Today's movers ----
+// Day P&L per position as bars diverging from a centre zero axis, biggest
+// gainer first. Bars are scaled against the largest ABSOLUTE move so one big
+// loser doesn't flatten every gainer into invisibility. Capped at MOVERS_MAX
+// rows so a 50-position portfolio doesn't turn the panel into a scroll pit —
+// the extremes are what matter here, and the full set is in the table.
+const MOVERS_MAX = 9;
+function _renderMovers(movers) {
+  const el = document.getElementById('alloc-movers');
+  if (!el) return;
+  if (movers.length === 0) {
+    el.innerHTML = '<div class="alloc-empty">No day-change data yet.</div>';
+    return;
+  }
+  let maxAbs = 0;
+  for (const m of movers) maxAbs = Math.max(maxAbs, Math.abs(m.dayPL));
+  if (maxAbs <= 0) maxAbs = 1; // all flat — avoid dividing by zero
+  // Select the most significant moves in EITHER direction, then order them
+  // gainer-to-loser for display. Slicing straight off the caller's
+  // sorted-descending list would fill all nine rows with gainers and hide every
+  // decline on an up day (and the mirror image on a down day) — this panel is
+  // "movers", not "winners".
+  const ranked = movers.slice()
+    .sort((a, b) => Math.abs(b.dayPL) - Math.abs(a.dayPL))
+    .slice(0, MOVERS_MAX)
+    .sort((a, b) => b.dayPL - a.dayPL);
+  el.innerHTML = ranked.map(m => {
+    // Cap at 48% of the track so the longest bar stops short of the edge.
+    const w = Math.max((Math.abs(m.dayPL) / maxAbs) * 48, 0.6);
+    const left = m.dayPL >= 0 ? 50 : 50 - w;
+    const cls = m.dayPL >= 0 ? 'pos' : 'neg';
+    const label = (m.dayPL >= 0 ? '+' : '−') + '$' + Math.abs(Math.round(m.dayPL)).toLocaleString('en-US');
+    const tip = m.symbol + ' · ' + label + ' today';
+    return `<div class="mv-row" data-sym="${escAttr(m.symbol)}" data-tip="${escAttr(tip)}" title="${escAttr(tip)}">`
+      + `<span class="mv-sym">${esc(m.symbol)}</span>`
+      + `<span class="mv-track"><span class="mv-bar ${cls}" style="left:${left.toFixed(2)}%;width:${w.toFixed(2)}%"></span></span>`
+      + `<span class="mv-val ${cls}">${label}</span></div>`;
+  }).join('');
+}
+
+// ---- Panel 3: Exposure by asset class ----
+// Collapses the per-symbol donut into the three classes the app actually
+// treats differently (they have separate data sources, refresh cadences, and
+// market hours), plus an advancing/declining count for the day.
+const ALLOC_CLASS_DEFS = [
+  { key: 'stock',     label: 'Stocks',      color: '#4a9eff' },
+  { key: 'crypto',    label: 'Crypto',      color: '#b86fff' },
+  { key: 'commodity', label: 'Commodities', color: '#ffc14a' },
+];
+function _renderAssetClasses(items, total, advancing, declining) {
+  const el = document.getElementById('alloc-classes');
+  if (!el) return;
+  if (!total || items.length === 0) { el.innerHTML = ''; return; }
+  const byClass = { stock: 0, crypto: 0, commodity: 0 };
+  for (const it of items) {
+    const k = isCryptoSymbol(it.symbol) ? 'crypto'
+            : isCommoditySymbol(it.symbol) ? 'commodity' : 'stock';
+    byClass[k] += it.value;
+  }
+  const dollar = v => '$' + Math.round(v).toLocaleString('en-US');
+  const present = ALLOC_CLASS_DEFS.filter(c => byClass[c.key] > 0);
+  const segs = present.map(c => {
+    const pct = (byClass[c.key] / total) * 100;
+    return `<span class="ac-seg" style="width:${pct.toFixed(2)}%;background:${c.color}"`
+      + ` title="${escAttr(c.label + ' · ' + dollar(byClass[c.key]) + ' · ' + pct.toFixed(1) + '%')}"></span>`;
+  }).join('');
+  const rows = present.map(c => {
+    const pct = (byClass[c.key] / total) * 100;
+    return `<div class="ac-row"><span class="ac-swatch" style="background:${c.color}"></span>`
+      + `<span>${c.label}</span><span class="ac-val">${dollar(byClass[c.key])}</span>`
+      + `<span class="ac-pct">${pct.toFixed(1)}%</span></div>`;
+  }).join('');
+  const plural = n => n === 1 ? '' : 's';
+  el.innerHTML = `<div class="ac-bar">${segs}</div>${rows}`
+    + `<div class="ac-stat"><span class="pos">${advancing} position${plural(advancing)} up</span>`
+    + `<span class="neg">${declining} down</span></div>`;
+}
+
 function renderAllocationChart() {
   const wrap = document.getElementById('allocation-wrap');
   const chart = document.getElementById('allocation-chart');
@@ -7406,16 +7562,24 @@ function renderAllocationChart() {
   // Decide whether the chart is even possible (need positions with prices).
   // Day P&L is accumulated alongside for the donut's center stat.
   const items = [];
+  const movers = [];              // per-position day P&L, for the movers panel
   let total = 0, dayPL = 0, hasPL = false;
+  let advancing = 0, declining = 0;
   for (const pos of portfolio) {
     const q = quoteData[pos.symbol];
     if (q && q.price != null) {
       const val = Math.abs(q.price * pos.shares);
       items.push({ symbol: pos.symbol, value: val });
       total += val;
-      if (q.change != null) { dayPL += q.change * pos.shares; hasPL = true; }
+      if (q.change != null) {
+        const d = q.change * pos.shares;
+        dayPL += d; hasPL = true;
+        movers.push({ symbol: pos.symbol, dayPL: d });
+        if (d > 0) advancing++; else if (d < 0) declining++;
+      }
     }
   }
+  movers.sort((a, b) => b.dayPL - a.dayPL); // biggest gainer first
   const possible = portfolio.length > 0 && total > 0;
 
   // Show/hide the toggle button based on possibility
@@ -7437,11 +7601,17 @@ function renderAllocationChart() {
   // the dollar — the donut hole shows live dollars, so they're part of the
   // signature. High-frequency WebSocket trades would otherwise rebuild the
   // SVG ~30x/sec for no visible benefit.
+  // The movers component is part of the signature too: individual positions can
+  // move in opposite directions that net out to the same rounded portfolio dayPL,
+  // which would leave the bars frozen while the table underneath them updated.
+  // Order matters here as well — movers is pre-sorted, so a change in ranking
+  // re-renders even when every value rounds identically.
   const sig = items
     .slice()
     .sort((a, b) => a.symbol.localeCompare(b.symbol))
     .map(it => it.symbol + ':' + ((it.value / total) * 1000 | 0))
-    .join('|') + '|T' + Math.round(total) + '|P' + (hasPL ? Math.round(dayPL) : 'x');
+    .join('|') + '|T' + Math.round(total) + '|P' + (hasPL ? Math.round(dayPL) : 'x')
+    + '|M' + movers.map(m => m.symbol + ':' + Math.round(m.dayPL)).join(',');
   if (sig === _lastAllocSig) return;
   _lastAllocSig = sig;
 
@@ -7517,6 +7687,10 @@ function renderAllocationChart() {
   chart.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="Portfolio allocation donut chart">`
     + `<g${enter}><g transform="rotate(-90 ${c} ${c})">${segs}</g></g>${centerText}</svg>`;
   legend.innerHTML = legendHtml;
+  // Companion panels — same data pass, same signature gate, so they can't drift
+  // out of sync with the donut or re-render independently on a WS tick.
+  _renderMovers(movers);
+  _renderAssetClasses(items, total, advancing, declining);
   _initAllocInteractions();
 }
 
@@ -7555,18 +7729,22 @@ function _initAllocInteractions() {
     tip.style.left = x + 'px';
     tip.style.top = y + 'px';
   };
-  const targetOf = e => e.target.closest && e.target.closest('.alloc-seg, .alloc-item');
+  // Mover rows join the delegation, but they carry only data-sym/data-tip — no
+  // data-i, since they aren't paired with a donut slice. Both lookups are
+  // therefore guarded: an unguarded showTip would print the string "undefined"
+  // into the tooltip, and setHot would query [data-i="undefined"].
+  const targetOf = e => e.target.closest && e.target.closest('.alloc-seg, .alloc-item, .mv-row');
 
   wrap.addEventListener('mouseover', e => {
     const t = targetOf(e);
     if (!t) return;
     clearHot();
-    setHot(t.dataset.i, true);
-    showTip(t.dataset.tip, e.clientX, e.clientY);
+    if (t.dataset.i != null) setHot(t.dataset.i, true);
+    if (t.dataset.tip) showTip(t.dataset.tip, e.clientX, e.clientY);
   });
   wrap.addEventListener('mousemove', e => {
     const t = targetOf(e);
-    if (t && tip.style.display === 'block') showTip(t.dataset.tip, e.clientX, e.clientY);
+    if (t && t.dataset.tip && tip.style.display === 'block') showTip(t.dataset.tip, e.clientX, e.clientY);
   });
   wrap.addEventListener('mouseout', e => {
     if (targetOf(e)) clearHot();
@@ -7575,8 +7753,10 @@ function _initAllocInteractions() {
     const t = targetOf(e);
     if (!t) { clearHot(); return; }
     const sym = t.dataset.sym;
-    // Legend row click: jump to that position in the table / mobile cards.
-    if (t.classList.contains('alloc-item') && sym) {
+    // Legend or mover row click: jump to that position in the table / cards.
+    // (The aggregated "Other" legend row has an empty data-sym, so it falls
+    // through to the slice-tap behaviour below instead.)
+    if ((t.classList.contains('alloc-item') || t.classList.contains('mv-row')) && sym) {
       const row = document.querySelector('tr[data-sym="' + CSS.escape(sym) + '"], .mobile-card[data-sym="' + CSS.escape(sym) + '"]');
       if (row) {
         row.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -7588,7 +7768,10 @@ function _initAllocInteractions() {
     // Slice tap (mobile has no hover): toggle the highlight + tooltip.
     const wasHot = t.classList.contains('hot');
     clearHot();
-    if (!wasHot) { setHot(t.dataset.i, true); showTip(t.dataset.tip, e.clientX, e.clientY); }
+    if (!wasHot) {
+      if (t.dataset.i != null) setHot(t.dataset.i, true);
+      if (t.dataset.tip) showTip(t.dataset.tip, e.clientX, e.clientY);
+    }
   });
 }
 
