@@ -519,32 +519,50 @@
   .error-row td { opacity: 0.6; }
   .error-text { color: #ff5252; font-size: 11px; font-style: italic; }
 
+  /* Onboarding guide. Flat panel surface at the theme's 3px structural radius:
+     the previous blue gradient + 6px corners read as a different design
+     language dropped into a flat terminal UI. */
   .welcome-banner {
-    background: linear-gradient(135deg, #0d1a2e 0%, #121230 100%);
-    border: 1px solid #2a3a5a;
-    border-radius: 6px;
+    background: #101024;
+    border: 1px solid #26264a;
+    border-radius: 3px;
     margin: 20px auto;
-    max-width: 640px;
-    padding: 24px 28px;
+    max-width: 660px;
+    padding: 22px 26px 18px;
     color: #c0c8d8;
     font-size: 13px;
     line-height: 1.6;
   }
   .welcome-banner h2 {
-    color: #4a9eff;
-    font-size: 17px;
-    margin-bottom: 14px;
+    color: #e8e8f0;
+    font-size: 16px;
+    margin-bottom: 3px;
     font-weight: 600;
+  }
+  .welcome-lede { color: #7b7b96; font-size: 12px; margin-bottom: 4px; }
+  /* Section headers reuse the analytics panels' uppercase micro-label, with a
+     hairline rule running out to the edge — gives the guide real hierarchy
+     instead of three same-size paragraphs stacked on each other. */
+  .welcome-section {
+    display: flex; align-items: center; gap: 10px;
+    margin: 20px 0 11px;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em;
+    color: #6a6a85; white-space: nowrap;
+  }
+  .welcome-section::after { content: ''; flex: 1; height: 1px; background: #22223d; }
+  .welcome-section-note {
+    text-transform: none; letter-spacing: 0; font-size: 11px; color: #b8963c;
   }
   .welcome-banner .step {
     display: flex;
     gap: 10px;
-    margin-bottom: 10px;
+    margin-bottom: 9px;
   }
   .welcome-banner .step-num {
     color: #3c8;
     font-weight: bold;
-    min-width: 18px;
+    min-width: 16px;
+    flex-shrink: 0;
   }
   .welcome-banner a {
     color: #4a9eff;
@@ -552,6 +570,20 @@
   }
   .welcome-banner a:hover { text-decoration: underline; }
   .welcome-banner .key-name { color: #e0e0e0; font-weight: bold; }
+  .welcome-note { color: #7b7b96; margin-bottom: 11px; }
+  /* Shared inline-token styling — was repeated as four separate inline style
+     attributes, which drifted (two of them lacked a border). */
+  .welcome-code, .welcome-kbd {
+    background: #1a1a30; border: 1px solid #2a2a48; border-radius: 2px;
+    padding: 1px 5px; font-family: inherit; color: #b8c4d8;
+  }
+  .welcome-kbd { font-size: 11px; }
+  .welcome-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap;
+    margin-top: 18px; padding-top: 14px; border-top: 1px solid #22223d;
+  }
+  .welcome-credit { color: #55556e; font-size: 11px; }
   /* Primary close action for the guide — a solid accent button so older users
      immediately see what closes it. (Label is "Close Welcome Guide".) */
   .welcome-banner .dismiss-btn {
@@ -568,15 +600,21 @@
   }
   .welcome-banner .dismiss-btn:hover { background: #2f78cf; color: #fff; }
 
-  .welcome-tips { margin-top: 14px; border-top: 1px solid #2a2a44; padding-top: 10px; }
+  .welcome-tips { margin-top: 16px; border-top: 1px solid #22223d; padding-top: 11px; }
+  /* A real <button>, not a click-handling <div>: this is the one interactive
+     control in the guide, and as a div it was unreachable by keyboard and
+     announced as plain text. */
   .welcome-tips-summary {
+    display: flex; align-items: center; gap: 8px;
+    background: none; border: 0; margin: 0; width: 100%; text-align: left;
     cursor: pointer;
-    outline: none;
     padding: 4px 0;
     color: #aab;
     user-select: none;
+    font-family: inherit;
     font-size: 13px;
   }
+  .welcome-tips-summary:hover { color: #d8d8e8; }
   .welcome-tips-arrow {
     display: inline-block;
     transition: transform 0.25s ease;
@@ -706,7 +744,12 @@
   .alloc-panel {
     display: flex; flex-direction: column; gap: 8px;
     flex: 1 1 300px; min-width: 250px; max-width: 400px;
-    background: #12122a; border: 1px solid #1e1e38; border-radius: 6px;
+    /* 3px, not 6px: the theme reserves the softer 6px radius for FLOATING
+       surfaces (modals, popovers, the welcome banner) and keeps inline
+       structure at 2-3px — inputs, buttons, swatches, the mover tracks right
+       below. These cards are inline structure, so 6px read as a foreign
+       rounded-card idiom dropped into a terminal UI. */
+    background: #12122a; border: 1px solid #22223d; border-radius: 3px;
     padding: 10px 12px;
   }
   .alloc-panel-donut { flex: 1 1 470px; max-width: 560px; }
@@ -1286,7 +1329,7 @@
       margin: 10px;
       padding: 18px 16px;
       font-size: 13px;
-      border-radius: 8px;
+      border-radius: 3px; /* match desktop — was 8px */
     }
     .welcome-banner h2 { font-size: 16px; }
     .welcome-banner .step { margin-bottom: 12px; }
@@ -1535,23 +1578,24 @@
   <div class="slide-inner">
     <div class="welcome-banner">
       <h2>Welcome to Portfolio Tracker</h2>
+      <p class="welcome-lede">Real-time stocks, crypto, and commodities &mdash; running entirely in this browser tab. No account, and your positions are never uploaded anywhere.</p>
 
-      <p style="margin-bottom:6px; color:#aab;"><strong style="color:#e0e0e0;">Getting Started</strong></p>
+      <div class="welcome-section">Getting started</div>
       <div class="step">
         <span class="step-num">&bull;</span>
         <span><strong>Add a ticker</strong> &mdash; Type a symbol (e.g. AAPL, BTC) into the ticker box in the toolbar and click <strong>Add</strong>.</span>
       </div>
       <div class="step">
         <span class="step-num">&bull;</span>
-        <span><strong>Import positions</strong> &mdash; Click the <strong>Import</strong> button to bulk-import from a CSV file or paste data directly. Auto-detects exports from <strong>Robinhood</strong>, <strong>E*Trade</strong>, <strong>Fidelity</strong>, <strong>Schwab</strong>, <strong>Webull</strong>, and <strong>Vanguard</strong>. You can also use a simple format: <code style="background:#1a1a30; padding:1px 5px; border-radius:2px;">Symbol, Shares, Cost, Date</code></span>
+        <span><strong>Import positions</strong> &mdash; Click the <strong>Import</strong> button to bulk-import from a CSV file or paste data directly. Auto-detects exports from <strong>Robinhood</strong>, <strong>E*Trade</strong>, <strong>Fidelity</strong>, <strong>Schwab</strong>, <strong>Webull</strong>, and <strong>Vanguard</strong>. You can also use a simple format: <code class="welcome-code">Symbol, Shares, Cost, Date</code></span>
       </div>
       <div class="step">
         <span class="step-num">&bull;</span>
         <span><strong>Just exploring?</strong> &mdash; <button class="btn btn-add" onclick="loadSampleData()" style="font-size:12px; padding:3px 12px;">Load Sample Data</button> to fill the table with a couple of well-known tech stocks, a commodity, and a crypto.</span>
       </div>
 
-      <p style="margin-top:16px; margin-bottom:6px; color:#aab;"><strong style="color:#e0e0e0;">API Keys</strong> <span style="color:#f4c542;">(highly recommended)</span></p>
-      <p style="margin-bottom:10px; color:#888;">For full data coverage, add one or more free API keys in <strong>Settings</strong>. Without them, many columns (market cap, P/E, EPS, dividends, etc.) will show dashes:</p>
+      <div class="welcome-section">API keys <span class="welcome-section-note">recommended</span></div>
+      <p class="welcome-note">For full data coverage, add one or more free API keys in <strong>Settings</strong>. Without them, columns like market cap, P/E, EPS, and dividends show dashes.</p>
       <div class="step">
         <span class="step-num">1.</span>
         <span><span class="key-name">FinnHub</span> &mdash; Sign up at <a href="https://finnhub.io/register" target="_blank" rel="noopener noreferrer">finnhub.io</a> for a free key. Provides market cap, P/E, EPS, beta, dividends, earnings dates, and performance data.</span>
@@ -1564,11 +1608,11 @@
         <span class="step-num">3.</span>
         <span><span class="key-name">FMP</span> (optional) &mdash; Sign up at <a href="https://site.financialmodelingprep.com/register" target="_blank" rel="noopener noreferrer">financialmodelingprep.com</a> for an extra data source fallback.</span>
       </div>
-      <p style="margin-top:14px; color:#888;">Without API keys, basic price data is still available via Yahoo Finance. Adding a FinnHub key unlocks real-time WebSocket streaming and full fundamentals.</p>
+      <p class="welcome-note" style="margin-top:12px; margin-bottom:0;">Without any key, live prices still work through Yahoo Finance, Stooq, and CoinGecko. A FinnHub key additionally unlocks real-time WebSocket streaming and full fundamentals.</p>
 
       <div class="welcome-tips" id="welcome-tips">
-        <div class="welcome-tips-summary" onclick="document.getElementById('welcome-tips').classList.toggle('open')"><span class="welcome-tips-arrow">&#9656;</span> <strong style="color:#e0e0e0;">Tips</strong> <span style="color:#666; font-weight:normal; font-size:11px;">(click to expand)</span></div>
-        <div class="welcome-tips-body"><div class="welcome-tips-body-inner">
+        <button type="button" class="welcome-tips-summary" aria-label="Tips and shortcuts" aria-expanded="false" aria-controls="welcome-tips-body" onclick="toggleWelcomeTips(this)"><span class="welcome-tips-arrow">&#9656;</span> <strong style="color:#e0e0e0;">Tips &amp; shortcuts</strong> <span style="color:#666; font-weight:normal; font-size:11px;">8 things worth knowing</span></button>
+        <div class="welcome-tips-body" id="welcome-tips-body"><div class="welcome-tips-body-inner">
           <div class="step">
             <span class="step-num">&bull;</span>
             <span><strong>Multiple portfolios</strong> &mdash; Turn on <strong>Show multiple-portfolio selector bar</strong> in <strong>Settings</strong> to reveal the portfolio bar above the toolbar, where you can create, switch, rename, and delete named portfolios (e.g. <em>Long-term</em>, <em>Trading</em>, <em>Crypto</em>). Each has its own positions and notes. Price alerts are keyed by symbol and shared across every portfolio.</span>
@@ -1599,13 +1643,13 @@
           </div>
           <div class="step">
             <span class="step-num">&bull;</span>
-            <span><strong>Undo / Redo</strong> &mdash; Press <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Z</kbd> to undo and <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Y</kbd> or <kbd style="background:#1a1a30; padding:1px 5px; border-radius:2px; font-size:11px;">Ctrl+Shift+Z</kbd> to redo any change (add, remove, edit, reorder, import, clear). Up to 50 levels of history.</span>
+            <span><strong>Undo / Redo</strong> &mdash; Press <kbd class="welcome-kbd">Ctrl+Z</kbd> to undo and <kbd class="welcome-kbd">Ctrl+Y</kbd> or <kbd class="welcome-kbd">Ctrl+Shift+Z</kbd> to redo any change (add, remove, edit, reorder, import, clear). Up to 50 levels of history.</span>
           </div>
         </div></div>
       </div>
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:16px;">
+      <div class="welcome-foot">
         <button class="dismiss-btn" onclick="dismissWelcome()">Close Welcome Guide</button>
-        <span style="color:#555; font-size:11px;">Made by <a href="https://github.com/gdy" target="_blank" rel="noopener noreferrer" style="color:#6a8ccc;">Grant</a></span>
+        <span class="welcome-credit">Built by <a href="https://github.com/gdy" target="_blank" rel="noopener noreferrer">Grant</a> &middot; open source, MIT</span>
       </div>
     </div>
   </div>
@@ -8993,6 +9037,15 @@ function showWelcomeBanner(force) {
     wrap.classList.add('show');
   }
   _syncWelcomeBtn();
+}
+// Tips disclosure inside the Welcome guide. Split out of the inline onclick so
+// aria-expanded tracks the open state — the control is a real <button> now, so
+// it's keyboard-reachable and announces correctly.
+function toggleWelcomeTips(btn) {
+  const wrap = document.getElementById('welcome-tips');
+  if (!wrap) return;
+  const open = wrap.classList.toggle('open');
+  if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 function dismissWelcome() {
   document.getElementById('welcome-wrap').classList.remove('show');
