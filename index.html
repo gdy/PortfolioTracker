@@ -522,16 +522,23 @@
   /* Onboarding guide. Flat panel surface at the theme's 3px structural radius:
      the previous blue gradient + 6px corners read as a different design
      language dropped into a flat terminal UI. */
+  /* Modal dialog, reusing the .import-overlay backdrop the Import / Columns /
+     Share / Shortcuts dialogs already use — the guide was the only overlay in
+     the app rendered as an inline slide-out, which on a 4K display left it
+     stranded in a sea of padding instead of centred in the viewport. */
   .welcome-banner {
     background: #101024;
     border: 1px solid #26264a;
     border-radius: 3px;
-    margin: 20px auto;
-    max-width: 660px;
+    width: 660px;
+    max-width: 92vw;
+    max-height: 86vh;
+    overflow-y: auto;
     padding: 22px 26px 18px;
     color: #c0c8d8;
     font-size: 13px;
     line-height: 1.6;
+    outline: none; /* focused programmatically on open; the border is the affordance */
   }
   .welcome-banner h2 {
     color: #e8e8f0;
@@ -651,11 +658,13 @@
     overflow-y: auto; color: #d0d0d0;
   }
   .import-modal h3 { margin-bottom: 12px; color: #e0e0e0; font-size: 15px; }
-  .import-modal .close-btn {
+  .import-modal .close-btn,
+  .welcome-banner .close-btn {
     float: right; background: none; border: none; color: #888;
     font-size: 18px; cursor: pointer; line-height: 1;
   }
-  .import-modal .close-btn:hover { color: #fff; }
+  .import-modal .close-btn:hover,
+  .welcome-banner .close-btn:hover { color: #fff; }
   .import-modal label { display: block; color: #999; font-size: 11px; text-transform: uppercase; margin: 10px 0 4px; }
   .import-modal textarea {
     width: 100%; height: 140px; background: #0a0a15; border: 1px solid #444;
@@ -1324,12 +1333,19 @@
       width: 100%;
     }
 
-    /* Welcome banner */
+    /* Welcome dialog — near-full-screen on phones, matching .import-modal's
+       mobile treatment. `margin` no longer positions it (the flex backdrop
+       centres it), so width/height do the work. */
     .welcome-banner {
-      margin: 10px;
+      width: 100%;
+      max-width: 100%;
+      max-height: 100vh;
+      height: 100vh;
       padding: 18px 16px;
       font-size: 13px;
-      border-radius: 3px; /* match desktop — was 8px */
+      border-radius: 0;
+      border-left: 0;
+      border-right: 0;
     }
     .welcome-banner h2 { font-size: 16px; }
     .welcome-banner .step { margin-bottom: 12px; }
@@ -1353,7 +1369,7 @@
     .mobile-card { padding: 10px 12px; }
     .mobile-card-price { font-size: 15px; }
     .mobile-card-sym { font-size: 14px; }
-    .welcome-banner { margin: 6px; padding: 14px 12px; }
+    .welcome-banner { padding: 14px 12px; }
   }
 </style>
 </head>
@@ -1574,10 +1590,11 @@
   </div>
 </div>
 
-<div class="slide-wrap" id="welcome-wrap">
-  <div class="slide-inner">
-    <div class="welcome-banner">
-      <h2>Welcome to Portfolio Tracker</h2>
+<div class="import-overlay" id="welcome-wrap" role="dialog" aria-modal="true" aria-labelledby="welcome-title"
+     onclick="if(event.target===this)dismissWelcome()">
+  <div class="welcome-banner" tabindex="-1">
+      <button class="close-btn" onclick="dismissWelcome()" aria-label="Close welcome guide">&times;</button>
+      <h2 id="welcome-title">Welcome to Portfolio Tracker</h2>
       <p class="welcome-lede">Real-time stocks, crypto, and commodities &mdash; running entirely in this browser tab. No account, and your positions are never uploaded anywhere.</p>
 
       <div class="welcome-section">Getting started</div>
@@ -1651,7 +1668,6 @@
         <button class="dismiss-btn" onclick="dismissWelcome()">Close Welcome Guide</button>
         <span class="welcome-credit">Built by <a href="https://github.com/gdy" target="_blank" rel="noopener noreferrer">Grant</a> &middot; open source, MIT</span>
       </div>
-    </div>
   </div>
 </div>
 
@@ -2099,7 +2115,10 @@ document.addEventListener('keydown', e => {
     if (so) so.classList.toggle('show');
   } else if (k === 'Escape') {
     const so = document.getElementById('shortcuts-overlay');
-    if (so && so.classList.contains('show')) { so.classList.remove('show'); e.preventDefault(); }
+    if (so && so.classList.contains('show')) { so.classList.remove('show'); e.preventDefault(); return; }
+    // Welcome guide is a modal dialog now, so Esc should close it like the rest.
+    const ww = document.getElementById('welcome-wrap');
+    if (ww && ww.classList.contains('show')) { dismissWelcome(); e.preventDefault(); }
   }
 });
 
@@ -2257,8 +2276,7 @@ function saveApiKey() {
   const key = document.getElementById('finnhub-key').value.trim();
   if (key) safeSet('stonks_finnhub_key', key);
   else localStorage.removeItem('stonks_finnhub_key');
-  document.getElementById('welcome-wrap').classList.remove('show');
-  _syncWelcomeBtn();
+  _closeWelcome(); // restores focus + syncs the Settings toggle label
   flashConfirm('confirm-finnhub');
   // Reconnect WebSocket with new key
   if (finnhubWs) { try { finnhubWs.close(); } catch(_){} finnhubWs = null; }
@@ -2274,8 +2292,7 @@ function saveAlpacaKeys() {
   else localStorage.removeItem('stonks_alpaca_key_id');
   if (secret) safeSet('stonks_alpaca_secret', secret);
   else localStorage.removeItem('stonks_alpaca_secret');
-  document.getElementById('welcome-wrap').classList.remove('show');
-  _syncWelcomeBtn();
+  _closeWelcome(); // restores focus + syncs the Settings toggle label
   flashConfirm('confirm-alpaca');
   refreshAll().catch(e => console.warn('refreshAll failed:', e));
 }
@@ -2286,8 +2303,7 @@ function saveFmpKey() {
   const key = document.getElementById('fmp-key').value.trim();
   if (key) safeSet('stonks_fmp_key', key);
   else localStorage.removeItem('stonks_fmp_key');
-  document.getElementById('welcome-wrap').classList.remove('show');
-  _syncWelcomeBtn();
+  _closeWelcome(); // restores focus + syncs the Settings toggle label
   flashConfirm('confirm-fmp');
   refreshAll().catch(e => console.warn('refreshAll failed:', e));
 }
@@ -2630,7 +2646,7 @@ function loadSampleData() {
   savePortfolio();
   // Dismiss the Welcome guide if it's open — the user just chose to dive in.
   const ww = document.getElementById('welcome-wrap');
-  if (ww && ww.classList.contains('show')) { ww.classList.remove('show'); _syncWelcomeBtn(); }
+  if (ww && ww.classList.contains('show')) _closeWelcome();
   renderTable();
   updateSummary();
   setStatus('Loaded sample data: ' + added.join(', '), 'loading');
@@ -9021,22 +9037,40 @@ function _syncWelcomeBtn() {
   if (!btn || !wrap) return;
   btn.textContent = wrap.classList.contains('show') ? 'Close Welcome Guide' : 'Show Welcome Guide';
 }
+// The guide is a modal dialog now, so opening it takes focus and closing gives
+// focus back to whatever opened it — otherwise a keyboard user tabs through the
+// table behind the backdrop, and lands nowhere in particular on close.
+let _welcomeLastFocus = null;
+function _openWelcome() {
+  const wrap = document.getElementById('welcome-wrap');
+  if (!wrap) return;
+  _welcomeLastFocus = document.activeElement;
+  wrap.classList.add('show');
+  _syncWelcomeBtn();
+  const box = wrap.querySelector('.welcome-banner');
+  if (box) box.focus();
+}
+function _closeWelcome() {
+  const wrap = document.getElementById('welcome-wrap');
+  if (!wrap) return;
+  wrap.classList.remove('show');
+  _syncWelcomeBtn();
+  if (_welcomeLastFocus && _welcomeLastFocus.focus) {
+    try { _welcomeLastFocus.focus(); } catch (_) {}
+  }
+  _welcomeLastFocus = null;
+}
 function showWelcomeBanner(force) {
   const wrap = document.getElementById('welcome-wrap');
   if (force) {
-    wrap.classList.toggle('show');
-    if (wrap.classList.contains('show')) {
-      wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-    _syncWelcomeBtn();
+    if (wrap.classList.contains('show')) _closeWelcome();
+    else _openWelcome();
     return;
   }
   const hasKeys = !!(getApiKey() || getAlpacaKeys().keyId || getFmpKey());
   const dismissed = localStorage.getItem('stonks_welcome_dismissed');
-  if (!dismissed && !hasKeys && portfolio.length === 0) {
-    wrap.classList.add('show');
-  }
-  _syncWelcomeBtn();
+  if (!dismissed && !hasKeys && portfolio.length === 0) _openWelcome();
+  else _syncWelcomeBtn();
 }
 // Tips disclosure inside the Welcome guide. Split out of the inline onclick so
 // aria-expanded tracks the open state — the control is a real <button> now, so
@@ -9047,10 +9081,12 @@ function toggleWelcomeTips(btn) {
   const open = wrap.classList.toggle('open');
   if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
+// Any deliberate close — the X, the footer button, the backdrop, or Esc — marks
+// the guide dismissed so it doesn't reappear on the next load. Re-opening it
+// from Settings goes through showWelcomeBanner(true), which doesn't re-set it.
 function dismissWelcome() {
-  document.getElementById('welcome-wrap').classList.remove('show');
+  _closeWelcome();
   safeSet('stonks_welcome_dismissed', '1');
-  _syncWelcomeBtn();
 }
 
 // ==================== PULL TO REFRESH (mobile) ====================
