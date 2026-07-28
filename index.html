@@ -538,8 +538,15 @@
     color: #c0c8d8;
     font-size: 13px;
     line-height: 1.6;
-    outline: none; /* focused programmatically on open; the border is the affordance */
+    /* Focused programmatically on open so keyboard users land inside the dialog,
+       but the container itself must not paint a ring — the global
+       [tabindex]:focus-visible rule (specificity 0,2,0) beats a bare
+       `.welcome-banner { outline: none }`, so a clean first load showed a hard
+       blue box around the whole guide. The ring belongs on the controls inside. */
+    outline: none;
   }
+  .welcome-banner:focus,
+  .welcome-banner:focus-visible { outline: none; }
   .welcome-banner h2 {
     color: #e8e8f0;
     font-size: 16px;
@@ -897,6 +904,10 @@
   .row-menu-item:hover { background: #23234a; }
   .row-menu-item.danger { color: #ff6b6b; }
   .row-menu-item.danger:hover { background: #3a1a1a; }
+  /* Column menu: a fixed-width gutter keeps labels aligned whether or not a row
+     is showing the active-sort tick. */
+  .rm-tick { display: inline-block; width: 12px; color: #3c8; }
+  .row-menu-sep { height: 1px; background: #2a2a44; margin: 4px 0; }
   /* Make the clickable symbol text discoverable without disrupting the row. */
   .sym-link { cursor: pointer; }
   .sym-link:hover { text-decoration: underline; }
@@ -1300,12 +1311,22 @@
       width: 100%;
       gap: 6px !important;
     }
-    .settings-bar input {
+    /* :not([type=checkbox]) matters — this rule is width:100% !important, so it
+       was overriding the desktop checkbox exemption and inflating the
+       portfolio-bar toggle into a full-width 40px block that shoved its own
+       label off the right edge of the panel. */
+    .settings-bar input:not([type="checkbox"]) {
       width: 100% !important;
       font-size: 16px;
       padding: 8px 10px;
       min-height: 40px;
     }
+    /* Give the checkbox a comfortable tap target without stretching it, and let
+       the label text wrap instead of overflowing. */
+    .settings-bar input[type="checkbox"] {
+      width: 18px !important; height: 18px; min-height: 0; flex: none;
+    }
+    .settings-bar label { min-width: 0; flex-wrap: wrap; }
     .settings-bar .btn {
       padding: 10px;
       font-size: 13px;
@@ -1542,6 +1563,14 @@
   <button class="row-menu-item" onclick="_rowMenuAct('alert')">&#128276; Set price alert</button>
   <button class="row-menu-item" onclick="_rowMenuAct('copy')">&#128203; Copy symbol</button>
   <button class="row-menu-item danger" onclick="_rowMenuAct('remove')">&#10005; Remove position</button>
+</div>
+
+<!-- Column header context menu (desktop right-click). Items are built per
+     column in openColumnMenu — sort options only for sortable columns, hide
+     only for non-essential ones. -->
+<div class="row-menu" id="col-menu" style="display:none;" onclick="event.stopPropagation()">
+  <div class="row-menu-sym" id="col-menu-label"></div>
+  <div id="col-menu-items"></div>
 </div>
 
 <div class="slide-wrap" id="settings-wrap">
@@ -2114,6 +2143,9 @@ document.addEventListener('keydown', e => {
     const so = document.getElementById('shortcuts-overlay');
     if (so) so.classList.toggle('show');
   } else if (k === 'Escape') {
+    // Transient menus first — Esc should dismiss the topmost thing.
+    const cm = document.getElementById('col-menu');
+    if (cm && cm.style.display === 'block') { _closeColMenu(); e.preventDefault(); return; }
     const so = document.getElementById('shortcuts-overlay');
     if (so && so.classList.contains('show')) { so.classList.remove('show'); e.preventDefault(); return; }
     // Welcome guide is a modal dialog now, so Esc should close it like the rest.
@@ -6122,7 +6154,11 @@ function buildHeader() {
     // Every column except the action column is draggable for reordering
     const draggable = col.key !== 'delete' ? ' draggable="true"' : '';
     const colKey = ` data-col-key="${col.key}"`;
-    return `<th${cls}${sort}${colKey}${draggable}>${col.label} ${arrow}</th>`;
+    // Surface the right-click menu — otherwise nothing hints that it exists.
+    const hint = col.key !== 'delete'
+      ? ` title="${col.sortable ? 'Click to sort · ' : ''}Right-click for column options"`
+      : '';
+    return `<th${cls}${sort}${colKey}${draggable}${hint}>${col.label} ${arrow}</th>`;
   }).join('');
 
   // Size the table to the sum of visible column widths so hiding columns
@@ -6143,6 +6179,15 @@ function buildHeader() {
     if (_ar) _ar.textContent = sortAsc ? ' ▲' : ' ▼';
   }
   syncHScrollProxy(); // column show/hide changes the table width
+
+  // Right-click any header (except the action column) for sort/hide actions.
+  row.querySelectorAll('th[data-col-key]').forEach(th => {
+    if (th.dataset.colKey === 'delete') return;
+    th.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openColumnMenu(th.dataset.colKey, e.clientX, e.clientY);
+    });
+  });
 
   // Sort handlers — only fire on click, not drag-end (suppressed via _thDragJustEnded)
   row.querySelectorAll('th[data-sort]').forEach(th => {
@@ -7207,6 +7252,73 @@ function _rowMenuAct(action) {
     } catch (_) {}
     setStatus('Copied "' + sym + '"', '');
   }
+}
+
+// ==================== COLUMN HEADER CONTEXT MENU ====================
+// Right-click a column header for sort/hide actions without a trip to the
+// Columns picker. Desktop-only by design: there's no right-click on touch, and
+// mobile already has its own sort dropdown and Fields picker. The `delete`
+// action column is deliberately excluded — the picker can't re-show it, so
+// hiding it from here would be a one-way door.
+let _colMenuKey = null;
+function openColumnMenu(colKey, clientX, clientY) {
+  const col = COLUMNS.find(c => c.key === colKey);
+  if (!col || col.key === 'delete') return;
+  // Only one floating surface at a time.
+  _closeAlertPopover();
+  _closeRowMenu();
+  if (typeof _closeAnalystPopover === 'function') _closeAnalystPopover();
+  _colMenuKey = colKey;
+  const pop = document.getElementById('col-menu');
+  if (!pop) return;
+  document.getElementById('col-menu-label').textContent = col.label || 'Column';
+  const tick = on => `<span class="rm-tick">${on ? '✓' : ''}</span>`;
+  const items = [];
+  if (col.sortable) {
+    const activeAsc = sortCol === colKey && sortAsc;
+    const activeDesc = sortCol === colKey && !sortAsc;
+    items.push(`<button class="row-menu-item" onclick="_colMenuAct('asc')">${tick(activeAsc)}Sort ascending</button>`);
+    items.push(`<button class="row-menu-item" onclick="_colMenuAct('desc')">${tick(activeDesc)}Sort descending</button>`);
+    if (sortCol === colKey) {
+      items.push(`<button class="row-menu-item" onclick="_colMenuAct('clear')">${tick(false)}Clear sort</button>`);
+    }
+  }
+  if (items.length) items.push('<div class="row-menu-sep"></div>');
+  if (ESSENTIAL_COLUMN_KEYS.has(colKey)) {
+    items.push(`<button class="row-menu-item" disabled style="opacity:.45; cursor:default;" title="Required field — cannot be hidden">${tick(false)}\u{1F512} Required column</button>`);
+  } else {
+    items.push(`<button class="row-menu-item danger" onclick="_colMenuAct('hide')">${tick(false)}Hide column</button>`);
+  }
+  items.push(`<button class="row-menu-item" onclick="_colMenuAct('picker')">${tick(false)}Configure columns…</button>`);
+  document.getElementById('col-menu-items').innerHTML = items.join('');
+  // Show first so offsetWidth/Height are measurable, then clamp into the viewport.
+  pop.style.display = 'block';
+  pop.style.left = '0px';
+  pop.style.top = '0px';
+  const w = pop.offsetWidth || 180, h = pop.offsetHeight || 140, pad = 6;
+  let left = Math.min(clientX, window.innerWidth - w - pad);
+  let top = clientY;
+  if (top + h > window.innerHeight - pad) top = clientY - h; // flip above the cursor
+  pop.style.left = Math.max(pad, left) + 'px';
+  pop.style.top = Math.max(pad, top) + 'px';
+  setTimeout(() => document.addEventListener('click', _closeColMenu, { once: true }), 0);
+}
+function _closeColMenu() {
+  const pop = document.getElementById('col-menu');
+  if (pop) pop.style.display = 'none';
+}
+function _colMenuAct(action) {
+  const key = _colMenuKey;
+  _closeColMenu();
+  if (!key) return;
+  if (action === 'hide') { toggleColumn(key, false); return; }      // rebuilds header + table
+  if (action === 'picker') { toggleColumnPicker(); return; }
+  if (action === 'clear') { sortCol = null; sortAsc = true; }
+  else { sortCol = key; sortAsc = (action === 'asc'); }
+  saveSort();
+  bumpPortfolioVersion(); // sort key changed — invalidate the sorted-portfolio cache
+  buildHeader();          // repaints the active-sort arrow
+  renderTable();
 }
 
 // ==================== ANALYST RATING POPOVER ====================
