@@ -799,11 +799,16 @@
 
   /* ---- Exposure by asset class: stacked bar + rows ---- */
   .ac-bar { display: flex; height: 16px; border-radius: 3px; overflow: hidden; background: #16162c; }
-  .ac-seg { min-width: 2px; }
+  /* Segments and rows cross-highlight each other on hover/tap, matching the
+     donut<->legend pairing so all three panels behave the same way. */
+  .ac-seg { min-width: 2px; cursor: pointer; transition: filter 0.15s ease; }
+  .ac-seg.hot { filter: brightness(1.4); }
   .ac-row {
     display: grid; grid-template-columns: 10px 1fr auto 46px; gap: 8px;
     align-items: center; font-size: 11px; color: #b8b8cc; padding: 2px 4px;
+    border-radius: 3px; cursor: pointer;
   }
+  .ac-row:hover, .ac-row.hot { background: rgba(74, 158, 255, 0.10); color: #e8e8f0; }
   .ac-swatch { width: 10px; height: 10px; border-radius: 2px; }
   .ac-val { color: #8888a0; text-align: right; font-variant-numeric: tabular-nums; }
   .ac-pct { text-align: right; font-variant-numeric: tabular-nums; }
@@ -7217,20 +7222,35 @@ function _closeAlertPopover() {
 // positioning + outside-click dismiss so behavior stays consistent.
 let _rowMenuSym = null;
 let _rowMenuAnchor = null;
-function openRowMenu(symbol, el) {
+// `clientX`/`clientY` are supplied by the right-click path so the menu opens at
+// the pointer, the way a context menu is expected to; left-click still anchors
+// under the clicked text.
+function openRowMenu(symbol, el, clientX, clientY) {
   _closeAlertPopover();
   if (typeof _closeAnalystPopover === 'function') _closeAnalystPopover();
+  if (typeof _closeColMenu === 'function') _closeColMenu();
   _rowMenuSym = symbol;
   _rowMenuAnchor = el;
   const pop = document.getElementById('row-menu');
   document.getElementById('row-menu-sym').textContent = symbol;
   pop.style.display = 'block';
-  // Position just below the clicked text, clamped inside the viewport. Falls back
-  // to a sensible spot if ever called without an anchor element.
-  const rect = el ? el.getBoundingClientRect() : { left: 12, bottom: 80 };
+  const pad = 4;
   const w = pop.offsetWidth || 168;
-  pop.style.left = Math.max(4, Math.min(rect.left, window.innerWidth - w - 4)) + 'px';
-  pop.style.top = (rect.bottom + 4) + 'px';
+  const h = pop.offsetHeight || 130;
+  let left, top;
+  if (clientX != null && clientY != null) {
+    left = clientX;
+    top = clientY;
+    if (top + h > window.innerHeight - pad) top = clientY - h; // flip above near the bottom edge
+  } else {
+    // Position just below the clicked text, clamped inside the viewport. Falls back
+    // to a sensible spot if ever called without an anchor element.
+    const rect = el ? el.getBoundingClientRect() : { left: 12, bottom: 80 };
+    left = rect.left;
+    top = rect.bottom + 4;
+  }
+  pop.style.left = Math.max(pad, Math.min(left, window.innerWidth - w - pad)) + 'px';
+  pop.style.top = Math.max(pad, top) + 'px';
   setTimeout(() => document.addEventListener('click', _closeRowMenu, { once: true }), 0);
 }
 function _closeRowMenu() {
@@ -7319,6 +7339,31 @@ function _colMenuAct(action) {
   bumpPortfolioVersion(); // sort key changed — invalidate the sorted-portfolio cache
   buildHeader();          // repaints the active-sort arrow
   renderTable();
+}
+
+// Right-click the Symbol or Name cell for the same quick-actions menu that a
+// left-click opens, positioned at the pointer. Delegated on the tbody, which
+// survives renderTable's innerHTML rebuild. Restricted to those two columns so
+// right-clicking an editable cell (shares, cost, notes) keeps the browser's
+// native menu with its cut/paste/spellcheck entries.
+const _ROW_MENU_COLUMNS = new Set(['symbol', 'name']);
+function initRowContextMenu() {
+  const tbody = document.getElementById('portfolio-body');
+  if (!tbody) return;
+  tbody.addEventListener('contextmenu', (e) => {
+    const td = e.target.closest && e.target.closest('td');
+    if (!td) return;
+    const tr = td.closest('tr[data-sym]');
+    if (!tr) return;
+    // Map the cell back to its column by position among the VISIBLE columns —
+    // the same list renderTable used to emit the row, so hidden/reordered
+    // columns stay in step.
+    const idx = [...tr.children].indexOf(td);
+    const col = getVisibleColumns()[idx];
+    if (!col || !_ROW_MENU_COLUMNS.has(col.key)) return;
+    e.preventDefault();
+    openRowMenu(tr.dataset.sym, td, e.clientX, e.clientY);
+  });
 }
 
 // ==================== ANALYST RATING POPOVER ====================
@@ -7688,14 +7733,30 @@ function _renderAssetClasses(items, total, advancing, declining, extremes) {
   }
   const dollar = v => '$' + Math.round(v).toLocaleString('en-US');
   const present = ALLOC_CLASS_DEFS.filter(c => byClass[c.key] > 0);
+  // data-cls pairs each bar segment with its legend row (the donut uses data-i
+  // for the same job); data-tip drives the shared hover tooltip. Counting the
+  // positions per class makes the tooltip say something the row doesn't already.
+  const countOf = {};
+  for (const it of items) {
+    const k = isCryptoSymbol(it.symbol) ? 'crypto'
+            : isCommoditySymbol(it.symbol) ? 'commodity' : 'stock';
+    countOf[k] = (countOf[k] || 0) + 1;
+  }
+  const tipFor = c => {
+    const pct = (byClass[c.key] / total) * 100;
+    const n = countOf[c.key] || 0;
+    return c.label + ' · ' + dollar(byClass[c.key]) + ' · ' + pct.toFixed(1) + '%'
+      + ' · ' + n + ' position' + (n === 1 ? '' : 's');
+  };
   const segs = present.map(c => {
     const pct = (byClass[c.key] / total) * 100;
-    return `<span class="ac-seg" style="width:${pct.toFixed(2)}%;background:${c.color}"`
-      + ` title="${escAttr(c.label + ' · ' + dollar(byClass[c.key]) + ' · ' + pct.toFixed(1) + '%')}"></span>`;
+    return `<span class="ac-seg" data-cls="${escAttr(c.key)}" data-tip="${escAttr(tipFor(c))}"`
+      + ` style="width:${pct.toFixed(2)}%;background:${c.color}" title="${escAttr(tipFor(c))}"></span>`;
   }).join('');
   const rows = present.map(c => {
     const pct = (byClass[c.key] / total) * 100;
-    return `<div class="ac-row"><span class="ac-swatch" style="background:${c.color}"></span>`
+    return `<div class="ac-row" data-cls="${escAttr(c.key)}" data-tip="${escAttr(tipFor(c))}" title="${escAttr(tipFor(c))}">`
+      + `<span class="ac-swatch" style="background:${c.color}"></span>`
       + `<span>${c.label}</span><span class="ac-val">${dollar(byClass[c.key])}</span>`
       + `<span class="ac-pct">${pct.toFixed(1)}%</span></div>`;
   }).join('');
@@ -7932,8 +7993,15 @@ function _initAllocInteractions() {
     if (seg) seg.classList.toggle('hot', on);
     if (row) row.classList.toggle('hot', on);
   };
+  // Asset-class segments and their legend rows pair on data-cls, the same way
+  // donut slices pair with legend rows on data-i.
+  const setHotClass = (cls, on) => {
+    wrap.querySelectorAll('.ac-seg[data-cls="' + cls + '"], .ac-row[data-cls="' + cls + '"]')
+      .forEach(el => el.classList.toggle('hot', on));
+  };
   const clearHot = () => {
-    wrap.querySelectorAll('.alloc-seg.hot, .alloc-item.hot').forEach(el => el.classList.remove('hot'));
+    wrap.querySelectorAll('.alloc-seg.hot, .alloc-item.hot, .ac-seg.hot, .ac-row.hot')
+      .forEach(el => el.classList.remove('hot'));
     tip.style.display = 'none';
   };
   const showTip = (text, clientX, clientY) => {
@@ -7952,13 +8020,26 @@ function _initAllocInteractions() {
   // data-i, since they aren't paired with a donut slice. Both lookups are
   // therefore guarded: an unguarded showTip would print the string "undefined"
   // into the tooltip, and setHot would query [data-i="undefined"].
-  const targetOf = e => e.target.closest && e.target.closest('.alloc-seg, .alloc-item, .mv-row');
+  const targetOf = e => e.target.closest
+    && e.target.closest('.alloc-seg, .alloc-item, .mv-row, .ac-seg, .ac-row');
+
+  // Resolve a symbol to the element the user can actually SEE. renderTable
+  // returns early after drawing mobile cards, so the desktop <tr> rows are left
+  // stale in the DOM — a combined 'tr, .mobile-card' selector matches the hidden
+  // row first, and the scroll/flash silently goes nowhere on a phone.
+  const locate = (sym) => document.querySelector(
+    (isMobileView() ? '.mobile-card[data-sym="' : 'tr[data-sym="') + CSS.escape(sym) + '"]');
+  const flash = (el) => {
+    el.classList.add('alloc-locate');
+    setTimeout(() => el.classList.remove('alloc-locate'), 1600);
+  };
 
   wrap.addEventListener('mouseover', e => {
     const t = targetOf(e);
     if (!t) return;
     clearHot();
     if (t.dataset.i != null) setHot(t.dataset.i, true);
+    if (t.dataset.cls) setHotClass(t.dataset.cls, true);
     if (t.dataset.tip) showTip(t.dataset.tip, e.clientX, e.clientY);
   });
   wrap.addEventListener('mousemove', e => {
@@ -7972,15 +8053,34 @@ function _initAllocInteractions() {
     const t = targetOf(e);
     if (!t) { clearHot(); return; }
     const sym = t.dataset.sym;
+    // Asset-class click: flash every position in that class and scroll the first
+    // into view — the class-level equivalent of a legend row jumping to one
+    // symbol, so all three panels are clickable rather than only two.
+    if (t.dataset.cls) {
+      const cls = t.dataset.cls;
+      const match = portfolio.filter(p => (isCryptoSymbol(p.symbol) ? 'crypto'
+        : isCommoditySymbol(p.symbol) ? 'commodity' : 'stock') === cls);
+      let first = null;
+      for (const p of match) {
+        const el = locate(p.symbol);
+        if (!el) continue;
+        if (!first) first = el;
+        flash(el);
+      }
+      if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      clearHot();
+      setHotClass(cls, true);
+      showTip(t.dataset.tip, e.clientX, e.clientY);
+      return;
+    }
     // Legend or mover row click: jump to that position in the table / cards.
     // (The aggregated "Other" legend row has an empty data-sym, so it falls
     // through to the slice-tap behaviour below instead.)
     if ((t.classList.contains('alloc-item') || t.classList.contains('mv-row')) && sym) {
-      const row = document.querySelector('tr[data-sym="' + CSS.escape(sym) + '"], .mobile-card[data-sym="' + CSS.escape(sym) + '"]');
+      const row = locate(sym);
       if (row) {
         row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        row.classList.add('alloc-locate');
-        setTimeout(() => row.classList.remove('alloc-locate'), 1600);
+        flash(row);
       }
       return;
     }
@@ -9283,6 +9383,7 @@ updateSummary();
 wireHScrollProxy();   // attach the sticky horizontal scrollbar's scroll sync
 syncHScrollProxy();
 initDragReorder();
+initRowContextMenu();  // right-click on Symbol / Name cells
 showWelcomeBanner();
 if (portfolio.length > 0) refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => connectFinnhubWebSocket());
 else connectFinnhubWebSocket();
