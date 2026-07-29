@@ -338,7 +338,13 @@ The interesting property of this app is that it has no backend, so the attack su
 
 **Untrusted API and proxy responses** — quote payloads can only populate symbols the app requested, so a crafted key such as `__proto__` from a compromised proxy is discarded before it can pollute `Object.prototype`. WebSocket trade messages use an explicit `hasOwnProperty` check for the same reason. API keys go only to their own origins, never through a proxy.
 
-**Untrusted user input** — imported CSV fields are escaped in the preview. The column picker attaches handlers via `addEventListener` and reads keys from `data-` attributes rather than interpolating them into inline `onclick`. External links use `rel="noopener noreferrer"`.
+Response *values* are treated the same way. Numeric fields are coerced by the formatters, and the two free-text fields a payload controls verbatim — the ex-dividend and next-earnings dates, which Yahoo supplies as pre-formatted strings — are escaped and length-capped at the render site. They were previously interpolated raw into the table, which a compromised proxy could have turned into script execution; the CSP does not help there, since `script-src` has to allow `'unsafe-inline'` for the app's own handlers.
+
+**Untrusted user input** — imported CSV fields are escaped in the preview, and the preview caps how many rows it draws so a mis-dropped transaction log can't freeze the tab. The column picker attaches handlers via `addEventListener` and reads keys from `data-` attributes rather than interpolating them into inline `onclick`. External links use `rel="noopener noreferrer"`.
+
+**Symbols** are whitelisted to `[A-Z0-9.\-=]` on *every* path that can introduce one — manual entry, CSV import, shared URL, and state restored from `localStorage`. That last one matters because symbols are interpolated into inline `onclick` handlers, where attribute escaping alone is not enough: the HTML parser decodes `&#39;` back to a real apostrophe before the JS is parsed, so a stored quote could otherwise terminate the argument. Writing `localStorage` already requires script execution on this origin, so this is defence in depth rather than a privilege boundary — the point is that the invariant holds everywhere instead of by convention.
+
+**Column layout** loaded from a settings file is resolved through a `Map`, not a plain-object lookup. With an object, an entry of `__proto__` or `constructor` satisfies a truthiness check and injects `Object.prototype` into the column list, rendering phantom headers.
 
 **Shared-URL imports** — parsed with a symbol whitelist (`[A-Z0-9.\-=]`), a 10-character cap, numeric coercion, and strict `YYYY-MM-DD` date validation, then gated behind a confirmation dialog. The date matters specifically because it flows into an HTML `value=""` attribute; it's validated on ingestion *and* escaped at every render site.
 

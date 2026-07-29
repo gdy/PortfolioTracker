@@ -2906,6 +2906,7 @@ function handleImportFile(file) {
   reader.readAsText(file);
 }
 
+const PREVIEW_MAX_ROWS = 200; // rows drawn in the import preview (import is uncapped)
 function parseCSVLine(line) {
   const result = [];
   let current = '';
@@ -3187,7 +3188,11 @@ function previewImport() {
   // symbols to [A-Z0-9.\-=], but the preview is the one place where a raw
   // purchaseDate string from the file could reach innerHTML, so we escape it
   // here defensively.
-  for (const p of pendingImport) {
+  // Only preview the first PREVIEW_MAX rows. The import itself is uncapped, but
+  // building a table row per parsed position meant dropping the wrong file — a
+  // transaction log with tens of thousands of lines — froze the tab while
+  // rendering a preview nobody could read anyway.
+  for (const p of pendingImport.slice(0, PREVIEW_MAX_ROWS)) {
     const shortTag = p.shares < 0 ? ' <span style="color:#e55;font-size:10px;">SHORT</span>' : '';
     const safeSym = esc(p.symbol || '');
     const safeDate = esc(p.purchaseDate || '—');
@@ -3200,7 +3205,10 @@ function previewImport() {
     html += '</tr>';
   }
   html += '</tbody></table>';
-  html += `<div style="margin-top:6px;color:#3c8;">${pendingImport.length} position(s) ready to import</div>`;
+  const hidden = pendingImport.length - PREVIEW_MAX_ROWS;
+  html += `<div style="margin-top:6px;color:#3c8;">${pendingImport.length} position(s) ready to import`
+    + (hidden > 0 ? ` <span style="color:#888;">(showing first ${PREVIEW_MAX_ROWS})</span>` : '')
+    + `</div>`;
   // Debug info: show detected column mappings — escape everything that came
   // from the uploaded CSV (header cells, raw line, and column labels).
   if (pendingImport._debug) {
@@ -5940,6 +5948,20 @@ async function _refreshAll(signal) {
 // ==================== FORMATTING ====================
 function esc(s) { if (!s) return s; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function escAttr(s) { return (s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// Display-only strings taken VERBATIM out of a third-party JSON payload —
+// Yahoo's pre-formatted `fmt` values for ex-dividend and earnings dates, and the
+// equivalent date strings from FinnHub and FMP. Every other quote field that
+// reaches the DOM is either numeric (coerced by fmt*) or already escaped; these
+// two were interpolated raw, which is a script-execution hole whenever the
+// upstream body is attacker-controlled. Yahoo's arrives through public CORS
+// proxies, so that is a realistic condition rather than a hypothetical, and the
+// CSP cannot help because script-src permits 'unsafe-inline'.
+// Also length-capped: an oversized "date" would otherwise blow out the column.
+function escShort(s, max = 24) {
+  if (s == null || s === '') return '—';
+  const t = String(s);
+  return esc(t.length > max ? t.slice(0, max) + '…' : t);
+}
 // Number.prototype.toLocaleString builds a fresh Intl formatter on every call \u2014
 // measured at ~35 \u00b5s each, which dominated table rendering (a 60-row x 33-column
 // repaint makes well over a thousand of them). Intl.NumberFormat instances are
@@ -6059,14 +6081,21 @@ function afterHoursHtml(q, price, opts) {
 // Returns columns in user-defined order (if set), otherwise the default order.
 // `delete` is always pinned to the end so the X button stays in its expected spot.
 function getOrderedColumns() {
-  const byKey = {};
-  for (const c of COLUMNS) byKey[c.key] = c;
+  // Map, not a plain object: `byKey[k]` on an object resolves INHERITED keys, so
+  // a columnOrder entry of "__proto__", "constructor" or "toString" passed the
+  // truthiness check and pushed Object.prototype / Object / Function into the
+  // column list — rendering phantom `data-col-key="undefined"` headers. Reachable
+  // from an imported settings file, which only checks Array.isArray(columnOrder).
+  // A Map has no prototype chain to walk into.
+  const byKey = new Map();
+  for (const c of COLUMNS) byKey.set(c.key, c);
   const ordered = [];
   const seen = new Set();
   if (columnOrder && columnOrder.length > 0) {
     for (const k of columnOrder) {
       if (k === 'delete') continue;
-      if (byKey[k] && !seen.has(k)) { ordered.push(byKey[k]); seen.add(k); }
+      const col = byKey.get(k);
+      if (col && !seen.has(k)) { ordered.push(col); seen.add(k); }
     }
   }
   // Append any columns not in the saved order (e.g. new columns added in an update)
@@ -6075,7 +6104,8 @@ function getOrderedColumns() {
     if (!seen.has(c.key)) ordered.push(c);
   }
   // delete column always last
-  if (byKey['delete']) ordered.push(byKey['delete']);
+  const del = byKey.get('delete');
+  if (del) ordered.push(del);
   return ordered;
 }
 function getVisibleColumns() {
@@ -6134,8 +6164,8 @@ function getCellHtml(col, pos, q, computed) {
     case 'mktValue': return `<td>${mktValue != null ? fmtDollar(mktValue) : '\u2014'}</td>`;
     case 'dayPL': return `<td class="${cc(dayPL)}">${dayPL != null ? fmtDollar(dayPL) : '\u2014'}</td>`;
     case 'divYield': return `<td>${fmtDivYield(q.dividend, q.dividendYield)}</td>`;
-    case 'exDiv': return `<td style="font-size:11px;">${q.exDivDate || '\u2014'}</td>`;
-    case 'earnings': return `<td style="font-size:11px;">${q.earningsDate || '\u2014'}</td>`;
+    case 'exDiv': return `<td style="font-size:11px;">${escShort(q.exDivDate)}</td>`;
+    case 'earnings': return `<td style="font-size:11px;">${escShort(q.earningsDate)}</td>`;
     case 'perfYTD': return `<td class="${cc(q.perfYTD)}">${q.perfYTD != null ? fmtPct(q.perfYTD) : '\u2014'}</td>`;
     case 'perf6M': return `<td class="${cc(q.perf6M)}">${q.perf6M != null ? fmtPct(q.perf6M) : '\u2014'}</td>`;
     case 'perf1Y': return `<td class="${cc(q.perf1Y)}">${q.perf1Y != null ? fmtPct(q.perf1Y) : '\u2014'}</td>`;
@@ -7001,8 +7031,8 @@ function renderMobileCards() {
           ${item('beta',       'Beta',       q.beta != null ? fmt(q.beta) : '\u2014')}
           ${showItem('analystRating') ? `<div class="mobile-detail-item" data-col="analystRating"><span class="mobile-detail-label">Analyst</span><span class="mobile-detail-value ${analystCls}"${analystTap}>${analystInner}</span></div>` : ''}
           ${item('divYield',   'Div/Yield',  fmtDivYield(q.dividend, q.dividendYield))}
-          ${item('exDiv',      'Ex-Div',     q.exDivDate || '\u2014')}
-          ${item('earnings',   'Earnings',   q.earningsDate || '\u2014')}
+          ${item('exDiv',      'Ex-Div',     escShort(q.exDivDate))}
+          ${item('earnings',   'Earnings',   escShort(q.earningsDate))}
           ${showItem('perfYTD') ? `<div class="mobile-detail-item" data-col="perfYTD"><span class="mobile-detail-label">YTD</span><span class="mobile-detail-value ${cc(q.perfYTD)}">${q.perfYTD != null ? fmtPct(q.perfYTD) : '\u2014'}</span></div>` : ''}
           ${showItem('perf6M') ? `<div class="mobile-detail-item" data-col="perf6M"><span class="mobile-detail-label">6M</span><span class="mobile-detail-value ${cc(q.perf6M)}">${q.perf6M != null ? fmtPct(q.perf6M) : '\u2014'}</span></div>` : ''}
           ${showItem('perf1Y') ? `<div class="mobile-detail-item" data-col="perf1Y"><span class="mobile-detail-label">1Y</span><span class="mobile-detail-value ${cc(q.perf1Y)}">${q.perf1Y != null ? fmtPct(q.perf1Y) : '\u2014'}</span></div>` : ''}
@@ -8185,6 +8215,37 @@ function _initAllocInteractions() {
 // ==================== MULTIPLE PORTFOLIOS ====================
 let portfolioName = localStorage.getItem('stonks_active_portfolio') || 'Default';
 
+// Re-apply the symbol whitelist to state loaded from storage. Every OTHER
+// ingestion path already does this (manual add, CSV import, shared URL); the
+// persisted blob was the one that didn't, making it the odd one out. It matters
+// because symbols are interpolated into inline onclick handlers, where escAttr is
+// NOT sufficient on its own: the HTML parser decodes &#39; back to a real
+// apostrophe before the JS is parsed, so a stored quote could terminate the
+// string argument and run arbitrary code.
+//
+// This is defence in depth, not a privilege boundary — writing localStorage
+// already requires script execution on this origin. The point is that the
+// invariant "a portfolio symbol always matches [A-Z0-9.\-=]" now actually holds
+// everywhere, instead of being true only by convention.
+function sanitizePortfolio(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const p of list) {
+    if (!p || typeof p !== 'object') continue;
+    const symbol = String(p.symbol == null ? '' : p.symbol).toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+    if (!symbol) continue;
+    const shares = parseFloat(p.shares);
+    const cost = parseFloat(p.costBasis);
+    out.push({
+      symbol,
+      shares: isFinite(shares) ? shares : 0,
+      costBasis: isFinite(cost) ? cost : 0,
+      purchaseDate: (typeof p.purchaseDate === 'string' && /^\d{4}-\d{2}-\d{2}/.test(p.purchaseDate))
+        ? p.purchaseDate.slice(0, 10) : '',
+    });
+  }
+  return out;
+}
 function initPortfolios() {
   let all = lsGet('stonks_portfolios', 'null');
   let dirty = false;
@@ -8201,7 +8262,7 @@ function initPortfolios() {
   }
   if (dirty) safeSet('stonks_portfolios', JSON.stringify(all));
   // Load active portfolio
-  portfolio = all[portfolioName].portfolio || [];
+  portfolio = sanitizePortfolio(all[portfolioName].portfolio);
   notes = all[portfolioName].notes || {};
   safeSet('stonks_active_portfolio', portfolioName);
   renderPortfolioSelector();
@@ -8277,7 +8338,7 @@ function switchPortfolio(name) {
   // new (empty) portfolio is now active.
   const _sel = document.getElementById('portfolio-select');
   if (_sel && _sel.value !== name) _sel.value = name;
-  portfolio = all[name].portfolio || [];
+  portfolio = sanitizePortfolio(all[name].portfolio);
   notes = all[name].notes || {};
   // Also update the flat keys for backward compat
   safeSet('stonks_portfolio', JSON.stringify(portfolio));
@@ -8336,7 +8397,7 @@ function deletePortfolioPrompt() {
   safeSet('stonks_portfolios', JSON.stringify(all));
   portfolioName = Object.keys(all)[0];
   safeSet('stonks_active_portfolio', portfolioName);
-  portfolio = all[portfolioName].portfolio || [];
+  portfolio = sanitizePortfolio(all[portfolioName].portfolio);
   notes = all[portfolioName].notes || {};
   safeSet('stonks_portfolio', JSON.stringify(portfolio));
   safeSet('stonks_notes', JSON.stringify(notes));
