@@ -5664,19 +5664,7 @@ async function _refreshAll(signal) {
     for (const [sym, rt] of Object.entries(realtimeCommodityOverlay)) {
       const q = quoteData[sym];
       if (!q) continue;
-      q.price = rt.price;
-      // PAXG carries a 24h "open" we use as prevClose so gold shows a day change
-      // even off-hours when Yahoo (the usual futures prevClose source) isn't
-      // queried. Never override a real Yahoo/Stooq prevClose if one is present.
-      if (q.prevClose == null && rt.prevClose != null) q.prevClose = rt.prevClose;
-      if (q.prevClose) {
-        q.change = rt.price - q.prevClose;
-        q.changePct = (q.change / q.prevClose) * 100;
-      }
-      if (q.dayHigh == null && rt.dayHigh != null) q.dayHigh = rt.dayHigh;
-      if (q.dayLow == null && rt.dayLow != null) q.dayLow = rt.dayLow;
-      if (!q.name || q.name === sym) q.name = commodityName(sym);
-      q._lastUpdate = Date.now();
+      _applyRealtimeCommodity(q, sym, rt);
     }
   }
 
@@ -8891,6 +8879,43 @@ let _lastHeavyStart = 0; // last time the timer kicked off a heavy refreshAll (a
 // rate instead of being gated by the slowest stock source. fetchCryptoQuotes
 // already overlays Coinbase for real-time prices and self-throttles via the
 // CG cache, so this is just a thin "fetch + apply + render" wrapper.
+// ---- Shared light-tick helpers ----
+// A light tick replaces quoteData[sym] wholesale with a fresh price-only quote,
+// so fields the tick's source doesn't return have to be carried across or they
+// get blanked. These lists were previously inlined as four near-identical `if`
+// ladders across three functions, which had already drifted apart.
+const PRESERVE_ON_TICK_CRYPTO = ['wk52High', 'wk52Low', 'perfYTD', 'perf6M', 'perf1Y', 'dayHigh', 'dayLow'];
+// Stooq returns neither market cap nor average volume for futures, so both
+// commodity tick paths need to preserve them. They disagreed: refreshCommoditiesOnly
+// kept both while refreshAlwaysOnOnly's commodity branch kept neither, so an
+// off-hours tick could blank whatever the heavy refresh had filled in. Unified on
+// the superset — preserving a field that was never set is a no-op, so this can
+// only ever retain more real data, never less.
+const PRESERVE_ON_TICK_COMMODITY = ['wk52High', 'wk52Low', 'perfYTD', 'perf6M', 'perf1Y', 'marketCap', 'avgVolume'];
+function _preserveAcrossTick(fresh, existing, fields) {
+  if (!existing || !fresh) return;
+  for (const k of fields) if (fresh[k] == null && existing[k] != null) fresh[k] = existing[k];
+}
+
+// Apply one real-time tokenized-commodity reading (currently PAXG for gold) onto
+// an existing quote. The heavy refresh and both light-tick paths carried three
+// byte-identical copies of this.
+function _applyRealtimeCommodity(q, sym, rt) {
+  q.price = rt.price;
+  // PAXG carries a 24h "open" we use as prevClose so gold shows a day change even
+  // off-hours, when Yahoo (the usual futures prevClose source) isn't queried.
+  // Never override a real Yahoo/Stooq prevClose if one is present.
+  if (q.prevClose == null && rt.prevClose != null) q.prevClose = rt.prevClose;
+  if (q.prevClose) {
+    q.change = rt.price - q.prevClose;
+    q.changePct = (q.change / q.prevClose) * 100;
+  }
+  if (q.dayHigh == null && rt.dayHigh != null) q.dayHigh = rt.dayHigh;
+  if (q.dayLow == null && rt.dayLow != null) q.dayLow = rt.dayLow;
+  if (!q.name || q.name === sym) q.name = commodityName(sym);
+  q._lastUpdate = Date.now();
+}
+
 let _cryptoOnlyInFlight = false;
 async function refreshCryptoOnly() {
   if (_cryptoOnlyInFlight) return;
@@ -8920,16 +8945,8 @@ async function refreshCryptoOnly() {
       } else if (existing) {
         prevPrices[sym] = existing.price;
       }
-      if (existing) {
-        // Preserve supplemental data the slow CG/Yahoo paths populated once
-        if (cData.wk52High == null && existing.wk52High != null) cData.wk52High = existing.wk52High;
-        if (cData.wk52Low == null && existing.wk52Low != null) cData.wk52Low = existing.wk52Low;
-        if (cData.perfYTD == null && existing.perfYTD != null) cData.perfYTD = existing.perfYTD;
-        if (cData.perf6M == null && existing.perf6M != null) cData.perf6M = existing.perf6M;
-        if (cData.perf1Y == null && existing.perf1Y != null) cData.perf1Y = existing.perf1Y;
-        if (cData.dayHigh == null && existing.dayHigh != null) cData.dayHigh = existing.dayHigh;
-        if (cData.dayLow == null && existing.dayLow != null) cData.dayLow = existing.dayLow;
-      }
+      // Preserve supplemental data the slow CG/Yahoo paths populated once
+      _preserveAcrossTick(cData, existing, PRESERVE_ON_TICK_CRYPTO);
       quoteData[sym] = cData;
       updated = true;
     }
@@ -9011,17 +9028,9 @@ async function refreshCommoditiesOnly() {
         const existing = quoteData[sym];
         if (prePrices[sym] != null) prevPrices[sym] = prePrices[sym];
         else if (existing) prevPrices[sym] = existing.price;
-        if (existing) {
-          // Preserve fields that Stooq doesn't return (52-week range, perf, marketState, etc.)
-          // so the heavy refresh's previously-fetched data isn't overwritten with nulls.
-          if (cData.wk52High == null && existing.wk52High != null) cData.wk52High = existing.wk52High;
-          if (cData.wk52Low == null && existing.wk52Low != null) cData.wk52Low = existing.wk52Low;
-          if (cData.perfYTD == null && existing.perfYTD != null) cData.perfYTD = existing.perfYTD;
-          if (cData.perf6M == null && existing.perf6M != null) cData.perf6M = existing.perf6M;
-          if (cData.perf1Y == null && existing.perf1Y != null) cData.perf1Y = existing.perf1Y;
-          if (cData.marketCap == null && existing.marketCap != null) cData.marketCap = existing.marketCap;
-          if (cData.avgVolume == null && existing.avgVolume != null) cData.avgVolume = existing.avgVolume;
-        }
+        // Preserve fields Stooq doesn't return (52-week range, perf, market cap,
+        // avg volume) so the heavy refresh's data isn't overwritten with nulls.
+        _preserveAcrossTick(cData, existing, PRESERVE_ON_TICK_COMMODITY);
         quoteData[sym] = cData;
         errorSymbols.delete(sym);
         updated = true;
@@ -9044,18 +9053,7 @@ async function refreshCommoditiesOnly() {
         if (prePrices[sym] != null && prevPrices[sym] == null) {
           prevPrices[sym] = prePrices[sym];
         }
-        q.price = rt.price;
-        // PAXG's 24h "open" backfills prevClose so gold shows a day change even
-        // off-hours (Yahoo isn't queried then). Never override a real prevClose.
-        if (q.prevClose == null && rt.prevClose != null) q.prevClose = rt.prevClose;
-        if (q.prevClose) {
-          q.change = rt.price - q.prevClose;
-          q.changePct = (q.change / q.prevClose) * 100;
-        }
-        if (q.dayHigh == null && rt.dayHigh != null) q.dayHigh = rt.dayHigh;
-        if (q.dayLow == null && rt.dayLow != null) q.dayLow = rt.dayLow;
-        if (!q.name || q.name === sym) q.name = commodityName(sym);
-        q._lastUpdate = Date.now();
+        _applyRealtimeCommodity(q, sym, rt);
         errorSymbols.delete(sym);
         updated = true;
       }
@@ -9101,16 +9099,8 @@ async function refreshAlwaysOnOnly() {
         } else if (existing) {
           prevPrices[sym] = existing.price;
         }
-        if (existing) {
-          // Preserve supplemental data that was fetched once (52-week, performance)
-          if (cData.wk52High == null && existing.wk52High != null) cData.wk52High = existing.wk52High;
-          if (cData.wk52Low == null && existing.wk52Low != null) cData.wk52Low = existing.wk52Low;
-          if (cData.perfYTD == null && existing.perfYTD != null) cData.perfYTD = existing.perfYTD;
-          if (cData.perf6M == null && existing.perf6M != null) cData.perf6M = existing.perf6M;
-          if (cData.perf1Y == null && existing.perf1Y != null) cData.perf1Y = existing.perf1Y;
-          if (cData.dayHigh == null && existing.dayHigh != null) cData.dayHigh = existing.dayHigh;
-          if (cData.dayLow == null && existing.dayLow != null) cData.dayLow = existing.dayLow;
-        }
+        // Preserve supplemental data that was fetched once (52-week, performance)
+        _preserveAcrossTick(cData, existing, PRESERVE_ON_TICK_CRYPTO);
         quoteData[sym] = cData;
         updated = true;
       }
@@ -9141,15 +9131,10 @@ async function refreshAlwaysOnOnly() {
         const existing = quoteData[sym];
         if (preCommodityPrices[sym] != null) prevPrices[sym] = preCommodityPrices[sym];
         else if (existing) prevPrices[sym] = existing.price;
-        if (existing) {
-          // Preserve fields Stooq doesn't return (52-week range, performance,
-          // marketState) so the heavy refresh's data isn't overwritten with nulls.
-          if (sData.wk52High == null && existing.wk52High != null) sData.wk52High = existing.wk52High;
-          if (sData.wk52Low == null && existing.wk52Low != null) sData.wk52Low = existing.wk52Low;
-          if (sData.perfYTD == null && existing.perfYTD != null) sData.perfYTD = existing.perfYTD;
-          if (sData.perf6M == null && existing.perf6M != null) sData.perf6M = existing.perf6M;
-          if (sData.perf1Y == null && existing.perf1Y != null) sData.perf1Y = existing.perf1Y;
-        }
+        // Preserve fields Stooq doesn't return. Uses the same list as
+        // refreshCommoditiesOnly — this branch used to omit marketCap/avgVolume,
+        // so an off-hours tick could blank them.
+        _preserveAcrossTick(sData, existing, PRESERVE_ON_TICK_COMMODITY);
         quoteData[sym] = sData;
         errorSymbols.delete(sym);
         updated = true;
@@ -9169,18 +9154,7 @@ async function refreshAlwaysOnOnly() {
         if (preCommodityPrices[sym] != null && prevPrices[sym] == null) {
           prevPrices[sym] = preCommodityPrices[sym];
         }
-        q.price = rt.price;
-        // PAXG's 24h "open" backfills prevClose so gold shows a day change even
-        // off-hours (Yahoo isn't queried then). Never override a real prevClose.
-        if (q.prevClose == null && rt.prevClose != null) q.prevClose = rt.prevClose;
-        if (q.prevClose) {
-          q.change = rt.price - q.prevClose;
-          q.changePct = (q.change / q.prevClose) * 100;
-        }
-        if (q.dayHigh == null && rt.dayHigh != null) q.dayHigh = rt.dayHigh;
-        if (q.dayLow == null && rt.dayLow != null) q.dayLow = rt.dayLow;
-        if (!q.name || q.name === sym) q.name = commodityName(sym);
-        q._lastUpdate = Date.now();
+        _applyRealtimeCommodity(q, sym, rt);
         errorSymbols.delete(sym);
         updated = true;
       }
