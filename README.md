@@ -9,21 +9,7 @@
 ![No backend](https://img.shields.io/badge/backend-none-informational)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-<!-- SCREENSHOT — save the images, then delete this comment and uncomment the two blocks below.
-     docs/screenshot.png       cropped hero: Symbol → P&L %, all rows (~2:1 renders legibly at GitHub's ~850px width)
-     docs/screenshot-wide.png  the full 33-column capture, at native resolution
-
-![STONKS — live portfolio table](docs/screenshot.png)
-
-<details>
-<summary>See the full column set</summary>
-
-<br/>
-
-[![All 33 columns](docs/screenshot-wide.png)](docs/screenshot-wide.png)
-
-</details>
--->
+![STONKS — 17 positions across stocks, crypto and commodity futures, with the allocation donut, day movers and asset-class exposure panels open. The status bar shows live data arriving from five sources plus the FinnHub WebSocket.](docs/screenshot.png)
 
 ---
 
