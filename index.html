@@ -1142,8 +1142,21 @@
     /* Allocation chart */
     .allocation-wrap { flex-direction: column; }
     .allocation-legend { width: 100%; max-width: 100%; min-width: 0; }
-    /* Panels stack full-width on phones rather than squeezing side by side. */
-    .alloc-panel, .alloc-panel-donut { max-width: 100%; width: 100%; min-width: 0; }
+    /* Panels stack full-width on phones rather than squeezing side by side.
+       flex must be reset to 0 0 auto: the wrap flips to flex-direction:column
+       here, which makes the main axis VERTICAL — so the desktop `flex: 1 1 300px`
+       (470px for the donut) was sizing HEIGHT, padding every card out to at
+       least 300px and leaving a dead gap under the content. Equal heights are a
+       desktop concern; stacked cards should size to what's in them. */
+    .alloc-panel, .alloc-panel-donut {
+      max-width: 100%; width: 100%; min-width: 0;
+      flex: 0 0 auto;
+    }
+    /* Likewise the bodies: `flex: 1` would re-expand them inside an auto-height
+       card. Let them be their natural height and drop the footer pin, which
+       only exists to absorb slack that no longer exists. */
+    .alloc-panel-body, .alloc-stack { flex: 0 0 auto; }
+    .ac-foot { margin-top: 10px; }
     .alloc-panel-donut .alloc-panel-body { flex-direction: column; gap: 12px; }
 
     /* Hide table, show cards */

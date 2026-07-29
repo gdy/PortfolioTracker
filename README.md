@@ -60,7 +60,7 @@ Most of what's interesting here is the consequences of that constraint.
 
 That's it. No install, no `npm`, no server.
 
-A **Welcome Guide** walks through setup on first launch, and **Load Sample Data** fills the table with a few well-known positions if you want to see it working before entering your own. Re-open the guide any time from **Settings → Show Welcome Guide**.
+A **Welcome Guide** opens as a dialog on first launch, and **Load Sample Data** fills the table with a few well-known positions if you want to see it working before entering your own. Dismiss the guide with its close button, the backdrop, or `Esc`; re-open it any time from **Settings → Show Welcome Guide**.
 
 **Optional free API keys** (Settings panel) unlock the rest: [FinnHub](https://finnhub.io/register) adds WebSocket streaming plus P/E, EPS, beta, dividends, earnings dates, and analyst ratings; [Alpaca](https://app.alpaca.markets/signup) adds real bid/ask; [FMP](https://site.financialmodelingprep.com/register) adds a third quote fallback.
 
@@ -173,9 +173,9 @@ Routing Yahoo through public proxies means an untrusted intermediary controls th
 - **Analytics panel** — three linked views that open together above the table:
   - *Allocation by position* — SVG donut with a 24-color palette tuned for dark backgrounds, live totals in the center, and hover/tap highlighting shared with its legend. Positions under 1.5% group into an "Other" slice on larger portfolios.
   - *Today's movers* — day P&L per position as bars diverging from a zero axis, picked by largest absolute move so gainers and losers both appear, then ordered best to worst.
-  - *Exposure by asset class* — stocks / crypto / commodities as a stacked bar, footed with best and worst performer by total P&L % and an advancing-vs-declining count for the day.
+  - *Exposure by asset class* — stocks / crypto / commodities as a stacked bar whose segments and legend rows cross-highlight each other, footed with best and worst performer by total P&L % and an advancing-vs-declining count for the day.
 
-  Clicking any legend or mover row jumps to that position in the table. All three render from one data pass behind a shared signature gate, so they can't drift out of sync or re-render independently on a WebSocket tick, and they equalise to a single card height so the band reads as one row rather than three ragged stacks. Toggle with **Show Charts** in the summary bar.
+  All three are hover-linked and clickable: a legend or mover row jumps to that position in the table, and clicking an asset class flashes every position in it. They render from one data pass behind a shared signature gate, so they can't drift out of sync or re-render independently on a WebSocket tick, and on desktop they equalise to a single card height so the band reads as one row rather than three ragged stacks. Toggle with **Show Charts** in the summary bar.
 - **Adaptive price precision** — decimals scale to magnitude (2 → 4 → 6 → 8), so SHIB shows `0.00002341` instead of `$0.00`. Dollar aggregates stay at 2.
 - **Export CSV** — respects your current sort; re-imports cleanly into the app.
 - **Export / import settings** — API keys, column layout, alerts, and preferences as a JSON file.
@@ -205,6 +205,8 @@ Auto-detects exports from **Robinhood · E\*Trade · Fidelity · Charles Schwab 
 <br/>
 
 - **Sort any column** — change, P&L, and performance columns lead with the *best* value first, so one click on **% Chg** puts the day's biggest gainer on top; because those are live-price columns the ranking then re-sorts itself as prices move. Sort persists across sessions.
+- **Right-click a column header** for sort ascending / descending / clear sort, hide column, or jump to the picker. Locked columns show as required rather than offering a hide that wouldn't work, and non-sortable columns omit the sort entries.
+- **Right-click a Symbol or Name cell** for the same quick-actions menu a left-click opens — set alert, copy symbol, remove position — positioned at the pointer. Editable cells keep the browser's native menu so cut/paste and spellcheck still work.
 - **Sticky header row** stays visible as you scroll down; the **symbol column is frozen** to the left edge as you scroll the wide table sideways.
 - **Persistent horizontal scrollbar** pinned to the bottom of the viewport, so you can scroll the table sideways from anywhere on the page.
 - **Drag-to-reorder** rows and columns; column layout and visibility persist per browser.
