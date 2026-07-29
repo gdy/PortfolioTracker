@@ -2764,15 +2764,17 @@ function clearAll() {
 
 function updateShares(symbol, val) {
   const p = portfolio.find(p => p.symbol === symbol);
-  if (p) { pushUndo(); p.shares = parseFloat(val) || 0; savePortfolio(); renderTable(); updateSummary(); }
+  // force: committing with Enter leaves the input focused, and the new value can
+  // change sort position — this repaint has to be structural.
+  if (p) { pushUndo(); p.shares = parseFloat(val) || 0; savePortfolio(); renderTable(true); updateSummary(); }
 }
 function updateCost(symbol, val) {
   const p = portfolio.find(p => p.symbol === symbol);
-  if (p) { pushUndo(); p.costBasis = parseFloat(val) || 0; savePortfolio(); renderTable(); updateSummary(); }
+  if (p) { pushUndo(); p.costBasis = parseFloat(val) || 0; savePortfolio(); renderTable(true); updateSummary(); }
 }
 function updateDate(symbol, val) {
   const p = portfolio.find(p => p.symbol === symbol);
-  if (p) { pushUndo(); p.purchaseDate = val || ''; savePortfolio(); renderTable(); }
+  if (p) { pushUndo(); p.purchaseDate = val || ''; savePortfolio(); renderTable(true); }
 }
 function updateNotes(symbol, val) {
   pushUndo();
@@ -6317,7 +6319,29 @@ function getSortedPortfolio() {
   return result;
 }
 
-function renderTable() {
+// True while the user is typing in a cell of the table or a mobile card. Both
+// render paths rebuild via innerHTML, which replaces that input node — dropping
+// focus, caret position, and every keystroke the `change` event hasn't committed
+// yet. Toolbar, Settings and modal inputs are deliberately NOT matched: they
+// live outside the rendered regions and are unaffected by a repaint.
+function _isEditingCell() {
+  const el = document.activeElement;
+  if (!el || !el.closest) return false;
+  const tag = el.tagName;
+  if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') return false;
+  return !!el.closest('#portfolio-body, #mobile-cards');
+}
+
+// `force` is for STRUCTURAL repaints — row added/removed, sort or columns
+// changed — which genuinely need a rebuild. Everything else (a refresh tick
+// landing while someone edits a share count) degrades to the in-place price
+// patch, which updates the same derived cells without touching the inputs.
+function renderTable(force) {
+  if (!force && _isEditingCell()) {
+    if (isMobileView()) updateMobileCardPrices();
+    else updatePriceCells();
+    return;
+  }
   _lastLightFullRender = Date.now(); // any full redraw resets the light-tick throttle
   const mobile = isMobileView();
   const body = document.getElementById('portfolio-body');
@@ -6722,7 +6746,15 @@ const LIGHT_FULL_RENDER_MS = 15000;
 // longer matches the data (rows added/removed since the last full render).
 // Caller must bumpPortfolioVersion() first so getSortedPortfolio re-sorts.
 function reorderTableToSort() {
-  if (isMobileView()) { renderMobileCards(); return; }
+  if (isMobileView()) {
+    // renderMobileCards rebuilds every card via innerHTML, so on a live-price
+    // sort this fired on EVERY tick and wiped an in-progress card edit. Cards
+    // can't be cheaply reordered the way <tr> nodes can, so while editing we
+    // just patch prices and let the order catch up on the next idle render.
+    if (_isEditingCell()) updateMobileCardPrices();
+    else renderMobileCards();
+    return;
+  }
   const body = document.getElementById('portfolio-body');
   if (!body) { renderTable(); return; }
   const rows = body.querySelectorAll('tr[data-sym]');
@@ -7613,7 +7645,10 @@ function setMobileAlert(symbol, type, val) {
   saveAlerts();
   // Re-render so the bell color/state updates immediately (was previously stuck
   // on .triggered after clearing the threshold from a triggered alert).
-  renderTable();
+  // force: this fires from a card input, so committing with Enter leaves that
+  // input focused — the unforced path would degrade to a price patch and the
+  // bell would keep its stale state, which is the exact bug noted above.
+  renderTable(true);
   updateSummary();
 }
 function checkAllAlerts() {
@@ -8171,6 +8206,8 @@ function pruneQuoteCache() {
     delete prevPrices[s];
     delete wsLastTradeTime[s];
     delete _summaryFailCounts[s];
+    delete _notFoundStreak[s];  // was leaking here the same way it leaked in removePosition
+    delete _cbCache[s];
     errorSymbols.delete(s);
     fetchedSummary.delete(s);
     fetchedFundamentals.delete(s);
