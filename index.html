@@ -136,11 +136,14 @@
   .btn-danger:hover { background: #3a1a1a; }
   .btn-refresh { border-color: #48f; color: #6af; }
   .btn-refresh:hover { background: #1a2a4a; }
-  /* Welcome-guide toggle in Settings — blue outline matching the Refresh button,
-     so it reads as accented next to the plain settings buttons without shouting.
-     Text flips to "Close Welcome Guide" while the guide is open (see _syncWelcomeBtn). */
-  .btn-welcome-toggle { border-color: #48f; color: #6af; }
-  .btn-welcome-toggle:hover { background: #1a2a4a; }
+  /* Welcome-guide toggle in Settings. Still a blue outline so it reads as the
+     accented item among the plain settings buttons, but a muted one: at the
+     Refresh button's #48f/#6af it sat hotter than anything else in the panel and
+     pulled the eye off the settings themselves. Deliberately NOT the same blue as
+     .btn-refresh any more. Text flips to "Close Welcome Guide" while the guide is
+     open (see _syncWelcomeBtn). */
+  .btn-welcome-toggle { border-color: #3f6ea6; color: #7ba7d6; }
+  .btn-welcome-toggle:hover { background: #1a2a4a; color: #9cc0e6; }
 
   @keyframes pulse-live { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
   #ws-indicator { animation: pulse-live 2s ease-in-out infinite; }
@@ -603,8 +606,10 @@
   .welcome-banner .dismiss-btn {
     margin-top: 14px;
     padding: 8px 20px;
-    background: #2563b0;
-    border: 1px solid #5aa6ff;
+    /* Muted from #2563b0 / #5aa6ff — that pale ring was the brightest thing in
+       the dialog. Still a solid filled button so it stays the obvious way out. */
+    background: #22598f;
+    border: 1px solid #4d84bd;
     color: #fff;
     cursor: pointer;
     font-family: inherit;
@@ -612,7 +617,7 @@
     font-weight: bold;
     border-radius: 4px;
   }
-  .welcome-banner .dismiss-btn:hover { background: #2f78cf; color: #fff; }
+  .welcome-banner .dismiss-btn:hover { background: #2a6aa8; color: #fff; }
 
   .welcome-tips { margin-top: 16px; border-top: 1px solid #22223d; padding-top: 11px; }
   /* A real <button>, not a click-handling <div>: this is the one interactive
