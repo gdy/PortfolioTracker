@@ -1463,7 +1463,9 @@
       <option value="60">60s</option>
     </select>
     <span id="ws-indicator" style="display:none; font-size:11px; color:#3c8; white-space:nowrap;" title="FinnHub WebSocket connected — real-time trade updates active" role="status" aria-live="polite">&#9679; Live</span>
-    <button class="btn btn-refresh" onclick="refreshAll()" aria-label="Refresh data now">&#8635; Refresh</button>
+    <!-- .catch matches every other refreshAll() call site; without it a failing
+         refresh surfaced as an unhandled promise rejection. -->
+    <button class="btn btn-refresh" onclick="refreshAll().catch(e => console.warn('refreshAll failed:', e))" aria-label="Refresh data now">&#8635; Refresh</button>
     <button class="btn" id="undo-btn" onclick="undo()" title="Undo (Ctrl+Z)" aria-label="Undo last change" disabled>&#8630; Undo</button>
     <button class="btn" id="redo-btn" onclick="redo()" title="Redo (Ctrl+Y)" aria-label="Redo change" disabled>&#8631; Redo</button>
     <button class="btn" onclick="openImportModal()" aria-label="Import portfolio from CSV">Import</button>
@@ -8547,7 +8549,25 @@ function sharePortfolio() {
 }
 function copyShareURL() {
   const url = document.getElementById('share-url').value;
-  navigator.clipboard.writeText(url).then(() => flashConfirm('confirm-share'));
+  // Guarded the same way the row menu's "Copy symbol" already was. The Clipboard
+  // API is absent or blocked in plenty of real contexts — older browsers, an
+  // insecure origin, a denied permission — and the README's primary install
+  // instruction is to open index.html straight from disk. Unguarded, this threw
+  // a TypeError on the click and the user got no feedback at all, since the
+  // confirmation badge only appeared on the success path.
+  const done = () => flashConfirm('confirm-share');
+  const manual = () => {
+    const el = document.getElementById('share-url');
+    if (el) { el.focus(); el.select(); }           // leave it selected to copy by hand
+    setStatus('Press Ctrl+C to copy — clipboard access is blocked here', 'error');
+  };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(done).catch(manual);
+    } else {
+      manual();
+    }
+  } catch (_) { manual(); }
 }
 function loadFromURL() {
   const hash = window.location.hash;
@@ -9310,12 +9330,13 @@ function setupAutoRefresh() {
             offHoursLastFullRefresh = now;
             refreshAll().catch(e => console.warn('refreshAll failed:', e)); // full refresh covers crypto/commodity too — skip lightweight
           } else if (hasAlwaysOn) {
-            refreshAlwaysOnOnly(); // lightweight crypto/commodity only between full refreshes
+            // .catch to match refreshCryptoOnly/refreshCommoditiesOnly above.
+            refreshAlwaysOnOnly().catch(e => dbg('off-hours refresh failed:', e && e.message));
           }
         } else {
           // Weekend: only crypto/commodity, no stock API calls
           if (hasAlwaysOn) {
-            refreshAlwaysOnOnly();
+            refreshAlwaysOnOnly().catch(e => dbg('off-hours refresh failed:', e && e.message));
           } else {
             setStatus('Market closed \u2014 auto-refresh paused (weekend)', '');
           }
