@@ -13,7 +13,27 @@
 -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
-<title>Portfolio Tracker</title>
+<title>STONKS — Portfolio Tracker</title>
+<meta name="description" content="A real-time portfolio tracker for stocks, crypto, and commodities that runs entirely in one HTML file. No server, no build step, no dependencies, no account — your positions never leave your browser.">
+<meta name="author" content="Grant">
+<!--
+  Link-preview cards. These are read by crawlers fetching the page, not by the
+  page itself, so the CSP's img-src has no bearing on them. og:image must be an
+  absolute URL — a relative path renders as a blank card on every platform.
+  Keep the URL pointed at the GitHub Pages deploy, which is the canonical copy.
+-->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="STONKS">
+<meta property="og:title" content="STONKS — Portfolio Tracker">
+<meta property="og:description" content="Real-time stocks, crypto, and commodities in a single HTML file. No server, no build step, no account — your positions never leave your browser.">
+<meta property="og:url" content="https://gdy.github.io/PortfolioTracker/">
+<meta property="og:image" content="https://gdy.github.io/PortfolioTracker/docs/screenshot.png">
+<meta property="og:image:alt" content="The STONKS portfolio tracker showing 17 positions across stocks, crypto and commodity futures, with the allocation donut, day movers and asset-class exposure panels open.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="STONKS — Portfolio Tracker">
+<meta name="twitter:description" content="Real-time stocks, crypto, and commodities in a single HTML file. No server, no build step, no account — your positions never leave your browser.">
+<meta name="twitter:image" content="https://gdy.github.io/PortfolioTracker/docs/screenshot.png">
+<link rel="canonical" href="https://gdy.github.io/PortfolioTracker/">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop offset='0%25' stop-color='%23003d1a'/%3E%3Cstop offset='100%25' stop-color='%230a0a0a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='url(%23g)'/%3E%3Cpolyline points='4,24 9,20 13,22 17,13 21,16 25,8 28,5' fill='none' stroke='%2300c853' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='25,5 28,5 28,8' fill='%2300c853'/%3E%3Cline x1='4' y1='27' x2='28' y2='27' stroke='%23333' stroke-width='1'/%3E%3C/svg%3E" />
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -362,6 +382,23 @@
   @keyframes flashR { 0% { background: rgba(255,23,68,0.15); } 100% { background: transparent; } }
 
   .after-hours { color: #b388ff; font-size: 12px; }
+
+  /* "D" superscript on a price whose source served it on a delay. Amber rather
+     than the muted grey used for estimates: an estimated bid/ask is a derived
+     nicety, but a stale price masquerading as a live one is the thing most
+     likely to mislead someone acting on this table, so it gets a colour that
+     reads as a caution. `cursor: help` invites the tooltip carrying the reason
+     and the delay. Kept out of the document flow width-wise (superscript, 9px)
+     so adding it never reflows the price column. */
+  .delay-mark {
+    color: #d19a3d;
+    font-size: 9px;
+    font-weight: bold;
+    margin-left: 2px;
+    cursor: help;
+    vertical-align: super;
+    line-height: 0;
+  }
 
   /* Auto-refresh toggle is styled exactly like .btn .btn-refresh but green.
      The native checkbox is hidden and a leading glyph (\u2713 when checked,
@@ -1061,7 +1098,13 @@
   .mobile-card-price { font-size: 17px; font-weight: bold; }
   .mobile-card-change { font-size: 12px; }
   .mobile-card-row2 {
+    /* `gap` is load-bearing, not cosmetic: this row is space-between with three
+       children, so as soon as their combined width fills the line the free space
+       hits zero and they butt straight up against each other — producing runs
+       like "12 shares @ $350.00AH: 572.00". A minimum gap keeps them legible at
+       any content width. */
     display: flex; justify-content: space-between; align-items: center;
+    gap: 10px;
     margin-top: 6px; font-size: 12px; color: #888;
   }
   .mobile-card-row2 span { display: inline-flex; gap: 4px; }
@@ -1679,7 +1722,7 @@
         <span class="step-num">3.</span>
         <span><span class="key-name">FMP</span> (optional) &mdash; Sign up at <a href="https://site.financialmodelingprep.com/register" target="_blank" rel="noopener noreferrer">financialmodelingprep.com</a> for an extra data source fallback.</span>
       </div>
-      <p class="welcome-note" style="margin-top:12px; margin-bottom:0;">Without any key, live prices still work through Yahoo Finance, Stooq, and CoinGecko. A FinnHub key additionally unlocks real-time WebSocket streaming and full fundamentals.</p>
+      <p class="welcome-note" style="margin-top:12px; margin-bottom:0;">Without any key, live prices still work: stocks and ETFs from StockAnalysis, crypto from CoinGecko, Coinbase and Kraken, commodities from Yahoo Finance. A FinnHub key additionally unlocks real-time WebSocket streaming and full fundamentals. A superscript <span class="delay-mark" style="cursor:default">D</span> next to a price means that source serves it on a delay.</p>
 
       <div class="welcome-tips" id="welcome-tips">
         <button type="button" class="welcome-tips-summary" aria-label="Tips and shortcuts" aria-expanded="false" aria-controls="welcome-tips-body" onclick="toggleWelcomeTips(this)"><span class="welcome-tips-arrow">&#9656;</span> <strong style="color:#e0e0e0;">Tips &amp; shortcuts</strong> <span style="color:#666; font-weight:normal; font-size:11px;">8 things worth knowing</span></button>
@@ -1942,6 +1985,7 @@ const AH_CHART_DELAY = 250;              // between sequential after-hours chart
 const CG_SUPPLEMENTAL_DELAY = 1500;       // between CoinGecko supplemental requests
 // Batch sizes
 const FINNHUB_FUND_BATCH = 5;
+
 const FINNHUB_QUOTE_BATCH = 10;
 const STILL_MISSING_BATCH = 4;
 const FILL_FUND_BATCH = 3;
@@ -1987,13 +2031,31 @@ function makeEmptyQuote(sym) {
     analystCount: null,  // number of analysts contributing to the consensus
     analystBreakdown: null, // FinnHub raw counts {strongBuy, buy, hold, sell, strongSell} or null (Yahoo source has no breakdown)
     analystPeriod: null,    // FinnHub reporting period (YYYY-MM-DD) or null
+    // Provenance of `price`. Several free sources are delayed at the origin and
+    // look identical to a real-time quote once they're in the table, so the user
+    // has no way to tell a live price from a 15-minute-old one. Rendered as a
+    // superscript "D" on the price cell (see delayMarkHtml) so a delayed number
+    // is never silently presented as live.
+    //
+    // Deliberately TRI-STATE, because "we know it's live" and "nobody has said"
+    // are different facts and collapsing them gets the default wrong:
+    //   >0   delayed by that many minutes (Alpaca delayed_sip 15,
+    //        non-gold futures 10-15 at the exchange)
+    //   0    confirmed real-time — a streamed trade, or the PAXG overlay taking
+    //        gold live — which SUPERSEDES an earlier delayed fill
+    //   null unknown; delayMarkHtml then falls back to what the instrument
+    //        itself implies, so a futures row is marked from its very first
+    //        paint instead of only after the refresh pass gets around to
+    //        tagging it. Fail towards warning, not towards silence.
+    delayedBy: null,
+    delayedNote: null,
     _lastUpdate: null, // timestamp of last data update for this symbol
   };
 }
 
 // Fields filled once by deferred/secondary passes (performance history, 52-week
 // range, fundamentals, analyst consensus) and gated by the fetched* sets so they
-// aren't re-fetched. A price-only primary source (e.g. Stooq on the keyless path)
+// aren't re-fetched. A price-only primary source (e.g. a bare exchange ticker)
 // doesn't carry them, so _refreshAll preserves them across the quote overwrite —
 // otherwise a later full refresh (e.g. one triggered by adding another ticker)
 // would blank them on every existing row while only the just-added ticker, not
@@ -2095,7 +2157,17 @@ let fetchedAfterHours = new Set(); // track symbols we already tried after-hours
 let fetchedFundamentals = new Set(); // track symbols with cached FinnHub fundamentals
 let fetchedPerformance = new Set(); // track symbols whose YTD/6M/1Y perf has been fetched
 let fundamentalsCache = {}; // cache profile, metrics, earnings, dividends from FinnHub
-let alpacaWorkingFeed = null; // cache which Alpaca feed works ('', 'iex', or null=unknown)
+let alpacaWorkingFeed = null; // cache which Alpaca feed works ('', 'iex', 'delayed_sip', or null=unknown)
+// Alpaca feeds this app will use, in the order it tries them, with the delay
+// each one carries at the origin. 'iex' is real-time but only IEX's own prints
+// (a small share of consolidated volume), so thinly-traded names often come back
+// with no trade at all. 'delayed_sip' is the full consolidated tape on a 15-min
+// delay and IS included in the free Basic plan — it is the difference between
+// "no price" and "a correct price from 15 minutes ago" for those names. '' means
+// no feed parameter: the server picks (sip for paid subscribers, iex otherwise).
+// Anything delayed is tagged onto the quote so the table can mark it (see
+// makeEmptyQuote's delayedBy) rather than passing a stale print off as live.
+const ALPACA_FEED_DELAY_MIN = { 'iex': 0, '': 0, 'delayed_sip': 15 };
 let attemptedSymbols = new Set(); // symbols that have had at least one fetch attempt
 let _notFoundStreak = {}; // sym -> consecutive refreshes a stock missed all sources (grace before "Not found")
 let hiddenColumns = lsGet('stonks_hidden_columns', '[]'); // column keys to hide
@@ -2231,8 +2303,12 @@ function saveNotes() {
 // deferred fields (performance, fundamentals, analyst, after-hours) fresh each
 // session anyway (see HYDRATE_STRIP_FIELDS), so persisting them just bloated the
 // blob — at 50+ positions that adds up on every debounced write.
+// `delayedBy`/`delayedNote` ride along with the cached price deliberately: the
+// price they describe is restored on the next boot, so dropping the provenance
+// would repaint a 15-minute-delayed number as if it were live.
 const _PERSIST_QUOTE_FIELDS = ['symbol', 'name', 'price', 'change', 'changePct', 'prevClose',
-  'open', 'dayHigh', 'dayLow', 'volume', 'bid', 'ask', 'bidEstimated', 'askEstimated', '_lastUpdate'];
+  'open', 'dayHigh', 'dayLow', 'volume', 'bid', 'ask', 'bidEstimated', 'askEstimated',
+  'delayedBy', 'delayedNote', '_lastUpdate'];
 function _saveQuotesNow() {
   _saveQuotesTimer = null;
   const syms = portfolio.map(p => p.symbol);
@@ -2371,7 +2447,7 @@ function getFmpKey() { return localStorage.getItem('stonks_fmp_key') || ''; }
 const CRYPTO_MAP = {
   'BTC': 'BTC-USD', 'ETH': 'ETH-USD', 'SOL': 'SOL-USD', 'DOGE': 'DOGE-USD',
   'XRP': 'XRP-USD', 'ADA': 'ADA-USD', 'DOT': 'DOT-USD', 'AVAX': 'AVAX-USD',
-  'MATIC': 'MATIC-USD', 'LINK': 'LINK-USD', 'LTC': 'LTC-USD', 'UNI': 'UNI-USD',
+  'LINK': 'LINK-USD', 'LTC': 'LTC-USD', 'UNI': 'UNI-USD',
   'SHIB': 'SHIB-USD', 'ATOM': 'ATOM-USD', 'XLM': 'XLM-USD',
   // Meme / newer-listing coins users commonly type by bare ticker
   'BONK': 'BONK-USD', 'PEPE': 'PEPE-USD', 'WIF': 'WIF-USD', 'FLOKI': 'FLOKI-USD',
@@ -2380,8 +2456,19 @@ const CRYPTO_MAP = {
   'TRX': 'TRX-USD', 'BCH': 'BCH-USD', 'NEAR': 'NEAR-USD', 'APT': 'APT-USD',
   'ARB': 'ARB-USD', 'OP': 'OP-USD', 'SUI': 'SUI-USD', 'ETC': 'ETC-USD',
   'FIL': 'FIL-USD', 'AAVE': 'AAVE-USD', 'ALGO': 'ALGO-USD', 'ICP': 'ICP-USD',
-  'HBAR': 'HBAR-USD', 'VET': 'VET-USD', 'INJ': 'INJ-USD', 'RNDR': 'RNDR-USD',
+  'HBAR': 'HBAR-USD', 'VET': 'VET-USD', 'INJ': 'INJ-USD',
   'TON': 'TON-USD',
+  // Ticker migrations (verified 2026-08-31). Both old tickers are kept as
+  // shorthand so anyone who still types them lands on the live asset instead
+  // of a dead one, but they RESOLVE to the new symbol:
+  //   MATIC -> POL: Polygon's MATIC->POL migration completed; CoinGecko's
+  //     `matic-network` is now literally titled "MATIC (migrated to POL)" with a
+  //     market cap of 0 and a stale price, and Coinbase delisted MATIC-USD (so
+  //     the real-time overlay silently had nothing to hit either).
+  //   RNDR -> RENDER: same story; Coinbase's RNDR-USD product is delisted and
+  //     RENDER-USD is the live one.
+  'POL': 'POL-USD', 'MATIC': 'POL-USD',
+  'RENDER': 'RENDER-USD', 'RNDR': 'RENDER-USD',
 };
 // Commodity shorthand -> Yahoo Finance futures symbol
 const COMMODITY_MAP = {
@@ -2393,8 +2480,8 @@ const COMMODITY_MAP = {
 };
 // Friendly display names for commodity futures. Yahoo supplies a name like
 // "Gold Dec 25", but Yahoo isn't queried off-hours (weekends/overnight) — the
-// only commodity sources then are Stooq (no name) and the Coinbase PAXG overlay
-// for gold (price only). Without this map a gold position added on a weekend
+// only commodity source then is the Coinbase/Kraken PAXG overlay for gold
+// (price only). Without this map a gold position added on a weekend
 // shows the bare "GC=F" forever. Used as a fallback whenever a commodity quote
 // would otherwise carry the bare symbol as its name.
 const COMMODITY_NAMES = {
@@ -2616,10 +2703,10 @@ function prefetchSampleData() {
   _samplePrefetch = { picks }; // loadSampleData reuses these so the warmed quotes match
   const syms = picks.map(_samplePickToSymbol);
   // Seed quoteData (price fields only) from each source AS IT RETURNS, so the fast
-  // direct-CORS sources (Stooq stocks/futures, CoinGecko crypto, ~1s) warm the
-  // cache without waiting on the slow proxied Yahoo batch (which can take 10s+ when
-  // the proxy fleet is degraded). Best-effort and fire-and-forget — the click works
-  // (and refreshes) regardless of whether/which prefetch landed.
+  // direct-CORS crypto path (CoinGecko + Coinbase, ~1s) warms the cache without
+  // waiting on the slow proxied Yahoo batch (which can take 10s+ when the proxy
+  // fleet is degraded). Best-effort and fire-and-forget — the click works (and
+  // refreshes) regardless of whether/which prefetch landed.
   const warm = (src, isCryptoSrc) => {
     if (!src || !src.data) return;
     for (const [sym, d] of Object.entries(src.data)) {
@@ -2645,7 +2732,7 @@ function prefetchSampleData() {
       }
     }
   };
-  fetchStooqQuotes(syms).then(r => warm(r, false)).catch(() => {});                       // fast: stocks + futures
+  fetchStockAnalysisQuotes(syms).then(r => warm(r, false)).catch(() => {});                // fast: stocks (direct CORS)
   if (syms.some(s => COINGECKO_IDS[s])) fetchCryptoQuotes(syms).then(r => warm(r, true)).catch(() => {}); // fast: crypto
   fetchYahooQuotes(syms).then(r => warm(r, false)).catch(() => {});                        // slower: refines/fills gaps
 }
@@ -3256,6 +3343,11 @@ function executeImport() {
     fetchedFundamentals.delete(pos.symbol);
     fetchedPerformance.delete(pos.symbol);
     fetchedAfterHours.delete(pos.symbol);
+    // Match addPosition/loadSampleData: clearing these two is what makes a
+    // freshly imported row say "loading..." instead of "retrying..." when the
+    // symbol had failed earlier in the session.
+    attemptedSymbols.delete(pos.symbol);
+    delete _notFoundStreak[pos.symbol];
     delete _summaryFailCounts[pos.symbol];
     delete fundamentalsCache[pos.symbol];
 
@@ -3276,14 +3368,32 @@ function executeImport() {
 // ==================== DATA FETCHING ====================
 const PROXIES = [
   url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
-  url => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
-  url => 'https://corsproxy.io/?' + encodeURIComponent(url),
   url => 'https://proxy.cors.sh/' + url,
+  url => 'https://proxy.corsfix.com/?' + url,
   // Pruned (2026-06): thingproxy.freeboard.io is NXDOMAIN — the domain no
   // longer exists, so every rotation through it was a guaranteed dead attempt.
   // crossorigin.me's proxy service shut down years ago and the domain has
   // since changed hands — requests there (which carry portfolio symbols in
   // the URL) went to an unknown party for zero chance of a response.
+  //
+  // Pruned (2026-08), both verified dead against Yahoo v8 over repeated trials:
+  //   api.codetabs.com — no longer answers at all. It doesn't refuse, it HANGS,
+  //     so every rotation through it burned the full PROXY_FETCH_TIMEOUT (~10 s)
+  //     and, on the parallel race path, held a connection slot for the whole
+  //     window. This was the single most expensive entry in the pool.
+  //   corsproxy.io — returns a hard 403 {"error":"keyless_legacy_url"}: the
+  //     anonymous/legacy URL form was retired and the service now requires an
+  //     account API key, which this app has no way to ship (a key in a public
+  //     static file is a key for everyone).
+  // Added (2026-08): proxy.corsfix.com — raw passthrough like cors.sh, and the
+  //     fastest of the three in testing (~115-185 ms vs allorigins' variable
+  //     0.02-12 s). Handles multi-param query strings and percent-encoded
+  //     futures symbols (GC%3DF) correctly, which several candidates did not.
+  //
+  // NOTE for future maintenance: the failure mode that actually hurts is a proxy
+  // that hangs, not one that errors. A fast 403 costs ~30 ms; a hang costs a full
+  // timeout and a connection slot. When auditing this list, measure latency on
+  // failure, not just success.
 ];
 
 let lastWorkingProxy = 0; // remember which proxy worked last
@@ -3885,9 +3995,25 @@ async function fetchFinnhubQuotes(symbols) {
   // FinnHub stock endpoints don't handle crypto or commodity futures (GC=F etc.)
   const stockSymbols = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
 
-  // Fetch fundamentals only for new symbols (not yet cached)
-  // Rate-limit: FinnHub free = 60 calls/min. Each symbol needs 4 calls.
-  // Process in batches of 5 symbols (20 calls) with 1.5s delay between batches.
+  // Fetch fundamentals only for new symbols (not yet cached).
+  //
+  // Rate-limit budget: FinnHub free is 60 calls/min, global per key. Each symbol
+  // costs 4 calls (profile2, metric, calendar/earnings, recommendation) fired
+  // concurrently, and a batch is FINNHUB_FUND_BATCH symbols — so a batch spends
+  // 4 x FINNHUB_FUND_BATCH calls at once. Keep that product in mind before
+  // adding an endpoint or raising the batch: this is a first-load-only
+  // cost (results are cached per symbol per session) so a short burst above the
+  // steady-state budget is tolerable, and a 429 bails out of the remaining
+  // batches rather than hammering, but the burst still has to stay in the same
+  // order of magnitude as the cap or every first load starts rate-limited.
+  //
+  // /stock/dividend used to be a fifth call here. It is a PREMIUM endpoint — it
+  // returns 403 on every free key, unconditionally — so it was a guaranteed
+  // wasted request per symbol, 20% of the fundamentals budget spent on a
+  // response that could never arrive. Ex-dividend date is still populated: the
+  // free /stock/metric response carries `exDividendDate`, which is what the
+  // fallback below already read whenever the dividend call came back empty
+  // (i.e. always). Dividend amount and yield likewise come from /stock/metric.
   const needFundamentals = stockSymbols.filter(s => !fetchedFundamentals.has(s) && !errorSymbols.has(s));
   if (needFundamentals.length > 0) {
     const fromDate = new Date(now.getTime() - 7 * 86400000).toISOString().split('T')[0];
@@ -3904,11 +4030,10 @@ async function fetchFinnhubQuotes(symbols) {
       const fundPromises = batch.map(async sym => {
         if (fundRateLimited) return;
         try {
-          const [profileResp, metricsResp, earningsResp, dividendResp, recResp] = await Promise.all([
+          const [profileResp, metricsResp, earningsResp, recResp] = await Promise.all([
             fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${key}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
             fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${key}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
             fetch(`https://finnhub.io/api/v1/calendar/earnings?symbol=${yfEnc(sym)}&from=${fromDate}&to=${toDate}&token=${key}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
-            fetch(`https://finnhub.io/api/v1/stock/dividend?symbol=${yfEnc(sym)}&from=2024-01-01&to=${toDate}&token=${key}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
             fetch(`https://finnhub.io/api/v1/stock/recommendation?symbol=${yfEnc(sym)}&token=${key}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
           ]);
           if (metricsResp.status === 429 || profileResp.status === 429) {
@@ -3919,7 +4044,6 @@ async function fetchFinnhubQuotes(symbols) {
           const profile = profileResp.ok ? await profileResp.json() : {};
           const metrics = metricsResp.ok ? await metricsResp.json() : {};
           const earnings = earningsResp.ok ? await earningsResp.json() : {};
-          const dividends = dividendResp.ok ? await dividendResp.json() : [];
           // Recommendation endpoint returns an array sorted newest-first; we
           // only need the most recent month's consensus. A 429 / non-OK here
           // shouldn't fail the whole symbol — ratings are supplemental.
@@ -3937,12 +4061,6 @@ async function fetchFinnhubQuotes(symbols) {
             const upcoming = earnings.earningsCalendar.find(e => new Date(e.date) >= now);
             if (upcoming) earningsDate = upcoming.date;
           }
-          let exDivDate = null;
-          if (Array.isArray(dividends) && dividends.length > 0) {
-            const sorted = dividends.sort((a, b) => new Date(b.exDate) - new Date(a.exDate));
-            exDivDate = sorted[0].exDate || null;
-          }
-
           fundamentalsCache[sym] = {
             name: profile.name || sym,
             wk52High: m['52WeekHigh'] || null, wk52Low: m['52WeekLow'] || null,
@@ -3953,7 +4071,9 @@ async function fetchFinnhubQuotes(symbols) {
             beta: m.beta || null,
             dividend: m.dividendPerShareAnnual || null,
             dividendYield: m.dividendYieldIndicatedAnnual || null,
-            exDivDate: exDivDate || m.exDividendDate || null,
+            // Free-tier source for ex-dividend date (the dedicated /stock/dividend
+            // endpoint is premium — see the budget note above).
+            exDivDate: m.exDividendDate || null,
             earningsDate,
             perfYTD: m.yearToDatePriceReturnDaily || null,
             perf6M: m['6MonthPriceReturnDaily'] || m['26WeekPriceReturnDaily'] || null,
@@ -4030,55 +4150,95 @@ async function fetchFinnhubQuotes(symbols) {
 }
 
 // --- Alpaca Markets API (free, 200 req/min, real-time IEX quotes with bid/ask) ---
+// Fetch one page of snapshots for a given feed. Returns the parsed symbol->snapshot
+// map, or null when the feed is unusable (auth failure / transport error), so the
+// caller can decide whether to fall through to the next feed.
+async function _alpacaSnapshotPage(base, feed, keyId, secret) {
+  const snapUrl = feed ? base + '&feed=' + feed : base;
+  try {
+    const resp = await fetch(snapUrl, {
+      headers: { 'APCA-API-KEY-ID': keyId, 'APCA-API-SECRET-KEY': secret },
+      signal: AbortSignal.timeout(ALPACA_TIMEOUT)
+    });
+    if (resp.ok) return await resp.json();
+    if (resp.status === 401 || resp.status === 403) {
+      console.warn('Alpaca auth failed (' + resp.status + ') for feed:', feed || 'default');
+    }
+  } catch (e) { console.warn('Alpaca attempt failed:', e.message); }
+  return null;
+}
+// Turn one snapshot object into a quote. `delayMin` is the origin delay of the
+// feed it came from, so a delayed_sip price is labelled instead of being shown
+// as if it were live.
+function _alpacaSnapToQuote(sym, snap, delayMin) {
+  const trade = snap.latestTrade || snap.trade || {};
+  const quote = snap.latestQuote || snap.quote || {};
+  const bar = snap.dailyBar || snap.bar || {};
+  const prevBar = snap.prevDailyBar || {};
+  const price = trade.p || bar.c;
+  const prevClose = prevBar.c || null;
+  if (!price) return null;
+  return { ...makeEmptyQuote(sym),
+    price, change: prevClose ? price - prevClose : null,
+    changePct: prevClose ? ((price - prevClose) / prevClose) * 100 : null,
+    prevClose, open: bar.o || null, dayHigh: bar.h || null, dayLow: bar.l || null,
+    volume: bar.v || null,
+    bid: quote.bp || null, ask: quote.ap || null,
+    delayedBy: delayMin,   // 0 for iex/default — positively asserts real-time
+    delayedNote: delayMin > 0 ? 'Alpaca delayed SIP feed' : null,
+    _lastUpdate: Date.now(),
+  };
+}
 async function fetchAlpacaQuotes(symbols) {
   const { keyId, secret } = getAlpacaKeys();
   if (!keyId || !secret) return null;
-  // Filter out crypto and commodities - Alpaca stock endpoint doesn't handle them
+  // Filter out crypto and commodities — the stock endpoint doesn't handle them.
+  // Crypto is covered separately by fetchAlpacaCryptoQuotes (different host path,
+  // no feed tiers, free and real-time).
   const stockSyms = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
   if (stockSyms.length === 0) return null;
-  // Use cached feed if known, otherwise try IEX first (free tier), then default (paid SIP)
   const base = 'https://data.alpaca.markets/v2/stocks/snapshots?symbols=' + stockSyms.join(',');
-  const feedsToTry = alpacaWorkingFeed != null ? [alpacaWorkingFeed] :  ['iex', ''];
-  let data = null;
+  // Try IEX first (real-time, free) then the server default. Whichever answers
+  // is remembered so later refreshes skip the dead one.
+  const feedsToTry = alpacaWorkingFeed != null ? [alpacaWorkingFeed] : ['iex', ''];
+  let data = null, usedFeed = null;
   for (const feed of feedsToTry) {
-    const snapUrl = feed ? base + '&feed=' + feed : base;
-    try {
-      const resp = await fetch(snapUrl, {
-        headers: { 'APCA-API-KEY-ID': keyId, 'APCA-API-SECRET-KEY': secret },
-        signal: AbortSignal.timeout(ALPACA_TIMEOUT)
-      });
-      if (resp.ok) {
-        data = await resp.json();
-        if (Object.keys(data).length > 0) alpacaWorkingFeed = feed;
-        break;
-      }
-      if (resp.status === 401 || resp.status === 403) {
-        console.warn('Alpaca auth failed (' + resp.status + ') for feed:', feed || 'default');
-        continue; // try next feed
-      }
-    } catch (e) { console.warn('Alpaca attempt failed:', e.message); }
+    const page = await _alpacaSnapshotPage(base, feed, keyId, secret);
+    if (page) {
+      data = page; usedFeed = feed;
+      if (Object.keys(page).length > 0) alpacaWorkingFeed = feed;
+      break;
+    }
   }
   if (!data) { console.warn('Alpaca: all endpoints failed'); return null; }
   try {
     const results = {};
+    const baseDelay = ALPACA_FEED_DELAY_MIN[usedFeed] || 0;
     for (const sym of stockSyms) {
       const snap = data[sym];
       if (!snap) continue;
-      const trade = snap.latestTrade || snap.trade || {};
-      const quote = snap.latestQuote || snap.quote || {};
-      const bar = snap.dailyBar || snap.bar || {};
-      const prevBar = snap.prevDailyBar || {};
-      const price = trade.p || bar.c;
-      const prevClose = prevBar.c || null;
-      if (!price) continue;
-      results[sym] = { ...makeEmptyQuote(sym),
-        price, change: prevClose ? price - prevClose : null,
-        changePct: prevClose ? ((price - prevClose) / prevClose) * 100 : null,
-        prevClose, open: bar.o || null, dayHigh: bar.h || null, dayLow: bar.l || null,
-        volume: bar.v || null,
-        bid: quote.bp || null, ask: quote.ap || null,
-        _lastUpdate: Date.now(),
-      };
+      const q = _alpacaSnapToQuote(sym, snap, baseDelay);
+      if (q) results[sym] = q;
+    }
+    // IEX only carries prints that crossed IEX itself — a few percent of
+    // consolidated volume — so thinly-traded names routinely come back with no
+    // trade and no daily bar, and previously just vanished from Alpaca's
+    // contribution entirely. The free Basic plan also includes delayed_sip: the
+    // full consolidated tape on a 15-minute delay. Backfill only the symbols IEX
+    // missed, and tag them delayed so the table shows them as delayed rather
+    // than passing a 15-minute-old print off as a live quote.
+    const missing = stockSyms.filter(s => !results[s]);
+    if (missing.length > 0 && usedFeed !== 'delayed_sip') {
+      const dsBase = 'https://data.alpaca.markets/v2/stocks/snapshots?symbols=' + missing.join(',');
+      const dsPage = await _alpacaSnapshotPage(dsBase, 'delayed_sip', keyId, secret);
+      if (dsPage) {
+        for (const sym of missing) {
+          const snap = dsPage[sym];
+          if (!snap) continue;
+          const q = _alpacaSnapToQuote(sym, snap, ALPACA_FEED_DELAY_MIN['delayed_sip']);
+          if (q) results[sym] = q;
+        }
+      }
     }
     if (Object.keys(results).length > 0) {
       // Alpaca data loaded
@@ -4086,6 +4246,57 @@ async function fetchAlpacaQuotes(symbols) {
     }
   } catch (e) {
     console.warn('Alpaca fetch failed:', e.message);
+  }
+  return null;
+}
+
+// --- Alpaca crypto snapshots (free, real-time, no feed tiers) ---
+// Alpaca's crypto data is not gated the way equities are: there is no IEX/SIP
+// split and no 15-minute delay on the free plan, so this is a genuinely
+// real-time source for anyone who already entered Alpaca keys for stocks. It
+// complements rather than replaces the Coinbase overlay — Coinbase covers coins
+// Alpaca doesn't list, and Alpaca covers a few Coinbase Exchange doesn't (TRX
+// among them). Both feed the same merge step, which prefers whichever source
+// actually has the symbol.
+//
+// Symbols are 'BTC/USD' here, not the app's 'BTC-USD', and the response nests
+// everything under a "snapshots" key — unlike the equities snapshot endpoint,
+// which returns a bare symbol->snapshot map. Both differences are easy to get
+// wrong silently, so they're converted explicitly below.
+async function fetchAlpacaCryptoQuotes(symbols) {
+  const { keyId, secret } = getAlpacaKeys();
+  if (!keyId || !secret) return null;
+  const cryptoSyms = symbols.filter(isCryptoSymbol);
+  if (cryptoSyms.length === 0) return null;
+  const toAlpaca = s => s.replace(/-USD$/, '/USD');
+  const url = 'https://data.alpaca.markets/v1beta3/crypto/us/snapshots?symbols=' +
+    encodeURIComponent(cryptoSyms.map(toAlpaca).join(','));
+  try {
+    const resp = await fetch(url, {
+      headers: { 'APCA-API-KEY-ID': keyId, 'APCA-API-SECRET-KEY': secret },
+      signal: AbortSignal.timeout(ALPACA_TIMEOUT)
+    });
+    if (!resp.ok) {
+      if (resp.status === 401 || resp.status === 403) console.warn('Alpaca crypto auth failed:', resp.status);
+      return null;
+    }
+    const body = await resp.json();
+    const snaps = (body && body.snapshots) || {};
+    const results = {};
+    // Iterate the symbols WE asked for rather than the response's keys, so a
+    // malformed or crafted key can never become an object key here (same
+    // response-key guard the equity and Yahoo paths use).
+    for (const sym of cryptoSyms) {
+      const snap = snaps[toAlpaca(sym)];
+      if (!snap) continue;
+      const q = _alpacaSnapToQuote(sym, snap, 0);
+      if (!q) continue;
+      q.name = CRYPTO_NAMES[sym] || sym;
+      results[sym] = q;
+    }
+    if (Object.keys(results).length > 0) return { source: 'Alpaca Crypto', data: results };
+  } catch (e) {
+    console.warn('Alpaca crypto fetch failed:', e.message);
   }
   return null;
 }
@@ -4198,164 +4409,166 @@ async function fetchFinnhubFreeQuotes(symbols) {
   return null;
 }
 
-// --- Stooq (free, no key, batched CSV, ~15 min delayed) for stocks + commodity futures ---
-// Stooq is a Polish data aggregator that hosts free intraday + EOD CSVs for thousands
-// of US tickers and major futures. Coverage: US equities (AAPL → aapl.us), commodity
-// futures (GC=F → gc.f), and indices. Data is roughly 15 minutes delayed during
-// market hours, but the wire format is tiny (one batched call covers the whole
-// portfolio) and the endpoint is CORS-enabled, so this gives keyless users a
-// reliable backup that doesn't depend on the public proxy fleet that Yahoo needs.
-const STOOQ_TIMEOUT = 6000;
-function _stooqSymbol(sym) {
-  if (isCryptoSymbol(sym)) return null; // CG/Coinbase already cover crypto better
-  if (isCommoditySymbol(sym)) {
-    // Yahoo-style GC=F → Stooq's gc.f
-    return sym.toLowerCase().replace('=f', '.f');
-  }
-  // US equities only — Stooq uses lowercase + .us suffix. Skip exotic
-  // tickers (BRK.B etc.) since their Stooq mapping isn't a simple 1:1.
-  if (!/^[A-Z][A-Z0-9]{0,5}$/.test(sym)) return null;
-  return sym.toLowerCase() + '.us';
+// --- stockanalysis.com (keyless, direct CORS, real-time US equities + ETFs) ---
+// This is the only keyless stock source that does NOT go through the public proxy
+// fleet, which makes it the most valuable source in the app for a no-key user:
+// Yahoo is keyless too, but every Yahoo call is a proxy call, and the proxy fleet
+// is the least reliable link in the chain (see the PROXIES notes).
+//
+// Why it replaced Stooq in this slot (see the Data graveyard in the README):
+//   - real-time rather than ~15 minutes delayed
+//   - covers dotted tickers (BRK.B, BF.B) that _stooqSymbol explicitly skipped
+//   - covers ETFs
+//   - carries after-hours/pre-market price AND an explicit market-state string,
+//     which is exactly what _hideAfterHours otherwise has to infer from a clock
+//
+// Trade-offs, stated plainly:
+//   - Per-symbol, not batched. That sounds worse than Stooq's one-call CSV, but
+//     the path it actually replaces for keyless users is Yahoo's per-symbol v8
+//     fan-out THROUGH PROXIES, so it is strictly fewer hops. Measured: 12 symbols
+//     concurrently in ~135 ms, ~30 ms warm.
+//   - It is an unofficial internal API of a commercial site, in the same category
+//     as Yahoo's own endpoints. Treated as best-effort: it can vanish, so it is a
+//     fast primary rather than something load-bearing, and every field it fills is
+//     also obtainable elsewhere.
+//   - No crypto, no futures (both 404) — equities and ETFs only.
+const SA_TIMEOUT = 6000;
+const SA_BATCH = 10;          // concurrent in-flight requests; browsers cap ~6/origin anyway
+// Circuit breaker rather than a permanent latch, and the distinction matters:
+// from the browser, "this endpoint is gone" and "the user's network dropped"
+// are the SAME observable event (TypeError: Failed to fetch). A permanent latch
+// therefore meant a passing wifi blip disabled a healthy source until reload —
+// verified by simulating an outage. A cooldown costs a dead endpoint one wasted
+// request per window while letting a recovered network heal on its own. Same
+// shape as the Coinbase breaker (CB_FAIL_THRESHOLD / CB_SKIP_COOLDOWN).
+const SA_FAIL_THRESHOLD = 2;   // consecutive all-symbol failures before backing off
+const SA_SKIP_COOLDOWN = 60000;
+let _saFailStreak = 0;
+let _saSkipUntil = 0;
+// Map stockanalysis' market-state strings onto the vocabulary the rest of the app
+// already speaks (Yahoo's marketState). Anything unrecognised stays null so
+// _hideAfterHours falls back to the ET clock rather than trusting a guess.
+function _saMarketState(ms, es) {
+  const m = (ms || '').toLowerCase();
+  const e = (es || '').toLowerCase();
+  if (m === 'open' || m === 'regular') return 'REGULAR';
+  if (e.startsWith('pre')) return 'PRE';
+  if (e.startsWith('after') || e.startsWith('post')) return 'POST';
+  if (m === 'closed') return 'CLOSED';
+  return null;
 }
-async function fetchStooqQuotes(symbols, signal) {
-  const supported = [];
-  const reverseMap = {}; // STOOQ_ID (uppercase) → user symbol
-  for (const s of symbols) {
-    const stooqId = _stooqSymbol(s);
-    if (stooqId) {
-      supported.push(stooqId);
-      reverseMap[stooqId.toUpperCase()] = s;
-    }
-  }
-  if (supported.length === 0) return null;
-
-  // Batched CSV: f=sd2t2ohlcvnp2 → Symbol, Date, Time, Open, High, Low, Close,
-  // Volume, Name, Change% — h=headers, e=csv. Stooq accepts up to ~50 symbols
-  // per call comfortably; chunk if larger.
-  //
-  // Symbols are separated by commas. We previously used '+' URL-encoded to
-  // '%2B', which Stooq's CGI parses inconsistently — for some batches it
-  // returned only the first symbol, leaving SI=F/HG=F/etc. silently dropped
-  // and stuck on "retrying..." in the table. Comma is unambiguous in a query
-  // string and matches Stooq's documented usage.
-  const CHUNK = 50;
+async function fetchStockAnalysisQuotes(symbols, signal) {
+  if (Date.now() < _saSkipUntil) return null;
+  const stockSyms = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
+  if (stockSyms.length === 0) return null;
   const results = {};
-  for (let i = 0; i < supported.length; i += CHUNK) {
-    const chunk = supported.slice(i, i + CHUNK);
-    const url = `https://stooq.com/q/l/?s=${chunk.join(',')}&f=sd2t2ohlcvnp2&h&e=csv`;
-    let text = null;
-    try {
-      // Try direct CORS first — Stooq's CSV endpoints typically allow it,
-      // which keeps us off the public proxy fleet entirely on the happy path.
-      const r = await fetch(url, { signal: _fetchTimeoutSignal(STOOQ_TIMEOUT, signal) });
-      if (r.ok) text = await r.text();
-    } catch (_) { /* fall through to proxy */ }
-    if (!text) {
-      try { text = await fetchWithProxy(url, -1, PROXY_FETCH_TIMEOUT, signal); }
-      catch (e) { dbg('Stooq fetch failed:', e && e.message); continue; }
-    }
-    if (!text || !text.trim()) continue;
-
-    const lines = text.split(/\r?\n/).filter(l => l.trim());
-    if (lines.length < 2) continue;
-    const headers = lines[0].split(',').map(h => h.trim());
-    const ix = name => headers.indexOf(name);
-    const iSym = ix('Symbol'), iOpen = ix('Open'), iHigh = ix('High'),
-          iLow = ix('Low'), iClose = ix('Close'), iVol = ix('Volume'),
-          iName = ix('Name'),
-          iChgPct = headers.findIndex(h => /change/i.test(h));
-    if (iSym < 0 || iClose < 0) continue;
-
-    for (let li = 1; li < lines.length; li++) {
-      // Quote-aware split (Stooq quotes some names), then repair the one case it
-      // can't: an UNQUOTED company name containing a comma ("XYZ, INC."). Name is
-      // second-to-last, so the overflow pushes Change% off the end and the percent
-      // parses as a fragment of the name — silently losing the day change for that
-      // symbol. The old `< headers.length` guard never caught it because the row
-      // gets LONGER, not shorter. Re-join the surplus fields into the name so every
-      // index after it lines up again.
-      let cells = parseCSVLine(lines[li]);
-      if (iName >= 0 && cells.length > headers.length) {
-        const extra = cells.length - headers.length;
-        cells = cells.slice(0, iName)
-          .concat([cells.slice(iName, iName + extra + 1).join(', ')])
-          .concat(cells.slice(iName + extra + 1));
-      }
-      if (cells.length < headers.length) continue;
-      const stooqSym = (cells[iSym] || '').trim().toUpperCase();
-      const userSym = reverseMap[stooqSym];
-      if (!userSym) continue;
-      const close = parseFloat(cells[iClose]);
-      if (!isFinite(close) || close <= 0) continue;
-      const open = parseFloat(cells[iOpen]); const high = parseFloat(cells[iHigh]);
-      const low = parseFloat(cells[iLow]);   const vol = parseFloat(cells[iVol]);
-      const namestr = iName >= 0 ? (cells[iName] || '').replace(/^"|"$/g, '').trim() : null;
-      const rawChangePct = iChgPct >= 0 ? parseFloat(cells[iChgPct]) : NaN;
-      // Stooq sometimes returns "0" for Change% as a missing-data placeholder
-      // (especially for thinly-traded futures like SI=F/HG=F). If OHLC clearly
-      // shows the day moved, a 0% can't be real — treat it as missing so other
-      // sources (Yahoo's normalized chart) can backfill via the merge step.
-      let changePct = null;
-      if (isFinite(rawChangePct)) {
-        const ohlcMoved = isFinite(open) && isFinite(close) && open !== close;
-        const ohlcRangeMoved = isFinite(high) && isFinite(low) && high !== low;
-        if (rawChangePct === 0 && (ohlcMoved || ohlcRangeMoved)) {
-          // Bogus 0% — discard
-        } else {
-          changePct = rawChangePct;
+  let hardFailures = 0;
+  for (let i = 0; i < stockSyms.length; i += SA_BATCH) {
+    if (signal && signal.aborted) break;
+    const batch = stockSyms.slice(i, i + SA_BATCH);
+    await Promise.all(batch.map(async sym => {
+      try {
+        // The /s/ and /e/ path segments (stock vs ETF) are interchangeable — both
+        // resolve either kind — so there is no need to classify the symbol first.
+        const r = await fetch('https://stockanalysis.com/api/quotes/s/' + encodeURIComponent(sym),
+                              { signal: _fetchTimeoutSignal(SA_TIMEOUT, signal) });
+        if (r.status === 404) return;            // unknown ticker here, not an outage
+        if (!r.ok) { hardFailures++; return; }
+        const j = await r.json();
+        const d = j && j.data;
+        const price = d && Number(d.p);
+        if (!isFinite(price) || price <= 0) return;
+        const q = { ...makeEmptyQuote(sym),
+          price,
+          change: isFinite(Number(d.c)) ? Number(d.c) : null,
+          changePct: isFinite(Number(d.cp)) ? Number(d.cp) : null,
+          prevClose: isFinite(Number(d.cl)) ? Number(d.cl) : null,
+          open: isFinite(Number(d.o)) ? Number(d.o) : null,
+          dayHigh: isFinite(Number(d.h)) ? Number(d.h) : null,
+          dayLow: isFinite(Number(d.l)) ? Number(d.l) : null,
+          volume: isFinite(Number(d.v)) ? Number(d.v) : null,
+          // h52/l52 are the 52-week range. Worth taking from here even though
+          // this is a 'price' source: the only other providers are Yahoo's
+          // quoteSummary (401s without a key) and FinnHub (needs one), so
+          // without this the 52-Wk Range column is permanently empty for a
+          // keyless user.
+          wk52High: isFinite(Number(d.h52)) ? Number(d.h52) : null,
+          wk52Low: isFinite(Number(d.l52)) ? Number(d.l52) : null,
+          marketState: _saMarketState(d.ms, d.es),
+          delayedBy: 0,   // real-time — positively assert it (see makeEmptyQuote)
+          _lastUpdate: Date.now(),
+        };
+        // Extended-hours price. `es` says which session it belongs to, so pre and
+        // post land in the right pair of fields instead of both being treated as
+        // after-hours (which would show a pre-market print under an "AH" label).
+        const ep = Number(d.ep), ec = Number(d.ec);
+        if (isFinite(ep) && ep > 0) {
+          const e = (d.es || '').toLowerCase();
+          if (e.startsWith('pre')) {
+            q.preMarketPrice = ep;
+            q.preMarketChange = isFinite(ec) ? ec : null;
+          } else if (e.startsWith('after') || e.startsWith('post')) {
+            q.postMarketPrice = ep;
+            q.postMarketChange = isFinite(ec) ? ec : null;
+          }
         }
+        results[sym] = q;
+      } catch (e) {
+        // An abort is OUR doing (portfolio switch, superseding refresh), not a
+        // statement about the endpoint. Counting it would let a single
+        // well-timed switch latch a perfectly healthy source off for the
+        // rest of the session — every in-flight symbol rejects at once, which
+        // is exactly the all-failed pattern the latch looks for.
+        if (e && e.name === 'AbortError') return;
+        hardFailures++;
+        dbg('stockanalysis failed for', sym, e && e.message);
       }
-      // Derive prevClose + change from close + change% so the sort/render
-      // path can color-tint the row even when this is the only source.
-      let change = null, prevClose = null;
-      if (changePct != null && changePct !== 0) {
-        prevClose = close / (1 + changePct / 100);
-        change = close - prevClose;
-      } else if (changePct === 0) {
-        // Genuine 0% (open == close == high == low) — change is meaningfully 0
-        change = 0;
-        prevClose = close;
-      }
-      results[userSym] = { ...makeEmptyQuote(userSym),
-        name: namestr || userSym,
-        price: close,
-        open: isFinite(open) ? open : null,
-        dayHigh: isFinite(high) ? high : null,
-        dayLow:  isFinite(low)  ? low  : null,
-        change, changePct,
-        prevClose,
-        volume: isFinite(vol) ? vol : null,
-        _lastUpdate: Date.now(),
-      };
+    }));
+  }
+  // Latch off only when EVERY symbol failed for a non-404, non-abort reason —
+  // that pattern means the endpoint moved or started refusing us, not that one
+  // ticker is unknown. A partial failure is normal and must not disable a
+  // working source, and neither must an aborted refresh.
+  if (signal && signal.aborted) return null;
+  if (Object.keys(results).length > 0) {
+    _saFailStreak = 0;
+    return { source: 'StockAnalysis', data: results };
+  }
+  if (hardFailures >= stockSyms.length && stockSyms.length > 0) {
+    _saFailStreak++;
+    if (_saFailStreak >= SA_FAIL_THRESHOLD) {
+      _saSkipUntil = Date.now() + SA_SKIP_COOLDOWN;
+      _saFailStreak = 0;
+      dbg('stockanalysis.com unreachable — backing off for ' + (SA_SKIP_COOLDOWN / 1000) + 's');
     }
   }
-  return Object.keys(results).length > 0 ? { source: 'Stooq', data: results } : null;
+  return null;
 }
 
 // --- CoinGecko (free, no key, CORS-enabled) for crypto market cap ---
 const COINGECKO_IDS = {
   'BTC-USD': 'bitcoin', 'ETH-USD': 'ethereum', 'SOL-USD': 'solana', 'DOGE-USD': 'dogecoin',
   'XRP-USD': 'ripple', 'ADA-USD': 'cardano', 'DOT-USD': 'polkadot', 'AVAX-USD': 'avalanche-2',
-  'MATIC-USD': 'matic-network', 'LINK-USD': 'chainlink', 'LTC-USD': 'litecoin', 'UNI-USD': 'uniswap',
+  'POL-USD': 'polygon-ecosystem-token', 'LINK-USD': 'chainlink', 'LTC-USD': 'litecoin', 'UNI-USD': 'uniswap',
   'SHIB-USD': 'shiba-inu', 'ATOM-USD': 'cosmos', 'XLM-USD': 'stellar',
   'BONK-USD': 'bonk', 'PEPE-USD': 'pepe', 'WIF-USD': 'dogwifcoin', 'FLOKI-USD': 'floki',
   'PENGU-USD': 'pudgy-penguins', 'TRX-USD': 'tron', 'BCH-USD': 'bitcoin-cash', 'NEAR-USD': 'near',
   'APT-USD': 'aptos', 'ARB-USD': 'arbitrum', 'OP-USD': 'optimism', 'SUI-USD': 'sui',
   'ETC-USD': 'ethereum-classic', 'FIL-USD': 'filecoin', 'AAVE-USD': 'aave', 'ALGO-USD': 'algorand',
   'ICP-USD': 'internet-computer', 'HBAR-USD': 'hedera-hashgraph', 'VET-USD': 'vechain',
-  'INJ-USD': 'injective-protocol', 'RNDR-USD': 'render-token', 'TON-USD': 'the-open-network',
+  'INJ-USD': 'injective-protocol', 'RENDER-USD': 'render-token', 'TON-USD': 'the-open-network',
 };
 const CRYPTO_NAMES = {
   'BTC-USD': 'Bitcoin', 'ETH-USD': 'Ethereum', 'SOL-USD': 'Solana', 'DOGE-USD': 'Dogecoin',
   'XRP-USD': 'XRP', 'ADA-USD': 'Cardano', 'DOT-USD': 'Polkadot', 'AVAX-USD': 'Avalanche',
-  'MATIC-USD': 'Polygon', 'LINK-USD': 'Chainlink', 'LTC-USD': 'Litecoin', 'UNI-USD': 'Uniswap',
+  'POL-USD': 'Polygon', 'LINK-USD': 'Chainlink', 'LTC-USD': 'Litecoin', 'UNI-USD': 'Uniswap',
   'SHIB-USD': 'Shiba Inu', 'ATOM-USD': 'Cosmos', 'XLM-USD': 'Stellar',
   'BONK-USD': 'Bonk', 'PEPE-USD': 'Pepe', 'WIF-USD': 'dogwifhat', 'FLOKI-USD': 'Floki',
   'PENGU-USD': 'Pudgy Penguins', 'TRX-USD': 'TRON', 'BCH-USD': 'Bitcoin Cash', 'NEAR-USD': 'NEAR Protocol',
   'APT-USD': 'Aptos', 'ARB-USD': 'Arbitrum', 'OP-USD': 'Optimism', 'SUI-USD': 'Sui',
   'ETC-USD': 'Ethereum Classic', 'FIL-USD': 'Filecoin', 'AAVE-USD': 'Aave', 'ALGO-USD': 'Algorand',
   'ICP-USD': 'Internet Computer', 'HBAR-USD': 'Hedera', 'VET-USD': 'VeChain',
-  'INJ-USD': 'Injective', 'RNDR-USD': 'Render', 'TON-USD': 'Toncoin',
+  'INJ-USD': 'Injective', 'RENDER-USD': 'Render', 'TON-USD': 'Toncoin',
 };
 let _cgCache = { data: null, time: 0 };
 
@@ -4376,10 +4589,11 @@ let _cgCache = { data: null, time: 0 };
 const CB_CACHE_TTL = 1000;
 const CB_FETCH_TIMEOUT = 1500;
 // Above this many portfolio cryptos, the per-symbol Coinbase ticker fan-out is
-// replaced by one batched CryptoCompare call per tick. Browsers cap ~6
+// replaced by one batched Binance.US (or Kraken) call per tick. Browsers cap ~6
 // connections per origin, so 15-20 per-symbol calls serialize into several
-// rounds every tick; the batch is faster and lighter at scale. Trade-off:
-// CryptoCompare has no real bid/ask, so spread estimates fill in instead.
+// rounds every tick; the batch is faster and lighter at scale. Both batch venues
+// carry real bid/ask, so unlike the old CryptoCompare batch there is no loss of
+// spread data at scale.
 const CB_OVERLAY_MAX_FANOUT = 10;
 const _cbCache = {}; // sym -> { data: {price, bid, ask}, time: ms }
 const _cbStatsCache = {}; // product -> { data: {price, prevClose, dayHigh, dayLow}, time: ms }
@@ -4401,7 +4615,19 @@ function _resetCoinbaseOverlayState() {
   _cbFailStreak = 0;
   _cbSkipUntil = 0;
 }
+// Coins the app supports that Coinbase Exchange has no product for, so the
+// real-time overlay can skip them instead of issuing a request per tick that
+// can only 404. Checked against the live /products list on 2026-08-31. These
+// still get prices from CoinGecko (and Alpaca Crypto, if keys are set) — they
+// just don't get the sub-tick Coinbase overlay on top.
+//
+// Kept as an explicit list rather than learned at runtime because the failure is
+// permanent, not transient: caching a 404 would work, but a hardcoded list makes
+// the omission visible to the next person reading this file and gives them a
+// date to re-check against.
+const CB_UNSUPPORTED = new Set(['TRX-USD']);
 async function _coinbaseFetch(sym) {
+  if (CB_UNSUPPORTED.has(sym)) return null;
   const cached = _cbCache[sym];
   const now = Date.now();
   if (cached && now - cached.time < CB_CACHE_TTL) return cached.data;
@@ -4452,66 +4678,191 @@ async function _coinbaseStats(product) {
     return null;
   }
 }
-// CryptoCompare (free, no key, CORS wildcard) — secondary keyless real-time
-// price source used as an automatic fallback when the Coinbase circuit breaker
-// trips. Replaces the former CoinCap v2 overlay: api.coincap.io was
-// decommissioned — its free v2 host no longer resolves (NXDOMAIN) and the v3
-// endpoint at rest.coincap.io requires an API key, which would break the
-// keyless design. CryptoCompare's pricemulti takes bare tickers (we just strip
-// the '-USD' suffix) and returns spot USD prices for every coin in our maps. It
-// returns price only (no 24h change), so we re-anchor change/changePct to
-// CoinGecko's 24h-old prevClose exactly like the Coinbase overlay does.
-async function _overlayCryptoComparePrices(out) {
-  if (!out || !out.data) return out;
-  const userSyms = Object.keys(out.data).filter(s => s.endsWith('-USD'));
-  if (userSyms.length === 0) return out;
-  const fsyms = userSyms.map(s => s.slice(0, -4)); // strip '-USD'
+// --- Batched real-time crypto overlay: Binance.US, with Kraken as backstop ---
+// Both are keyless, direct-CORS and genuinely batched (one call for the whole
+// crypto sleeve), which is what the per-symbol Coinbase fan-out cannot be past
+// CB_OVERLAY_MAX_FANOUT: browsers cap ~6 connections per origin, so 15-20
+// per-symbol calls serialise into several rounds every tick.
+//
+// Binance.US is tried first (bid/ask included, cleaner response keys); Kraken
+// backs it up and is the only one of the two that covers every coin the app
+// knows about. Neither replaces CoinGecko — that still supplies market cap,
+// 24h high/low and the other slow-moving fields these two don't carry.
+//
+// Pair maps are hardcoded rather than discovered at runtime: resolving them would
+// cost an extra exchangeInfo/AssetPairs call (hundreds of KB) every session to
+// learn something that changes a few times a year. Generated from the live venue
+// listings on 2026-09-01; re-derive if coins are added.
+//
+// The six USDT entries are coins with no direct USD book on Binance.US. USDT
+// tracks the dollar within a few basis points, which is right for a portfolio
+// view, and Kraken's USD book covers them if that ever stops holding.
+const BINANCE_US_PAIRS = {
+  'BTC-USD':'BTCUSD','ETH-USD':'ETHUSD','SOL-USD':'SOLUSD','DOGE-USD':'DOGEUSD',
+  'XRP-USD':'XRPUSD','ADA-USD':'ADAUSD','DOT-USD':'DOTUSD','AVAX-USD':'AVAXUSD',
+  'POL-USD':'POLUSD','LINK-USD':'LINKUSD','LTC-USD':'LTCUSD','UNI-USD':'UNIUSD',
+  'SHIB-USD':'SHIBUSD','ATOM-USD':'ATOMUSD','XLM-USD':'XLMUSD','BONK-USD':'BONKUSD',
+  'PEPE-USD':'PEPEUSD','WIF-USD':'WIFUSDT','FLOKI-USD':'FLOKIUSD','PENGU-USD':'PENGUUSDT',
+  'TRX-USD':'TRXUSD','BCH-USD':'BCHUSD','NEAR-USD':'NEARUSD','APT-USD':'APTUSDT',
+  'ARB-USD':'ARBUSDT','OP-USD':'OPUSD','SUI-USD':'SUIUSD','ETC-USD':'ETCUSD',
+  'FIL-USD':'FILUSDT','AAVE-USD':'AAVEUSD','ALGO-USD':'ALGOUSD','ICP-USD':'ICPUSD',
+  'HBAR-USD':'HBARUSD','VET-USD':'VETUSD','INJ-USD':'INJUSDT','RENDER-USD':'RENDERUSD',
+  // TON has no Binance.US book — Kraken covers it.
+};
+// Kraken keys its Ticker RESPONSE by an internal asset-pair code that often differs
+// from the pair you asked for (XBTUSD -> XXBTZUSD), so both halves are stored:
+// `pair` goes into the request, `key` reads the result back out.
+const KRAKEN_PAIRS = {
+  'BTC-USD':{pair:'XBTUSD',key:'XXBTZUSD'},'ETH-USD':{pair:'ETHUSD',key:'XETHZUSD'},
+  'SOL-USD':{pair:'SOLUSD',key:'SOLUSD'},'DOGE-USD':{pair:'XDGUSD',key:'XDGUSD'},
+  'XRP-USD':{pair:'XRPUSD',key:'XXRPZUSD'},'ADA-USD':{pair:'ADAUSD',key:'ADAUSD'},
+  'DOT-USD':{pair:'DOTUSD',key:'DOTUSD'},'AVAX-USD':{pair:'AVAXUSD',key:'AVAXUSD'},
+  'POL-USD':{pair:'POLUSD',key:'POLUSD'},'LINK-USD':{pair:'LINKUSD',key:'LINKUSD'},
+  'LTC-USD':{pair:'LTCUSD',key:'XLTCZUSD'},'UNI-USD':{pair:'UNIUSD',key:'UNIUSD'},
+  'SHIB-USD':{pair:'SHIBUSD',key:'SHIBUSD'},'ATOM-USD':{pair:'ATOMUSD',key:'ATOMUSD'},
+  'XLM-USD':{pair:'XLMUSD',key:'XXLMZUSD'},'BONK-USD':{pair:'BONKUSD',key:'BONKUSD'},
+  'PEPE-USD':{pair:'PEPEUSD',key:'PEPEUSD'},'WIF-USD':{pair:'WIFUSD',key:'WIFUSD'},
+  'FLOKI-USD':{pair:'FLOKIUSD',key:'FLOKIUSD'},'PENGU-USD':{pair:'PENGUUSD',key:'PENGUUSD'},
+  'TRX-USD':{pair:'TRXUSD',key:'TRXUSD'},'BCH-USD':{pair:'BCHUSD',key:'BCHUSD'},
+  'NEAR-USD':{pair:'NEARUSD',key:'NEARUSD'},'APT-USD':{pair:'APTUSD',key:'APTUSD'},
+  'ARB-USD':{pair:'ARBUSD',key:'ARBUSD'},'OP-USD':{pair:'OPUSD',key:'OPUSD'},
+  'SUI-USD':{pair:'SUIUSD',key:'SUIUSD'},'ETC-USD':{pair:'ETCUSD',key:'XETCZUSD'},
+  'FIL-USD':{pair:'FILUSD',key:'FILUSD'},'AAVE-USD':{pair:'AAVEUSD',key:'AAVEUSD'},
+  'ALGO-USD':{pair:'ALGOUSD',key:'ALGOUSD'},'ICP-USD':{pair:'ICPUSD',key:'ICPUSD'},
+  'HBAR-USD':{pair:'HBARUSD',key:'HBARUSD'},'VET-USD':{pair:'VETUSD',key:'VETUSD'},
+  'INJ-USD':{pair:'INJUSD',key:'INJUSD'},'RENDER-USD':{pair:'RENDERUSD',key:'RENDERUSD'},
+  'TON-USD':{pair:'TONUSD',key:'TONUSD'},
+};
+const BATCH_OVERLAY_TIMEOUT = 2500;
+let _binanceUsDisabled = false;
+let _krakenDisabled = false;
+
+// Apply a {price, bid, ask} patch onto an existing CoinGecko quote, re-anchoring
+// change/changePct to CoinGecko's 24h-old prevClose so cell tinting still works
+// when this overlay is the only fresh signal. Shared by both venues so they can't
+// drift apart in how they patch.
+function _applyCryptoOverlay(q, price, bid, ask) {
+  if (!q || !isFinite(price) || price <= 0) return false;
+  q.price = price;
+  if (bid != null && isFinite(bid) && bid > 0) q.bid = bid;
+  if (ask != null && isFinite(ask) && ask > 0) q.ask = ask;
+  if (q.prevClose) {
+    q.change = price - q.prevClose;
+    q.changePct = (q.change / q.prevClose) * 100;
+  }
+  q.delayedBy = 0; // spot exchange print — real-time
+  q._lastUpdate = Date.now();
+  return true;
+}
+
+// Returns the SET of symbols it successfully patched (empty on any failure), not
+// a boolean: the caller needs to know which symbols still need a second venue,
+// and every exit path has to return the same shape or that lookup throws.
+async function _overlayBinanceUsPrices(out) {
+  if (!out || !out.data || _binanceUsDisabled) return new Set();
+  const syms = Object.keys(out.data).filter(s => BINANCE_US_PAIRS[s]);
+  if (syms.length === 0) return new Set();
+  const pairs = syms.map(s => BINANCE_US_PAIRS[s]);
   try {
-    const r = await fetch(`https://min-api.cryptocompare.com/data/pricemulti?fsyms=${encodeURIComponent(fsyms.join(','))}&tsyms=USD`,
-                          { signal: AbortSignal.timeout(2500) });
-    if (!r.ok) return out;
-    const j = await r.json();
-    if (!j || typeof j !== 'object' || j.Response === 'Error') return out;
-    let patched = false;
-    for (let i = 0; i < userSyms.length; i++) {
-      const sym = userSyms[i], entry = j[fsyms[i]];
-      if (!entry || typeof entry !== 'object') continue;
-      const price = parseFloat(entry.USD);
-      if (!isFinite(price) || price <= 0) continue;
-      const q = out.data[sym];
-      if (!q) continue;
-      q.price = price;
-      // Re-anchor change + changePct to CoinGecko's 24h-old prevClose so the
-      // cell tinting still works when CryptoCompare is the only fresh signal.
-      if (q.prevClose) {
-        q.change = price - q.prevClose;
-        q.changePct = (q.change / q.prevClose) * 100;
-      }
-      q._lastUpdate = Date.now();
-      patched = true;
+    const r = await fetch('https://api.binance.us/api/v3/ticker/24hr?symbols=' +
+                          encodeURIComponent(JSON.stringify(pairs)),
+                          { signal: AbortSignal.timeout(BATCH_OVERLAY_TIMEOUT) });
+    // 451 is the one worth latching on: it is the geo-block response, and it will
+    // not resolve itself for this user on this connection.
+    if (r.status === 401 || r.status === 403 || r.status === 451) { _binanceUsDisabled = true; return new Set(); }
+    if (!r.ok) return new Set();
+    const arr = await r.json();
+    if (!Array.isArray(arr)) return new Set();
+    // Index the response by pair, then read it back through OUR map. The response's
+    // own keys are never iterated into quoteData (same response-key guard the
+    // Yahoo and Alpaca paths use).
+    const byPair = {};
+    for (const row of arr) if (row && typeof row.symbol === 'string') byPair[row.symbol] = row;
+    const done = new Set();
+    for (const sym of syms) {
+      const row = byPair[BINANCE_US_PAIRS[sym]];
+      if (!row) continue;
+      if (_applyCryptoOverlay(out.data[sym], parseFloat(row.lastPrice),
+                              parseFloat(row.bidPrice), parseFloat(row.askPrice))) done.add(sym);
     }
-    // Absolute label, not an append: `out` is the long-lived _cgCache object, so
-    // appending would accumulate " + CryptoCompare" once per tick for the length
-    // of a Coinbase cooldown. Mirrors the Coinbase overlay's absolute assignment.
-    if (patched) out.source = 'CoinGecko + CryptoCompare';
-  } catch (_) { /* per-call failure is silent — falls through to CoinGecko data */ }
+    return done;
+  } catch (_) { return new Set(); }
+}
+
+async function _overlayKrakenPrices(out, skip) {
+  if (!out || !out.data || _krakenDisabled) return new Set();
+  // Only fill what the previous venue couldn't. Re-patching a symbol that
+  // already has a live price costs a wider request for an identical number.
+  const syms = Object.keys(out.data).filter(s => KRAKEN_PAIRS[s] && !(skip && skip.has(s)));
+  if (syms.length === 0) return new Set();
+  try {
+    const r = await fetch('https://api.kraken.com/0/public/Ticker?pair=' +
+                          encodeURIComponent(syms.map(s => KRAKEN_PAIRS[s].pair).join(',')),
+                          { signal: AbortSignal.timeout(BATCH_OVERLAY_TIMEOUT) });
+    // Kraken geo-blocks some jurisdictions outright. That will not resolve itself
+    // for this user, so latch it off rather than paying a request every tick —
+    // same treatment Binance.US gets for its 451.
+    if (r.status === 403 || r.status === 451) { _krakenDisabled = true; return new Set(); }
+    if (!r.ok) return new Set();
+    const j = await r.json();
+    const res = j && j.result;
+    if (!res || typeof res !== 'object') return new Set();
+    const done = new Set();
+    for (const sym of syms) {
+      // Own-property lookup through our own map, so Kraken's internal keys never
+      // reach quoteData directly.
+      const k = KRAKEN_PAIRS[sym].key;
+      if (!Object.prototype.hasOwnProperty.call(res, k)) continue;
+      const t = res[k];
+      // c = [last trade price, lot volume]; b / a = [best bid / ask, whole lot, lot]
+      const last = t && t.c && parseFloat(t.c[0]);
+      const bid = t && t.b && parseFloat(t.b[0]);
+      const ask = t && t.a && parseFloat(t.a[0]);
+      if (_applyCryptoOverlay(out.data[sym], last, bid, ask)) done.add(sym);
+    }
+    return done;
+  } catch (_) { return new Set(); }
+}
+
+// Batched overlay entry point: Binance.US first, then Kraken for anything it
+// couldn't cover (TON has no Binance.US book) or if Binance.US failed outright.
+//
+// The source label is assembled HERE rather than inside each venue, because both
+// can legitimately contribute to the same tick — a portfolio holding BTC and TON
+// gets BTC from Binance.US and TON from Kraken. Letting each venue assign the
+// label meant whichever ran last overwrote the other, and the status bar credited
+// only Kraken for a tick Binance.US did most of the work in.
+async function _overlayBatchedCryptoPrices(out) {
+  if (!out || !out.data) return out;
+  const fromBinance = await _overlayBinanceUsPrices(out);
+  const uncovered = Object.keys(out.data).filter(s => KRAKEN_PAIRS[s] && !fromBinance.has(s));
+  const fromKraken = uncovered.length > 0 ? await _overlayKrakenPrices(out, fromBinance) : new Set();
+  const venues = [];
+  if (fromBinance.size > 0) venues.push('Binance.US');
+  if (fromKraken.size > 0) venues.push('Kraken');
+  if (venues.length > 0) out.source = 'CoinGecko + ' + venues.join(' + ');
   return out;
 }
 
 async function _overlayCoinbasePrices(out) {
   if (!out || !out.data) return out;
   // When Coinbase has tripped the circuit breaker (3 consecutive all-fails →
-  // 30 s cooldown), try CryptoCompare instead so crypto prices still update on
-  // every refresh tick. If CryptoCompare also fails the user falls through to
-  // the slower CoinGecko data — same pre-overlay behavior, no regression.
-  if (Date.now() < _cbSkipUntil) return await _overlayCryptoComparePrices(out);
+  // 30 s cooldown), use the batched venues instead so crypto prices still update
+  // on every refresh tick. If those also fail the user falls through to the
+  // slower CoinGecko data — same pre-overlay behavior, no regression.
+  if (Date.now() < _cbSkipUntil) return await _overlayBatchedCryptoPrices(out);
   const syms = Object.keys(out.data);
   if (syms.length === 0) return out;
-  // Large portfolios: one batched CryptoCompare call beats N per-symbol Coinbase
-  // calls per tick (see CB_OVERLAY_MAX_FANOUT).
-  if (syms.length > CB_OVERLAY_MAX_FANOUT) return await _overlayCryptoComparePrices(out);
+  // Large portfolios: one batched Binance.US/Kraken call beats N per-symbol
+  // Coinbase calls per tick (see CB_OVERLAY_MAX_FANOUT).
+  if (syms.length > CB_OVERLAY_MAX_FANOUT) return await _overlayBatchedCryptoPrices(out);
   let patched = false;
   const results = await Promise.all(syms.map(_coinbaseFetch));
+  // Symbols Coinbase Exchange has no product for can never patch, so they must
+  // not count toward the circuit breaker's "every symbol failed" test —
+  // otherwise a portfolio whose only coin is unsupported (e.g. TRX) trips a
+  // 30 s cooldown every three ticks and blames Coinbase for a listing gap.
+  const eligible = syms.filter(sy => !CB_UNSUPPORTED.has(sy)).length;
   for (let i = 0; i < syms.length; i++) {
     const sym = syms[i], cb = results[i];
     if (!cb) continue;
@@ -4532,7 +4883,7 @@ async function _overlayCoinbasePrices(out) {
   if (patched) {
     _cbFailStreak = 0;
     out.source = 'CoinGecko + Coinbase';
-  } else {
+  } else if (eligible > 0) {
     _cbFailStreak++;
     if (_cbFailStreak >= CB_FAIL_THRESHOLD) {
       _cbSkipUntil = Date.now() + CB_SKIP_COOLDOWN;
@@ -4801,12 +5152,22 @@ async function fetchAlpacaSupplemental(symbols) {
   // Use multi-symbol bars endpoint — use cached feed if known, otherwise try default then IEX
   const startDate = new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0];
   let barsMap = null;
+  // `limit` on the MULTI-symbol bars endpoint is the total number of bars across
+  // ALL symbols in the response, not per symbol, and results come back sorted by
+  // symbol then timestamp. A flat `limit=10` therefore returned ~10 bars that all
+  // belonged to whichever symbol sorted first, and every other symbol silently
+  // got nothing — falling through to the "use today's volume" fallback below
+  // while the column still said "Avg Vol 10D". Budget per symbol instead: the
+  // 14-day window yields at most ~10 trading days each, +1 for slack. Capped at
+  // Alpaca's 10000 maximum; beyond that the response paginates via
+  // next_page_token and the fallback covers the remainder.
+  const barBudget = Math.min(10000, stockSyms.length * 11);
   const feedsToTry = alpacaWorkingFeed != null ? [alpacaWorkingFeed] : ['', 'iex'];
   for (const feed of feedsToTry) {
     try {
       const feedParam = feed ? `&feed=${feed}` : '';
       const resp = await fetch(
-        `https://data.alpaca.markets/v2/stocks/bars?symbols=${stockSyms.join(',')}&timeframe=1Day&start=${startDate}&limit=10${feedParam}`, {
+        `https://data.alpaca.markets/v2/stocks/bars?symbols=${stockSyms.join(',')}&timeframe=1Day&start=${startDate}&limit=${barBudget}${feedParam}`, {
         headers: { 'APCA-API-KEY-ID': keyId, 'APCA-API-SECRET-KEY': secret },
         signal: AbortSignal.timeout(PROXY_FETCH_TIMEOUT)
       });
@@ -5080,18 +5441,13 @@ async function fetchOneSymbolNow(sym) {
         })());
       }
 
-      // Stooq direct-CORS CSV — covers US equities and major commodity futures
-      // (gc.f, cl.f, si.f, hg.f, …). For commodities specifically this is the
-      // biggest win: the previous racer pool was Yahoo-via-proxy only, so adding
-      // gold/silver/copper meant 1–3 s of "retrying..." while waiting on the
-      // proxy fleet. Stooq's batched CSV typically returns in 200–500 ms via
-      // direct CORS, with proxy fallback inside fetchStooqQuotes if needed.
-      // ~15 min delayed — that's the wire-format limitation, not a fetch-speed
-      // one — but the row appears immediately and the next heavy refresh
-      // catches up to the live Yahoo (or PAXG) price.
+      // stockanalysis.com — keyless and direct-CORS, so it usually wins this race
+      // outright (~30 ms warm vs 1-3 s for anything going through the proxy
+      // fleet). Equities and ETFs only; commodities still depend on the Yahoo
+      // and PAXG racers below.
       racers.push((async () => {
-        const r = await fetchStooqQuotes([sym]);
-        if (!r || !r.data || !r.data[sym]) throw new Error('stooq no data');
+        const r = await fetchStockAnalysisQuotes([sym]);
+        if (!r || !r.data || !r.data[sym]) throw new Error('stockanalysis no data');
         return r.data[sym];
       })());
 
@@ -5176,11 +5532,15 @@ async function _warmFinnhubFundamentals(sym, key) {
     const fromDate = new Date(now.getTime() - 7 * 86400000).toISOString().split('T')[0];
     const toDate = new Date(now.getTime() + 90 * 86400000).toISOString().split('T')[0];
     const T = 8000;
-    const [profileResp, metricsResp, earningsResp, dividendResp, recResp] = await Promise.all([
+    // Same four free endpoints the batched path uses — /stock/dividend is
+    // premium and was dropped from both (see the budget note in
+    // fetchFinnhubQuotes). Kept in lockstep deliberately: these two call sites
+    // build the SAME fundamentalsCache entry, so a divergence here shows up as
+    // a field that exists only when a symbol was added manually.
+    const [profileResp, metricsResp, earningsResp, recResp] = await Promise.all([
       fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${key}`, { signal: AbortSignal.timeout(T) }),
       fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${key}`, { signal: AbortSignal.timeout(T) }),
       fetch(`https://finnhub.io/api/v1/calendar/earnings?symbol=${yfEnc(sym)}&from=${fromDate}&to=${toDate}&token=${key}`, { signal: AbortSignal.timeout(T) }),
-      fetch(`https://finnhub.io/api/v1/stock/dividend?symbol=${yfEnc(sym)}&from=2024-01-01&to=${toDate}&token=${key}`, { signal: AbortSignal.timeout(T) }),
       fetch(`https://finnhub.io/api/v1/stock/recommendation?symbol=${yfEnc(sym)}&token=${key}`, { signal: AbortSignal.timeout(T) }),
     ]);
     if (metricsResp.status === 429 || profileResp.status === 429) return;
@@ -5190,7 +5550,6 @@ async function _warmFinnhubFundamentals(sym, key) {
     const profile = profileResp.ok ? await profileResp.json() : {};
     const metrics = metricsResp.ok ? await metricsResp.json() : {};
     const earnings = earningsResp.ok ? await earningsResp.json() : {};
-    const dividends = dividendResp.ok ? await dividendResp.json() : [];
     let rec = null;
     if (recResp.ok) {
       try {
@@ -5204,11 +5563,6 @@ async function _warmFinnhubFundamentals(sym, key) {
       const upcoming = earnings.earningsCalendar.find(e => new Date(e.date) >= now);
       if (upcoming) earningsDate = upcoming.date;
     }
-    let exDivDate = null;
-    if (Array.isArray(dividends) && dividends.length > 0) {
-      const sorted = dividends.sort((a, b) => new Date(b.exDate) - new Date(a.exDate));
-      exDivDate = sorted[0].exDate || null;
-    }
     fundamentalsCache[sym] = {
       name: profile.name || sym,
       wk52High: m['52WeekHigh'] || null, wk52Low: m['52WeekLow'] || null,
@@ -5219,7 +5573,7 @@ async function _warmFinnhubFundamentals(sym, key) {
       beta: m.beta || null,
       dividend: m.dividendPerShareAnnual || null,
       dividendYield: m.dividendYieldIndicatedAnnual || null,
-      exDivDate: exDivDate || m.exDividendDate || null,
+      exDivDate: m.exDividendDate || null,
       earningsDate,
       perfYTD: m.yearToDatePriceReturnDaily || null,
       perf6M: m['6MonthPriceReturnDaily'] || m['26WeekPriceReturnDaily'] || null,
@@ -5337,28 +5691,38 @@ async function _refreshAll(signal) {
   const hasAlpaca = !!(alpacaKeys.keyId && alpacaKeys.secret);
   const hasFmp = !!getFmpKey();
   const hasCrypto = symbols.some(s => COINGECKO_IDS[s]);
-  // Stooq is a keyless, CORS-enabled CSV source for US stocks + commodity futures
-  // (~15 min delayed). Always run it — even when the user has FinnHub/Alpaca keys
-  // it provides cheap resilience: if the primary keyed sources hiccup, Stooq's
-  // batched single call still has the whole portfolio.
-  const hasStooqEligible = symbols.some(s => !isCryptoSymbol(s));
+  // stockanalysis.com covers equities and ETFs, keyless and without a proxy.
+  // Always worth running: even when the user has keys it is usually the first
+  // stock price to arrive, and it is the only stock source that can't be taken
+  // down by a proxy-fleet outage.
+  const hasStockAnalysisEligible = symbols.some(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
   // Kick every source off at once (they all run concurrently) but await them in
-  // two waves. Wave 1 is the fast, single-call, direct-CORS sources — Stooq (the
-  // whole portfolio of US stocks + futures in one CSV) and CoinGecko + Coinbase
-  // (crypto) — which typically return in ~300–500 ms. The proxied Yahoo batch is
-  // the slowest link (and the only real-time stock source a keyless user has),
-  // so we paint an interim preview from the fast sources rather than make the
-  // first paint wait seconds on Yahoo.
+  // two waves. Wave 1 is the fast, direct-CORS crypto path (CoinGecko +
+  // Coinbase), which typically returns in ~300–500 ms. The proxied Yahoo batch
+  // is the slowest link (and the only real-time stock source a keyless user
+  // has), so we paint an interim preview from the fast source rather than make
+  // the first paint wait seconds on Yahoo.
+  //
+  // stockanalysis.com joins wave 1: it is direct-CORS (no proxy hop) and returns
+  // in tens of milliseconds, so awaiting it here is what lets a keyless user see
+  // stock prices essentially immediately instead of waiting on the Yahoo proxy
+  // fan-out. This slot previously held Stooq, whose failure path was slow enough
+  // to stall the whole first paint — see the Data graveyard in the README.
   const pFinnhub = hasFinnHub ? fetchFinnhubQuotes(symbols) : Promise.resolve(null);
   const pYahoo = fetchYahooQuotes(symbols, signal);
   const pAlpaca = hasAlpaca ? fetchAlpacaQuotes(symbols) : Promise.resolve(null);
+  // Alpaca's crypto endpoint is a separate call on a separate host path with no
+  // feed tiers — free and real-time, unlike the equity IEX/SIP split. Only worth
+  // firing when the portfolio actually holds crypto and Alpaca keys are set.
+  const pAlpacaCrypto = (hasAlpaca && symbols.some(isCryptoSymbol))
+    ? fetchAlpacaCryptoQuotes(symbols) : Promise.resolve(null);
   const pFmp = hasFmp ? fetchFmpQuotes(symbols) : Promise.resolve(null);
   const pCrypto = hasCrypto ? fetchCryptoQuotes(symbols) : Promise.resolve(null);
   const pFree = !hasFinnHub ? fetchFinnhubFreeQuotes(symbols) : Promise.resolve(null);
-  const pStooq = hasStooqEligible ? fetchStooqQuotes(symbols, signal) : Promise.resolve(null);
+  const pStockAnalysis = hasStockAnalysisEligible ? fetchStockAnalysisQuotes(symbols, signal) : Promise.resolve(null);
 
-  // --- Wave 1: interim paint from the fast sources ---
-  const [stooqResult, cryptoResult] = await Promise.all([pStooq, pCrypto]);
+  // --- Wave 1: interim paint from the fast, direct-CORS sources ---
+  const [cryptoResult, saResult] = await Promise.all([pCrypto, pStockAnalysis]);
   if (signal && signal.aborted) return;
   // Fill ONLY blank rows (symbols that have no price yet), merging price fields
   // onto any existing/hydrated object instead of replacing it (so its
@@ -5368,7 +5732,7 @@ async function _refreshAll(signal) {
   // this can only ever show a correct price ~1 s sooner, never a wrong one.
   {
     let interimPainted = false;
-    for (const src of [cryptoResult, stooqResult]) {
+    for (const src of [cryptoResult, saResult]) {
       if (!src || !src.data) continue;
       for (const [sym, d] of Object.entries(src.data)) {
         if (!d || d.price == null) continue;
@@ -5390,9 +5754,9 @@ async function _refreshAll(signal) {
     if (interimPainted) { renderTable(); updateSummary(); }
   }
 
-  // --- Wave 2: the remaining sources (Stooq/crypto already resolved here) ---
-  const [finnhubResult, yahooResult, alpacaResult, fmpResult, freeResult] = await Promise.all([
-    pFinnhub, pYahoo, pAlpaca, pFmp, pFree,
+  // --- Wave 2: the remaining sources (crypto already resolved above) ---
+  const [finnhubResult, yahooResult, alpacaResult, fmpResult, freeResult, alpacaCryptoResult] = await Promise.all([
+    pFinnhub, pYahoo, pAlpaca, pFmp, pFree, pAlpacaCrypto,
   ]);
 
   if (signal && signal.aborted) return;
@@ -5408,11 +5772,11 @@ async function _refreshAll(signal) {
 
   // Pick primary source: prefer the one with the most matching symbols
   const allResults = [
-    finnhubResult, yahooFinal, freeResult, fmpResult, alpacaResult, cryptoResult, stooqResult
+    finnhubResult, yahooFinal, freeResult, fmpResult, alpacaResult, cryptoResult, alpacaCryptoResult, saResult
   ].filter(Boolean);
   function countHits(r) { return r ? symbols.filter(s => r.data[s]).length : 0; }
-  // Priority order for tie-breaking: FinnHub > Yahoo > FinnHub free > FMP > Alpaca > CoinGecko > Stooq
-  // (Stooq is last because its data is ~15 min delayed; better to use it only when fresher sources miss the symbol)
+  // Priority order for tie-breaking: FinnHub > Yahoo > FinnHub free > FMP > Alpaca > CoinGecko > StockAnalysis
+  // (all are real-time now; ties go to the source carrying the most fields)
   // Track the incumbent's score rather than recomputing it each comparison —
   // countHits is O(symbols), so the old form was O(2 x sources x symbols).
   let result = null, resultHits = -1;
@@ -5420,11 +5784,13 @@ async function _refreshAll(signal) {
     const hits = countHits(r);
     if (!result || hits > resultHits) { result = r; resultHits = hits; }
   }
-  // Additional sources to merge missing fields from. Stooq lives in the merge
-  // pool too so it fills holes (e.g. FinnHub couldn't quote a thinly-traded
-  // ticker, but Stooq has it) without becoming the primary except when
+  // Additional sources to merge missing fields from. StockAnalysis lives in the
+  // merge pool too so it fills holes (e.g. FinnHub couldn't quote a thinly-traded
+  // ticker, but StockAnalysis has it) without becoming the primary except when
   // everything else fails.
-  const mergeSources = [alpacaResult, fmpResult, cryptoResult, freeResult, yahooFinal, stooqResult].filter(r => r && r !== result);
+  // CoinGecko/Coinbase stays ahead of Alpaca Crypto for crypto: it carries 24h
+  // high/low, market cap and volume that Alpaca's snapshot has no equivalent for.
+  const mergeSources = [alpacaResult, fmpResult, cryptoResult, alpacaCryptoResult, freeResult, yahooFinal, saResult].filter(r => r && r !== result);
 
   // Retry commodity symbols that didn't get data — FinnHub/Alpaca/FMP don't support futures,
   // so commodities depend on Yahoo proxies which can fail under concurrent load.
@@ -5494,7 +5860,7 @@ async function _refreshAll(signal) {
         if (q.marketState == null && p.marketState != null) q.marketState = p.marketState;
         // Don't let a transient null/missing price from the primary source blank a
         // row that already had one. Yahoo occasionally returns a symbol entry with
-        // no regularMarketPrice; that would overwrite the interim Stooq price and —
+        // no regularMarketPrice; that would overwrite the interim wave-1 price and —
         // because the entry exists, the mergeSources pass treats it as "in primary"
         // and won't refill it — flip a just-shown row back to "loading..." for a
         // tick (a visible flicker on first load, e.g. AMZN). Keep the last-known
@@ -5526,7 +5892,7 @@ async function _refreshAll(signal) {
     // flashing a false error. Two consecutive misses (not one) are still required
     // even when the layer is up, so a single transient hiccup never condemns a
     // well-known name like AAPL. Commodity/crypto are never error-marked here.
-    const stockSources = [finnhubResult, yahooFinal, freeResult, fmpResult, alpacaResult, stooqResult];
+    const stockSources = [finnhubResult, yahooFinal, freeResult, fmpResult, alpacaResult, saResult];
     const anyStockSourceReplied = symbols.some(s =>
       !isCryptoSymbol(s) && !isCommoditySymbol(s) && stockSources.some(r => r && r.data[s]));
     if (anyStockSourceReplied) {
@@ -5635,7 +6001,7 @@ async function _refreshAll(signal) {
         // Fill missing fields from any source
         if (q.name === sym && sData.name && sData.name !== sym) q.name = sData.name;
         // change / changePct / prevClose can be missing when the primary
-        // source returned price-only data (e.g. Stooq's bogus 0% placeholder
+        // source returned price-only data (e.g. a bare exchange ticker
         // for thinly-traded futures). Fill from secondary sources so the
         // change column doesn't sit at "+0" / "—" while another source has
         // the real day-over-day delta.
@@ -5672,15 +6038,30 @@ async function _refreshAll(signal) {
 
   // Apply real-time tokenized-commodity overlay (PAXG → GC=F) after the
   // mergeSources loop so prevClose is filled. Without this ordering, primary
-  // sources that return price-only data (Stooq's bogus 0% change for thinly-
-  // traded futures) would leave prevClose null and the overlay couldn't
-  // re-derive change/changePct.
+  // sources that return price-only data would leave prevClose null and the
+  // overlay couldn't re-derive change/changePct.
   if (realtimeCommodityOverlay) {
     for (const [sym, rt] of Object.entries(realtimeCommodityOverlay)) {
       const q = quoteData[sym];
       if (!q) continue;
       _applyRealtimeCommodity(q, sym, rt);
     }
+  }
+
+  // Commodity futures without a real-time tokenised stand-in are 10-15 minutes
+  // behind at the exchange — that is a market-data licensing floor, not
+  // something this app can fetch its way around. Mark them so the number in
+  // the table is never mistaken for a live one. Gold is the exception: the
+  // PAXG overlay above supersedes it with a genuinely live price and clears
+  // the flag. Anything that already carries a delay (e.g. a delayed_sip fill) keeps
+  // the marker it was given.
+  for (const sym of symbols) {
+    if (!isCommoditySymbol(sym)) continue;
+    const q = quoteData[sym];
+    if (!q || q.price == null || q.delayedBy != null) continue;
+    if (COMMODITY_REALTIME_PROXY[sym]) continue; // live via its token overlay
+    q.delayedBy = 15;
+    q.delayedNote = 'Futures feed is delayed at the exchange';
   }
 
   // Apply FinnHub fundamentalsCache to fill gaps (in case FinnHub wasn't primary source)
@@ -6067,6 +6448,30 @@ function fmtDivYield(div, yld) {
 // stale value until the next full render. `labels` adds the AH:/PM: prefixes the
 // mobile cards use; `empty` is what to show when there's nothing to display.
 // (_hideAfterHours is a hoisted function declaration defined further down.)
+// Superscript marker appended to a price that its source served on a delay.
+// Without this a 15-minute-old print is visually identical to a live one — the
+// user has no way to tell, and a portfolio tracker that quietly shows stale
+// prices as live is worse than one that shows nothing. Title carries the
+// specific reason and the delay so hovering explains it.
+function delayMarkHtml(q, sym) {
+  if (!q) return '';
+  let mins = q.delayedBy, note = q.delayedNote;
+  if (mins == null) {
+    // Nothing has claimed this price either way yet, so fall back to what the
+    // instrument implies. Commodity futures are delayed at the exchange, full
+    // stop — that includes gold, which is only live once the PAXG overlay has
+    // actually landed and set delayedBy = 0. Marking gold optimistically because
+    // a real-time stand-in *exists* would be exactly the wrong default: the
+    // overlay is skipped off-hours and whenever Coinbase's breaker is open, and
+    // in both of those cases the price on screen really did come from the
+    // delayed futures feed.
+    const s = sym || q.symbol;
+    if (!s || !isCommoditySymbol(s)) return '';
+    mins = 15; note = 'Futures feed is delayed at the exchange';
+  }
+  if (!(mins > 0)) return '';
+  return `<sup class="delay-mark" title="${escAttr((note || 'Delayed quote') + ' — about ' + mins + ' min behind')}">D</sup>`;
+}
 function afterHoursHtml(q, price, opts) {
   const labels = !!(opts && opts.labels);
   const empty = (opts && opts.empty != null) ? opts.empty : '\u2014';
@@ -6468,7 +6873,7 @@ function renderTable(force) {
         priceCell = '<span style="color:#4a9eff">loading...</span>';
       }
     } else {
-      priceCell = fmtPrice(price);
+      priceCell = fmtPrice(price) + delayMarkHtml(q, pos.symbol);
     }
 
     // Compute alertTriggered once per row; reused by rowClass and the bell icon
@@ -6510,10 +6915,18 @@ function updatePriceCells() {
       if (!td) return;
       // Only update price-derived display cells, never input cells
       switch (col.key) {
-        case 'last':
+        case 'last': {
           td.className = cc(change);
-          td.textContent = price != null ? fmtPrice(price) : '\u2014';
+          // textContent for the common case (cheap \u2014 this runs per row on every
+          // WS tick); innerHTML only when a delay marker has to ride along, so a
+          // light tick can't silently strip the "D" a full render put there and
+          // repaint a delayed price as though it were live.
+          const mark = delayMarkHtml(q, sym);
+          if (price == null) td.textContent = '\u2014';
+          else if (mark) td.innerHTML = fmtPrice(price) + mark;
+          else td.textContent = fmtPrice(price);
           break;
+        }
         case 'change':
           td.className = cc(change);
           td.textContent = change != null ? (change >= 0 ? '+' : '') + fmtPrice(change) : '\u2014';
@@ -6612,7 +7025,11 @@ function updateMobileCardPrices() {
     // whatever placeholder renderMobileCards drew (loading/retrying/unknown).
     const priceEl = card.querySelector('.mobile-card-price');
     if (priceEl && price != null) {
-      priceEl.textContent = '$' + fmtPrice(price);
+      // Mirror the desktop patch: keep the cheap textContent path, and only
+      // reach for innerHTML when a delay marker needs to survive the tick.
+      const mark = delayMarkHtml(q, sym);
+      if (mark) priceEl.innerHTML = '$' + fmtPrice(price) + mark;
+      else priceEl.textContent = '$' + fmtPrice(price);
       applySignClass(priceEl, change);
     }
 
@@ -6949,7 +7366,7 @@ function renderMobileCards() {
         priceHtml = '<span style="color:#4a9eff">loading...</span>';
       }
     } else {
-      priceHtml = '$' + fmtPrice(price);
+      priceHtml = '$' + fmtPrice(price) + delayMarkHtml(q, pos.symbol);
     }
 
     // After hours — hidden during the regular session (stale otherwise)
@@ -7274,6 +7691,27 @@ function exportCSV() {
   const cols = ['Symbol','Name','Last Price','$ Change','% Change','Shares','Cost Basis Per Share','Purchase Date',
     'Market Value','Day P&L','Total P&L','P&L %','Prev Close','Open','Volume','Market Cap','P/E','EPS','Beta',
     'Div/Yield','Notes'];
+  // Binary floating point makes `572.34 - 578.02` come out as -5.67999999999995,
+  // and every derived figure (market value, day P&L, total P&L) multiplies that
+  // error up. Writing the raw values meant a spreadsheet showed a column of
+  // -68.1599999999994 next to a clean -0.98 \u2014 the same file looking broken and
+  // precise at once. Round on the way out instead.
+  //
+  // `dp` is chosen per field rather than fixed at 2: dollar aggregates want 2,
+  // but a per-share price can legitimately need 8 (SHIB at $0.00002341 would
+  // round to $0.00), which is the same magnitude-scaling rule fmtPrice applies
+  // for display. Returns '' for blanks so empty cells stay empty, and strips
+  // trailing zeros so 150.00 exports as 150 and round-trips unchanged.
+  const num = (v, dp = 2) => {
+    if (v === '' || v == null || !isFinite(v)) return '';
+    return String(parseFloat(Number(v).toFixed(dp)));
+  };
+  const priceNum = (v) => {
+    if (v === '' || v == null || !isFinite(v)) return '';
+    const abs = Math.abs(v);
+    const dp = (abs >= 1 || abs === 0) ? 2 : abs >= 0.01 ? 4 : abs >= 0.0001 ? 6 : 8;
+    return num(v, dp);
+  };
   const rows = [cols.map(csvField).join(',')];
   for (const pos of getSortedPortfolio()) {
     const q = quoteData[pos.symbol] || {};
@@ -7283,10 +7721,12 @@ function exportCSV() {
     const totalPLPct = (totalPL !== '' && pos.costBasis) ? (totalPL / (Math.abs(pos.shares) * pos.costBasis) * 100) : '';
     // Every field goes through csvField \u2014 symbols are sanitized on entry, but
     // names and notes are free text from data sources and the user.
-    rows.push([pos.symbol, quoteName(pos.symbol, q), price||'', q.change||'', q.changePct||'',
-      pos.shares, pos.costBasis||'', pos.purchaseDate||'', mktVal, dayPL, totalPL,
-      totalPLPct !== '' ? totalPLPct.toFixed(2) : '', q.prevClose||'', q.open||'',
-      q.volume||'', q.marketCap||'', q.pe||'', q.eps||'', q.beta||'',
+    rows.push([pos.symbol, quoteName(pos.symbol, q),
+      priceNum(price), priceNum(q.change), num(q.changePct),
+      pos.shares, priceNum(pos.costBasis), pos.purchaseDate||'',
+      num(mktVal), num(dayPL), num(totalPL),
+      num(totalPLPct), priceNum(q.prevClose), priceNum(q.open),
+      num(q.volume, 0), num(q.marketCap, 0), num(q.pe), num(q.eps), num(q.beta),
       fmtDivYield(q.dividend, q.dividendYield).replace('\u2014',''), notes[pos.symbol]||'']
       .map(csvField).join(','));
   }
@@ -8336,7 +8776,10 @@ function switchPortfolio(name) {
   flushPendingSaves();
   // Load new
   const all = lsGet('stonks_portfolios', '{}');
-  if (!all[name]) return;
+  // Own-property check: `all['constructor']` (or any Object.prototype member)
+  // is truthy by inheritance, so a truthiness test would happily "switch" to a
+  // portfolio that was never created and then read .portfolio off a function.
+  if (!Object.prototype.hasOwnProperty.call(all, name)) return;
   portfolioName = name;
   safeSet('stonks_active_portfolio', name);
   // Keep the dropdown selection in sync. When this runs right after creating a
@@ -8367,11 +8810,26 @@ function switchPortfolio(name) {
   if (portfolio.length > 0) refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
   else syncWsSubscriptions();
 }
+// Portfolio names index a plain object, so a handful of names collide with
+// Object.prototype and misbehave in ways that look like the app losing data.
+// `__proto__` is the sharp one: `all['__proto__'] = {...}` doesn't create an own
+// property at all, it reassigns the object's prototype — so the portfolio is
+// never stored, JSON.stringify drops it, and the UI happily switches to a
+// portfolio that doesn't exist. `constructor`/`toString` are less destructive but
+// still make the `if (all[name])` existence check answer true for a name nobody
+// has used. Reject the whole set rather than special-casing each one.
+const RESERVED_PORTFOLIO_NAMES = new Set(['__proto__', 'constructor', 'prototype', 'toString', 'hasOwnProperty', 'valueOf']);
+function _rejectReservedPortfolioName(name) {
+  if (!RESERVED_PORTFOLIO_NAMES.has(name)) return false;
+  alert('"' + name + '" is a reserved word and can\'t be used as a portfolio name. Please pick another.');
+  return true;
+}
 function createPortfolioPrompt() {
   const name = prompt('New portfolio name:');
   if (!name || !name.trim()) return;
+  if (_rejectReservedPortfolioName(name.trim())) return;
   const all = lsGet('stonks_portfolios', '{}');
-  if (all[name.trim()]) { alert('Portfolio "' + name.trim() + '" already exists.'); return; }
+  if (Object.prototype.hasOwnProperty.call(all, name.trim())) { alert('Portfolio "' + name.trim() + '" already exists.'); return; }
   all[name.trim()] = { portfolio: [], notes: {} };
   safeSet('stonks_portfolios', JSON.stringify(all));
   renderPortfolioSelector();
@@ -8380,12 +8838,13 @@ function createPortfolioPrompt() {
 function renamePortfolioPrompt() {
   const newName = prompt('Rename "' + portfolioName + '" to:', portfolioName);
   if (!newName || !newName.trim() || newName.trim() === portfolioName) return;
+  if (_rejectReservedPortfolioName(newName.trim())) return;
   // Flush any pending debounced save so the slot we're about to rename has
   // the latest state — otherwise the pending write could fire after the old
   // slot has been deleted and re-create it.
   flushPendingSaves();
   const all = lsGet('stonks_portfolios', '{}');
-  if (all[newName.trim()]) { alert('Portfolio "' + newName.trim() + '" already exists.'); return; }
+  if (Object.prototype.hasOwnProperty.call(all, newName.trim())) { alert('Portfolio "' + newName.trim() + '" already exists.'); return; }
   all[newName.trim()] = all[portfolioName];
   delete all[portfolioName];
   portfolioName = newName.trim();
@@ -8543,6 +9002,15 @@ function sharePortfolio() {
     return s;
   });
   const encoded = encodeURIComponent(parts.join(';'));
+  // A share link is only meaningful from an http(s) deploy. Opened straight
+  // from disk — which is the README's primary install instruction —
+  // location.origin is the literal string "null", so this used to hand the
+  // user "null/C:/.../index.html#p=..." and let them copy it. Say what's
+  // actually wrong instead of producing a link that cannot work.
+  if (window.location.protocol !== 'http:' && window.location.protocol !== 'https:') {
+    setStatus("Sharing needs the app served over http(s) — a link to a local file won't open for anyone else", 'error');
+    return;
+  }
   const url = window.location.origin + window.location.pathname + '#p=' + encoded;
   document.getElementById('share-url').value = url;
   document.getElementById('share-overlay').classList.add('show');
@@ -8783,6 +9251,10 @@ function connectFinnhubWebSocket() {
           if (q.bidEstimated) q.bid = +(price - spread).toFixed(4);
           if (q.askEstimated) q.ask = +(price + spread).toFixed(4);
 
+          // A streamed trade is by definition live, so it supersedes any delay
+          // an earlier delayed_sip fill recorded on this row. 0 asserts
+          // live rather than merely unsetting it (see makeEmptyQuote).
+          q.delayedBy = 0; q.delayedNote = null;
           wsLastTradeTime[sym] = Date.now();
           updated = true;
         }
@@ -8971,13 +9443,11 @@ let _lastHeavyStart = 0; // last time the timer kicked off a heavy refreshAll (a
 // get blanked. These lists were previously inlined as four near-identical `if`
 // ladders across three functions, which had already drifted apart.
 const PRESERVE_ON_TICK_CRYPTO = ['wk52High', 'wk52Low', 'perfYTD', 'perf6M', 'perf1Y', 'dayHigh', 'dayLow'];
-// Stooq returns neither market cap nor average volume for futures, so both
-// commodity tick paths need to preserve them. They disagreed: refreshCommoditiesOnly
-// kept both while refreshAlwaysOnOnly's commodity branch kept neither, so an
-// off-hours tick could blank whatever the heavy refresh had filled in. Unified on
-// the superset — preserving a field that was never set is a no-op, so this can
-// only ever retain more real data, never less.
-const PRESERVE_ON_TICK_COMMODITY = ['wk52High', 'wk52Low', 'perfYTD', 'perf6M', 'perf1Y', 'marketCap', 'avgVolume'];
+// There is deliberately no commodity equivalent any more. The commodity light
+// ticks used to swap in a whole fresh quote from Stooq's batched CSV, which is
+// what made a preserve-list necessary; they now only patch a price onto the
+// existing quote object (see refreshCommoditiesOnly), so nothing gets blanked
+// and there is nothing to carry across.
 function _preserveAcrossTick(fresh, existing, fields) {
   if (!existing || !fresh) return;
   for (const k of fields) if (fresh[k] == null && existing[k] != null) fresh[k] = existing[k];
@@ -8990,7 +9460,7 @@ function _applyRealtimeCommodity(q, sym, rt) {
   q.price = rt.price;
   // PAXG carries a 24h "open" we use as prevClose so gold shows a day change even
   // off-hours, when Yahoo (the usual futures prevClose source) isn't queried.
-  // Never override a real Yahoo/Stooq prevClose if one is present.
+  // Never override a real Yahoo prevClose if one is present.
   if (q.prevClose == null && rt.prevClose != null) q.prevClose = rt.prevClose;
   if (q.prevClose) {
     q.change = rt.price - q.prevClose;
@@ -8999,6 +9469,11 @@ function _applyRealtimeCommodity(q, sym, rt) {
   if (q.dayHigh == null && rt.dayHigh != null) q.dayHigh = rt.dayHigh;
   if (q.dayLow == null && rt.dayLow != null) q.dayLow = rt.dayLow;
   if (!q.name || q.name === sym) q.name = commodityName(sym);
+  // A real-time tokenised price supersedes whatever delayed futures quote was
+  // there a moment ago. 0 (not null) is the point: it positively asserts "this
+  // is live", so delayMarkHtml won't fall back to marking it delayed on the
+  // grounds that it is a futures symbol.
+  q.delayedBy = 0; q.delayedNote = null;
   q._lastUpdate = Date.now();
 }
 
@@ -9061,16 +9536,62 @@ async function refreshCryptoOnly() {
 const COMMODITY_REALTIME_PROXY = {
   'GC=F': 'PAXG-USD', // Gold futures → PAX Gold (1 PAXG ≡ 1 troy oz gold)
 };
+// Kraken failover for the same idea. Two things this buys that Coinbase alone
+// could not:
+//   1. A second VENUE. When Coinbase's breaker is open (or it is simply down)
+//      gold used to fall straight back to the 10-15 min delayed futures feed
+//      and pick up a "D" marker. Kraken keeps it live through that window.
+//   2. A second TOKEN. Kraken lists both PAXG and XAUT (Tether Gold), which is
+//      the same claim-on-an-ounce structure from a different issuer, so a
+//      problem specific to one token's peg doesn't take gold offline.
+// Kraken's /Ticker gives o (today's opening price) which serves as prevClose,
+// and h/l arrays whose [1] element is the 24h high/low — the same shape the
+// Coinbase /stats path already produces.
+const COMMODITY_KRAKEN_PROXY = {
+  'GC=F': ['PAXGUSD', 'XAUTUSD'],
+};
+async function _krakenCommodityStats(pairs) {
+  if (_krakenDisabled) return null;
+  try {
+    const r = await fetch('https://api.kraken.com/0/public/Ticker?pair=' + encodeURIComponent(pairs.join(',')),
+                          { signal: AbortSignal.timeout(BATCH_OVERLAY_TIMEOUT) });
+    if (r.status === 403 || r.status === 451) { _krakenDisabled = true; return null; }
+    if (!r.ok) return null;
+    const j = await r.json();
+    const res = j && j.result;
+    if (!res) return null;
+    // Take the first pair that actually came back — PAXG preferred, XAUT as
+    // the alternate — rather than assuming a fixed response key.
+    for (const want of pairs) {
+      for (const k of Object.keys(res)) {
+        if (k !== want && k.indexOf(want.slice(0, 4)) === -1) continue;
+        const t = res[k];
+        const price = t && t.c && parseFloat(t.c[0]);
+        if (!isFinite(price) || price <= 0) continue;
+        const open = t.o != null ? parseFloat(t.o) : NaN;
+        const hi = t.h && parseFloat(t.h[1]);
+        const lo = t.l && parseFloat(t.l[1]);
+        return { price,
+                 prevClose: isFinite(open) && open > 0 ? open : null,
+                 dayHigh: isFinite(hi) ? hi : null,
+                 dayLow: isFinite(lo) ? lo : null };
+      }
+    }
+  } catch (_) { /* fall through to null — caller keeps the delayed price */ }
+  return null;
+}
 async function _overlayRealtimeCommodities(commoditySyms) {
-  // Skip Coinbase entirely if its circuit breaker is open (3 consecutive fails
-  // → 30 s cooldown). Same _cbSkipUntil signal that gates the crypto overlay.
-  if (Date.now() < _cbSkipUntil) return null;
-  const targets = commoditySyms.filter(s => COMMODITY_REALTIME_PROXY[s]);
+  const targets = commoditySyms.filter(s => COMMODITY_REALTIME_PROXY[s] || COMMODITY_KRAKEN_PROXY[s]);
   if (targets.length === 0) return null;
+  const cbOpen = Date.now() >= _cbSkipUntil; // Coinbase breaker closed?
   const overlay = {}; // user sym → { price, prevClose?, dayHigh?, dayLow? }
   await Promise.all(targets.map(async sym => {
-    const cbProduct = COMMODITY_REALTIME_PROXY[sym];
-    const st = await _coinbaseStats(cbProduct); // 24h open/high/low/last, cached + 1.5 s timeout
+    // Coinbase first (already cached per tick, 1.5 s timeout), Kraken only if
+    // Coinbase is breakered or came back empty. Sequential on purpose: the
+    // point is a fallback, not two requests per tick in the happy path.
+    let st = null;
+    if (cbOpen && COMMODITY_REALTIME_PROXY[sym]) st = await _coinbaseStats(COMMODITY_REALTIME_PROXY[sym]);
+    if (!st && COMMODITY_KRAKEN_PROXY[sym]) st = await _krakenCommodityStats(COMMODITY_KRAKEN_PROXY[sym]);
     if (!st) return;
     overlay[sym] = { price: st.price, prevClose: st.prevClose, dayHigh: st.dayHigh, dayLow: st.dayLow };
   }));
@@ -9078,17 +9599,19 @@ async function _overlayRealtimeCommodities(commoditySyms) {
 }
 
 // Lightweight commodities-only refresh — same fast-tick pattern as refreshCryptoOnly.
-// Uses Stooq's batched CSV (one direct-CORS call covers all commodity futures in
-// the portfolio, ~500 ms typical). Stooq's data is delayed by roughly the same
-// margin as Yahoo's free retail futures feed, so this isn't a freshness regression
-// vs. the heavy refreshAll path — just dramatically faster because there's no
-// per-symbol Yahoo-via-proxy loop. Falls through silently if Stooq fails; the
-// next heavy refreshAll will catch up via Yahoo.
 //
-// On top of Stooq, we additionally overlay real-time prices for any commodity
-// that has a tokenized equivalent on Coinbase Exchange (currently gold via
-// PAXG-USD). Stooq's delayed price is replaced by the real-time token price
-// when available, which gives gold the same per-tick movement as crypto.
+// This tick applies ONLY the real-time tokenized overlay (gold via PAXG on
+// Coinbase, with Kraken PAXG/XAUT as failover). It deliberately does not refetch
+// the delayed futures feed, for the same reason the app doesn't poll CoinGecko
+// every 2 seconds: re-requesting a 10-15 minute delayed price on a 2-second tick
+// returns the identical number and buys nothing but load. The delayed futures
+// prices refresh on the heavy refreshAll path, where they belong.
+//
+// (This used to also pull Stooq's batched CSV, which was the one cheap way to
+// refresh every futures symbol at once. Stooq is gone — see the Data graveyard
+// in the README — and its replacement, stockanalysis.com, has no futures
+// coverage. Nothing is actually lost here: a delayed price re-fetched more often
+// is still the same delayed price.)
 let _commoditiesOnlyInFlight = false;
 async function refreshCommoditiesOnly() {
   if (_commoditiesOnlyInFlight) return;
@@ -9102,36 +9625,17 @@ async function refreshCommoditiesOnly() {
     for (const sym of commoditySyms) {
       if (quoteData[sym]) prePrices[sym] = quoteData[sym].price;
     }
-    // Fire Stooq + Coinbase real-time-token overlay in parallel.
-    const [stooqResult, realtimeOverlay] = await Promise.all([
-      fetchStooqQuotes(commoditySyms),
-      _overlayRealtimeCommodities(commoditySyms),
-    ]);
+    const realtimeOverlay = await _overlayRealtimeCommodities(commoditySyms);
     let updated = false;
-    if (stooqResult && stooqResult.data) {
-      for (const [sym, cData] of Object.entries(stooqResult.data)) {
-        if (!isCommoditySymbol(sym)) continue;
-        const existing = quoteData[sym];
-        if (prePrices[sym] != null) prevPrices[sym] = prePrices[sym];
-        else if (existing) prevPrices[sym] = existing.price;
-        // Preserve fields Stooq doesn't return (52-week range, perf, market cap,
-        // avg volume) so the heavy refresh's data isn't overwritten with nulls.
-        _preserveAcrossTick(cData, existing, PRESERVE_ON_TICK_COMMODITY);
-        quoteData[sym] = cData;
-        errorSymbols.delete(sym);
-        updated = true;
-      }
-    }
-    // Apply the real-time-token overlay on top — overwrites the Stooq price
-    // with the live Coinbase price for gold (and any future tokenized
-    // commodities). Re-derives change/changePct from the previous close so
-    // the row still tints correctly.
+    // Patch in the live token price for gold (and any future tokenized
+    // commodity). Re-derives change/changePct from the previous close so the
+    // row still tints correctly, and clears the delayed marker.
     if (realtimeOverlay) {
       for (const [sym, rt] of Object.entries(realtimeOverlay)) {
         let q = quoteData[sym];
         if (!q) {
-          // Stooq didn't return data either (maybe symbol unsupported) but
-          // we still got a real-time token price — seed a minimal entry.
+          // No quote for this symbol yet (heavy refresh hasn't landed) but we
+          // do have a real-time token price — seed a minimal entry.
           q = { ...makeEmptyQuote(sym), name: commodityName(sym), _lastUpdate: Date.now() };
           if (prePrices[sym] != null) prevPrices[sym] = prePrices[sym];
           quoteData[sym] = q;
@@ -9193,12 +9697,11 @@ async function refreshAlwaysOnOnly() {
     }
   }
 
-  // Commodities via Stooq's batched CSV — direct CORS preferred, one call
-  // covers everything. Replaces the previous per-symbol Yahoo v8 loop with its
-  // 60-second gate, so commodity prices now tick every refresh interval
-  // off-hours just like crypto. The full refreshAll path (fired once per
-  // OFF_HOURS_FULL_INTERVAL) still hits Yahoo for any fresher data. Gold
-  // additionally gets a real-time PAXG-USD overlay on top of Stooq.
+  // Commodities: real-time token overlay only (gold via PAXG/XAUT). Same
+  // reasoning as refreshCommoditiesOnly — the non-tokenized futures are delayed
+  // at the exchange, so re-pulling them on every off-hours tick returns the same
+  // number. The full refreshAll path (fired once per OFF_HOURS_FULL_INTERVAL)
+  // still refreshes them via Yahoo.
   let commoditySourceLabel = null;
   if (commoditySyms.length > 0) {
     // Snapshot pre-fetch commodity prices for flash detection
@@ -9206,29 +9709,9 @@ async function refreshAlwaysOnOnly() {
     for (const sym of commoditySyms) {
       if (quoteData[sym]) preCommodityPrices[sym] = quoteData[sym].price;
     }
-    const [stooqResult, realtimeOverlay] = await Promise.all([
-      fetchStooqQuotes(commoditySyms),
-      _overlayRealtimeCommodities(commoditySyms),
-    ]);
-    if (stooqResult && stooqResult.data) {
-      commoditySourceLabel = stooqResult.source || 'Stooq';
-      for (const [sym, sData] of Object.entries(stooqResult.data)) {
-        if (!isCommoditySymbol(sym)) continue;
-        const existing = quoteData[sym];
-        if (preCommodityPrices[sym] != null) prevPrices[sym] = preCommodityPrices[sym];
-        else if (existing) prevPrices[sym] = existing.price;
-        // Preserve fields Stooq doesn't return. Uses the same list as
-        // refreshCommoditiesOnly — this branch used to omit marketCap/avgVolume,
-        // so an off-hours tick could blank them.
-        _preserveAcrossTick(sData, existing, PRESERVE_ON_TICK_COMMODITY);
-        quoteData[sym] = sData;
-        errorSymbols.delete(sym);
-        updated = true;
-      }
-    }
-    // Real-time token overlay (PAXG for gold). Overwrites the Stooq price
-    // with the live Coinbase price; re-derives change/changePct from
-    // prevClose so cell tinting still works.
+    const realtimeOverlay = await _overlayRealtimeCommodities(commoditySyms);
+    // Real-time token overlay (PAXG/XAUT for gold); re-derives change/changePct
+    // from prevClose so cell tinting still works.
     if (realtimeOverlay) {
       for (const [sym, rt] of Object.entries(realtimeOverlay)) {
         let q = quoteData[sym];
@@ -9244,11 +9727,7 @@ async function refreshAlwaysOnOnly() {
         errorSymbols.delete(sym);
         updated = true;
       }
-      if (commoditySourceLabel && !commoditySourceLabel.includes('Coinbase')) {
-        commoditySourceLabel = commoditySourceLabel + ' + Coinbase';
-      } else if (!commoditySourceLabel) {
-        commoditySourceLabel = 'Coinbase';
-      }
+      if (!commoditySourceLabel) commoditySourceLabel = 'Coinbase';
     }
   }
 
@@ -9258,8 +9737,8 @@ async function refreshAlwaysOnOnly() {
     renderLightTick();
     // Dedupe across the two label groups before joining. Either label can
     // already be a compound string — crypto returns "CoinGecko + Coinbase" while
-    // the commodity path returns a bare "Coinbase" when Stooq came back empty and
-    // only the PAXG overlay landed — so a naive join rendered
+    // the commodity path returns a bare "Coinbase" when only the PAXG overlay
+    // landed — so a naive join rendered
     // "Data via CoinGecko + Coinbase + Coinbase (off-hours)". Split on the same
     // separator we join with, then keep first occurrences. _refreshAll builds its
     // attribution through a Set for exactly this reason; this was the one path

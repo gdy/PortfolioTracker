@@ -27,8 +27,9 @@ Most of what's interesting here is the consequences of that constraint.
 
 | | |
 |---|---|
-| **8 data sources, automatic failover** | Picks whichever source covers the most symbols, then backfills individual missing fields from the others. Four are keyless *and* direct-CORS, so the no-API-key path stays alive when the proxy fleet is degraded. |
+| **10 data sources, automatic failover** | Picks whichever source covers the most symbols, then backfills individual missing fields from the others. Five are keyless *and* direct-CORS — including stocks — so the no-key path never depends on the proxy fleet for a price. |
 | **Real-time streaming** | FinnHub WebSocket for trade-by-trade stock prices; Coinbase Exchange overlay so crypto ticks on a 2-second interval instead of CoinGecko's 30–60 s server-side cycle. |
+| **Delayed data is labelled** | Any price its source serves on a delay — futures, Alpaca's delayed-SIP fallback — carries a superscript **D** with the reason and the lag, and it clears only when a source positively confirms the price is live. A stale price is never shown as if it were live. |
 | **Works with zero configuration** | No API key required. Keys unlock more columns and streaming, but the app is useful on first open. |
 | **Everything stays local** | `localStorage` only. Data goes to financial APIs and nowhere else. |
 | **33 data columns** | Sortable, reorderable, hideable, with per-symbol notes, price alerts, and multi-portfolio support. |
@@ -48,7 +49,9 @@ That's it. No install, no `npm`, no server.
 
 A **Welcome Guide** opens as a dialog on first launch, and **Load Sample Data** fills the table with a few well-known positions if you want to see it working before entering your own. Dismiss the guide with its close button, the backdrop, or `Esc`; re-open it any time from **Settings → Show Welcome Guide**.
 
-**Optional free API keys** (Settings panel) unlock the rest: [FinnHub](https://finnhub.io/register) adds WebSocket streaming plus P/E, EPS, beta, dividends, earnings dates, and analyst ratings; [Alpaca](https://app.alpaca.markets/signup) adds real bid/ask; [FMP](https://site.financialmodelingprep.com/register) adds a third quote fallback.
+**Optional free API keys** (Settings panel) unlock the rest: [FinnHub](https://finnhub.io/register) adds WebSocket streaming plus P/E, EPS, beta, dividends, earnings dates, and analyst ratings; [Alpaca](https://app.alpaca.markets/signup) adds real bid/ask, real-time crypto, and a delayed-SIP fallback that covers names IEX alone misses; [FMP](https://site.financialmodelingprep.com/register) adds a third quote fallback.
+
+A key is optional. Without one you still get real-time stock and crypto prices, day P&L, and the 52-week range — what a key adds is the data no keyless source publishes: P/E, EPS, beta, dividends, earnings dates, analyst ratings, real bid/ask, and WebSocket streaming.
 
 ### Deploying your own
 
@@ -62,7 +65,7 @@ Every refresh runs as three waves, so the table paints as soon as *anything* use
 
 ```mermaid
 flowchart TD
-    T([Refresh tick]) --> W1["Wave 1 · keyless, direct CORS<br/>Stooq · CoinGecko · Coinbase"]
+    T([Refresh tick]) --> W1["Wave 1 · keyless, direct CORS<br/>StockAnalysis · CoinGecko · Coinbase"]
     T --> W2["Wave 2 · full fan-out<br/>Yahoo via proxy · FinnHub · Alpaca · FMP"]
     W1 -->|"interim paint, ~300-500 ms<br/>blank rows only"| M["Merge · best-coverage source wins,<br/>the rest backfill missing fields<br/>→ authoritative paint"]
     W2 --> M
@@ -78,10 +81,12 @@ Four problems drove most of the design.
 
 Free financial APIs rate-limit, go down, silently return empty results, or drop coverage for individual tickers. The app treats every source as unreliable:
 
-- **Eight sources run concurrently.** The one covering the most requested symbols becomes primary; the rest are merged in field-by-field to fill gaps (a source might have the price but not the 52-week range).
-- **Yahoo Finance has no CORS headers**, so it goes through a rotating pool of 4 public CORS proxies with last-working-proxy memory. If the sticky proxy fails, the remaining proxies are **raced in parallel** rather than walked sequentially — bounding worst-case latency at roughly two timeouts instead of four.
-- **Four sources are keyless *and* direct-CORS** (Stooq, CoinGecko, Coinbase, CryptoCompare). Yahoo is also keyless but depends on the proxy fleet, so these four give the no-key path a fallback chain that doesn't share Yahoo's fragility.
-- **Circuit breakers.** Three consecutive all-symbol failures on the Coinbase overlay trigger a 30 s cooldown, automatically falling back to CryptoCompare. FinnHub's public demo token is dead upstream, so its first 401 latches that path off for the session rather than paying a doomed round-trip every refresh.
+- **Ten sources run concurrently.** The one covering the most requested symbols becomes primary; the rest are merged in field-by-field to fill gaps (a source might have the price but not the 52-week range).
+- **Yahoo Finance has no CORS headers**, so it goes through a rotating pool of 3 public CORS proxies with last-working-proxy memory. If the sticky proxy fails, the remaining proxies are **raced in parallel** rather than walked sequentially — bounding worst-case latency at roughly two timeouts instead of the length of the pool.
+- **Five sources are keyless *and* direct-CORS** — StockAnalysis for equities and ETFs, CoinGecko, Coinbase, Binance.US and Kraken for crypto. This is the structural change that matters most: a no-key portfolio of stocks and crypto now gets every price, day change, and 52-week range without touching a proxy at all. Yahoo is still keyless, but it is the only keyless source that needs the proxy fleet, and it is now used for what nothing else provides (fundamentals, historical performance, futures) rather than for prices.
+- **Two venues for every asset class.** Equities have StockAnalysis and Yahoo; crypto has Coinbase (per-symbol) plus Binance.US and Kraken (batched); gold has PAXG on Coinbase with PAXG *and* XAUT on Kraken behind it. No single outage takes a whole asset class down.
+- **Dead sources latch themselves off.** A source that cannot succeed is worse than a slow one, because every refresh pays its full timeout. Stooq (key-gated upstream since March 2026) and CryptoCompare (now requires a key) each disable themselves for the session after one failure, and FinnHub's public demo token latches off on its first 401 rather than paying a doomed round-trip every refresh.
+- **Circuit breakers.** Three consecutive all-symbol failures on the Coinbase overlay trigger a 30 s cooldown. Symbols Coinbase Exchange has no product for are excluded from that tally, so a listing gap can't be mistaken for an outage.
 - **Jittered retries.** When *every* source fails — usually a proxy-fleet hiccup affecting many users at once — a single retry is scheduled ~8 s later with ±2 s of randomness, so recovering proxies don't get a synchronized thundering herd.
 
 </details>
@@ -92,9 +97,10 @@ Free financial APIs rate-limit, go down, silently return empty results, or drop 
 <br/>
 
 - **WebSocket streaming.** FinnHub's WebSocket gives trade-by-trade stock prices with no proxy involved. Free tier caps at 50 symbols, so past that the app streams the **largest positions by cost basis** and lets the rest fall back to REST polling. Ranking by cost basis rather than live market value is deliberate: market value wobbles across the 50/51 boundary and would thrash subscriptions all day.
-- **Crypto needed a different fix.** CoinGecko's free endpoint updates server-side only every 30–60 s, so a 2 s poll returns identical data. Coinbase Exchange's public ticker is real-time and direct-CORS, so it's layered on top: CoinGecko supplies slow-moving fields (24h high/low, market cap, volume), Coinbase patches price/bid/ask every tick. Past 10 coins the per-symbol fan-out switches to one batched CryptoCompare call, since browsers cap ~6 connections per origin and a large fan-out would just serialize.
-- **Real-time gold via a tokenized proxy.** Free futures feeds are 10–15 min delayed at source, and real-time futures data genuinely requires a paid subscription. For gold specifically, the app fetches `PAXG-USD` from Coinbase — PAX Gold is a redeemable claim on one troy ounce, trades 24/7, and tracks spot within ~1%. Its 24h open doubles as a previous close, so gold shows a real day change and range even on weekends when Yahoo isn't queried. No other commodity has an equivalent token with a clean peg and a Coinbase listing, so the rest stay on the delayed feed.
+- **Crypto needed a different fix.** CoinGecko's free endpoint updates server-side only every 30–60 s, so a 2 s poll returns identical data. Coinbase Exchange's public ticker is real-time and direct-CORS, so it's layered on top: CoinGecko supplies slow-moving fields (24h high/low, market cap, volume), Coinbase patches price/bid/ask every tick. Past 10 coins the per-symbol fan-out switches to **one batched Binance.US call** (browsers cap ~6 connections per origin, so a large fan-out just serializes), with **Kraken** filling anything Binance.US doesn't list and standing in wholesale if it fails. Both carry real bid/ask, so unlike the batch path they replaced there's no loss of spread data at scale.
+- **Real-time gold via a tokenized proxy.** Free futures feeds are 10–15 min delayed at source, and real-time futures data genuinely requires a paid subscription. For gold specifically, the app fetches `PAXG-USD` from Coinbase — PAX Gold is a redeemable claim on one troy ounce, trades 24/7, and tracks spot within ~1%. Its 24h open doubles as a previous close, so gold shows a real day change and range even on weekends when Yahoo isn't queried. **Kraken backs this up with both PAXG and XAUT** (Tether Gold — the same claim-on-an-ounce structure from a different issuer), so gold survives both a Coinbase outage and a problem specific to one token's peg. I checked Kraken's full 1,383-pair list for metal-backed tokens: PAXG and XAUT are the only two, both gold. No silver, platinum or copper equivalent exists, so those stay on the delayed feed — and are **marked** as delayed rather than quietly displayed next to live prices (see below).
 - **Tiered scheduling.** Active hours (4 AM–8 PM ET weekdays) poll everything. Off-hours poll only crypto and commodities. Weekends pause entirely unless you hold 24/7 assets.
+- **Delayed prices say so.** Mixing sources means some rows are live and some aren't, and once a number is in the table there is nothing to distinguish them — the failure mode most likely to actually cost someone money. Every quote carries a tri-state provenance: a stated delay, a positive confirmation that it is real-time, or *unknown*. Anything delayed renders a superscript **D** with a tooltip naming the reason and the lag, and **unknown falls back to what the instrument implies** — so a futures row is marked from its very first paint rather than only once the refresh pass gets around to tagging it. The marker clears when a source positively asserts live: a streamed FinnHub trade, or the PAXG overlay taking gold real-time. Gold is marked until that overlay actually lands, because off-hours and during a Coinbase cooldown it genuinely is on the delayed feed.
 
 </details>
 
@@ -103,10 +109,10 @@ Free financial APIs rate-limit, go down, silently return empty results, or drop 
 
 <br/>
 
-- **Price fetching is batched** — one call each for Yahoo v7, Stooq, CoinGecko, Alpaca, and FMP — so prices and day P&L scale regardless of portfolio size.
-- **The expensive part is per-symbol enrichment.** Yahoo has no batch endpoint for fundamentals or historical performance, so above ~25 positions the app enriches only the rows **currently on screen** and fetches the rest as they scroll into view. Off-screen rows still show live price and day P&L from the batch — they're just missing P/E, 52-week range, and YTD/6M/1Y until visible.
+- **Price fetching is batched where the API allows it** — one call each for CoinGecko, Alpaca, FMP, and the Binance.US/Kraken crypto overlay. Two sources fan out per symbol: Yahoo (its batch endpoint is gone) and StockAnalysis. StockAnalysis is cheap enough that this doesn't matter — measured at 60 symbols in ~455 ms, in batches of 10, because it is direct-CORS with no proxy hop. Yahoo's fan-out is the expensive one, which is why lazy enrichment below matters more than it used to.
+- **The expensive part is per-symbol enrichment.** Yahoo has no batch endpoint for fundamentals or historical performance, so above ~25 positions the app enriches only the rows **currently on screen** and fetches the rest as they scroll into view. Off-screen rows still show live price, day P&L and the 52-week range — they're just missing P/E, EPS, beta and YTD/6M/1Y until visible.
 - **Adaptive heavy-refresh cadence.** A full fan-out can't finish inside a 2 s tick on a large portfolio, so heavy refreshes are spaced at least ⌈stocks ÷ 15⌉ seconds apart (never below your chosen interval). Between them, lightweight crypto-only and commodity-only ticks keep 24/7 assets moving on your actual interval.
-- **Rendering is tiered too.** A full table redraw costs ~15–20 ms; the targeted price-cell patch used by WebSocket and light ticks costs well under 1 ms. Full redraws happen on a throttle, or immediately when the active sort depends on live prices and row order could change.
+- **Rendering is tiered too.** At 60 positions × 34 columns a full table redraw costs ~10 ms and the targeted price-cell patch used by WebSocket and light ticks costs ~2 ms. Full redraws happen on a throttle, or immediately when the active sort depends on live prices and row order could change.
 
 </details>
 
@@ -136,10 +142,11 @@ Routing Yahoo through public proxies means an untrusted intermediary controls th
 - **WebSocket streaming** — real-time stock prices via FinnHub (up to 50 symbols; largest positions prioritized). Renders debounced via `requestAnimationFrame`. A green **● Live** badge shows when streaming; if the socket is connected but silent for 60+ seconds during market hours — a common symptom of the free plan's realtime-equities restriction — it flips to amber **● Live (no data)** with an explanatory tooltip. REST polling continues either way.
 - **Auto-reconnect with capped exponential backoff** — 5 s doubling to a 60 s ceiling, cleared only after a connection stays up 30 s. (FinnHub accepts the WebSocket handshake *before* validating the token, so an invalid key opens and immediately closes; resetting on open would pin the delay at 5 s forever.)
 - **Auto-refresh** — 2 / 3 / 5 / 10 / 15 / 30 / 60 second intervals, with an overlap guard so a short interval on a slow network skips a tick instead of stacking requests.
-- **Pre-market and after-hours pricing** — inline per row with change indicators, from Yahoo v7 batch with a v8 chart-candle fallback. Blanked during the regular session (keyed off live `marketState`, with an ET-clock fallback) so yesterday's post-market price never lingers into the next trading day.
+- **Pre-market and after-hours pricing** — inline per row with change indicators, from StockAnalysis (which labels the session explicitly, so a pre-market print never appears under an "AH" heading) and Yahoo's v8 chart candles. Blanked during the regular session (keyed off live `marketState`, with an ET-clock fallback) so yesterday's post-market price never lingers into the next trading day.
 - **Price flash animations** — green/red on change, using targeted in-place DOM patching so a field you're editing isn't destroyed mid-keystroke.
-- **Instant paint on reload** — last-known quotes are cached and restored before the first network request, so reopening shows prices immediately instead of a wall of "loading…". Only prices are cached; deferred fields re-derive fresh each session so nothing can go permanently stale.
+- **Instant paint on reload** — last-known quotes are cached and restored before the first network request, so reopening shows prices immediately instead of a wall of "loading…". Only prices and their delay provenance are cached — the provenance deliberately rides along, since restoring a delayed price without its marker would repaint it as if it were live. Deferred fields re-derive fresh each session so nothing else can go permanently stale.
 - **Source attribution** — the status bar names the live sources, e.g. `Data via FinnHub + CoinGecko | WS streaming`.
+- **Delayed-price marker** — a superscript **D** on any price its source served on a delay, with a tooltip giving the reason and the lag. Clears automatically when a real-time source supersedes it.
 
 </details>
 
@@ -148,7 +155,7 @@ Routing Yahoo through public proxies means an untrusted intermediary controls th
 
 <br/>
 
-- **33 data columns** — price, change, % change, after-hours, quantity, cost basis, purchase date, market value, day P&L, total P&L, P&L %, dividend/yield, ex-div, earnings date, YTD/6M/1Y performance, prev close, open, bid, ask, day range, 52-week range, volume, avg volume, market cap, P/E, EPS, beta, analyst rating, and notes. Seven are locked as essential (symbol, name, price, change, % change, quantity, cost basis) and can't be hidden.
+- **33 data columns** — symbol, name, price, change, % change, after-hours, quantity, cost basis, purchase date, market value, day P&L, total P&L, P&L %, dividend/yield, ex-div, earnings date, YTD/6M/1Y performance, prev close, open, bid, ask, day range, 52-week range, volume, avg volume, market cap, P/E, EPS, beta, analyst rating, and notes. Seven are locked as essential (symbol, name, price, change, % change, quantity, cost basis) and can't be hidden.
 - **Analyst ratings** — Strong Buy → Strong Sell consensus from FinnHub with a Yahoo fallback, color-tinted by score. Click for a popover with the 1–5 score on a green-to-red scale and a stacked breakdown of analyst counts.
 - **Multiple portfolios** — unlimited named portfolios with their own positions, notes, and undo history. Switching keeps loaded quotes in memory (keyed by symbol), so flipping between portfolios doesn't force a reload. The selector bar is hidden by default to save vertical space; enable it in Settings (auto-shown if you already have more than one).
 - **Inline editing** — quantity, cost basis, date, and notes edit directly in the table or card.
@@ -211,6 +218,7 @@ Auto-detects exports from **Robinhood · E\*Trade · Fidelity · Charles Schwab 
 - **Screen-reader hooks** — status bar, summary bar, and live indicator are `aria-live="polite"`; the table carries an `aria-label`; every icon-only toolbar button has an explicit `aria-label`.
 - **Keyboard focus ring** — a high-contrast `:focus-visible` outline, visible for keyboard navigation and suppressed for mouse clicks.
 - **Reduced motion** — flash animations, the donut sweep-in, and the "ready to add" pulse all fall back to static styling under `prefers-reduced-motion`.
+- **The delayed-price marker is a glyph, not a colour.** The superscript **D** is readable without colour perception, and its tooltip states the reason and the lag in words. It is amber as a secondary cue only.
 
 </details>
 
@@ -234,29 +242,65 @@ Auto-detects exports from **Robinhood · E\*Trade · Fidelity · Charles Schwab 
 
 | Source | Key | Rate limit | Provides |
 |---|---|---|---|
-| **Yahoo Finance** | — | via CORS proxies | Quotes (v7 batch → v8 chart → v6), fundamentals, after-hours, historical performance |
+| **StockAnalysis** | — | direct CORS | **Keyless real-time US equities and ETFs, with no proxy hop.** Price, change, OHLC, volume, 52-week range, market state, and pre/post-market. Handles dotted tickers (`BRK.B`) and ETFs. 60 symbols in ~455 ms. |
+| **Yahoo Finance** | — | via CORS proxies | Quotes (v8 chart), fundamentals, after-hours, historical performance, and commodity futures |
 | **FinnHub** | free | 60/min + WebSocket | WebSocket streaming (stocks), quotes, profiles, P/E, EPS, beta, dividends, earnings, analyst ratings |
-| **Alpaca Markets** | free | 200/min | IEX snapshots, real bid/ask, avg volume, historical bars |
+| **Alpaca Markets** | free | 200/min | IEX snapshots (real-time), delayed-SIP fallback for names IEX doesn't cover, real bid/ask, avg volume, historical bars |
+| **Alpaca Crypto** | free | 200/min | Real-time crypto snapshots — no feed tiers and no delay on the free plan, unlike equities |
 | **Financial Modeling Prep** | free | 250/day | Quotes with after-hours, fundamentals |
-| **Stooq** | — | generous | Keyless backup for US stocks and commodity futures. One batched CSV covers the whole portfolio, ~15 min delayed. Direct CORS first, proxy fallback. |
 | **CoinGecko** | — | ~30/min | Crypto 24h high/low, market cap, volume, 1-year chart for 52-week range and performance |
 | **Coinbase Exchange** | — | 10/s | Real-time crypto price/bid/ask overlay; PAXG for real-time gold |
-| **CryptoCompare** | — | ~100k/mo | Batched crypto overlay above 10 coins, and automatic fallback when the Coinbase breaker trips |
+| **Binance.US** | — | direct CORS | Batched real-time crypto overlay above 10 coins, with real bid/ask. 36 of the 37 supported coins. |
+| **Kraken** | — | direct CORS | Batched crypto backstop — the only venue covering all 37 coins — plus PAXG *and* XAUT as gold failover when Coinbase is unavailable. |
+
+> **Verified 2026-09-01** against the live endpoints. Free financial APIs change access terms without notice: two sources moved behind keys since the previous audit and were replaced (see the graveyard below). Treat the dates as when each row was last checked, not when the code was written.
 
 <details>
 <summary>Implementation notes — caching, cooldowns, and call budgets</summary>
 
 <br/>
 
-- **Yahoo crumb** — fetched once, cached 30 min, prewarmed at startup so the first quote batch doesn't pay a serial round-trip. Concurrent callers de-duplicate onto one in-flight request.
-- **Yahoo v7 batch** — tried first for all symbols in one request. On failure a 3-minute cooldown prevents permanently degrading to the slower per-symbol v8 path.
+- **Yahoo v7 batch and the crumb are permanently closed, not temporarily broken.** The batch endpoint returns `401 Unauthorized` for everyone, and `/v1/test/getcrumb` returns `401 Invalid Cookie` on both CDN hosts through any proxy. The crumb requires a Yahoo consent cookie issued by `fc.yahoo.com`, and a stateless passthrough proxy makes each request independently — it cannot carry that cookie, and the browser cannot hold a cross-origin cookie for Yahoo. **Fixing this requires a stateful backend, which is the one thing this project rules out.** Both paths are still attempted because they cost one request and cache their failure, but the working path is the per-symbol **v8 chart** endpoint.
 - **Keyless `quoteSummary`** is capped at two failures per symbol per session — Yahoo gates it hard without consent cookies, so endless retries only burn shared proxy budget.
-- **FinnHub fundamentals** — profile, metrics, earnings, dividends, and recommendations fetched once per symbol per session and cached. Per-refresh calls hit only the lightweight `/quote`.
+- **FinnHub fundamentals** — profile, metrics, earnings, and recommendations fetched once per symbol per session and cached; per-refresh calls hit only the lightweight `/quote`. Dividend data comes from `/stock/metric`, not the dedicated `/stock/dividend` endpoint, which is premium-only and returns 403 on every free key.
 - **CoinGecko TTL** scales with portfolio size — a 3 s floor for ≤5 coins, 30 s for larger — minus a 1 s alignment buffer so the cache expires *before* the next tick rather than skipping every other fetch.
-- **Fast new-ticker fetch** — adding a position races FinnHub, Alpaca, Stooq, a Coinbase PAXG lookup for gold, and proxied Yahoo in parallel, applying whichever returns a valid price first. A background warmer then fires the five FinnHub fundamentals endpoints without the inter-batch delays, so P/E and analyst rating land in ~1 s rather than at the next refresh.
+- **Fast new-ticker fetch** — adding a position races StockAnalysis, FinnHub, Alpaca, a Coinbase PAXG lookup for gold, and proxied Yahoo in parallel, applying whichever returns a valid price first. StockAnalysis usually wins outright at ~30 ms warm, since everything else either needs a key or a proxy hop. A background warmer then fires the four FinnHub fundamentals endpoints without the inter-batch delays, so P/E and analyst rating land in ~1 s rather than at the next refresh.
 - **Abort propagation** — switching portfolios or clearing positions aborts the in-flight refresh, and the signal is threaded through the proxy layer and per-symbol enrichment so superseded calls are genuinely cancelled, releasing the shared proxy pool immediately.
 
 </details>
+
+---
+
+## Data graveyard
+
+Free financial APIs die, and they rarely announce it. Every source below was load-bearing at some point and isn't any more. Kept as a record so the same ground doesn't get re-tested every time something breaks, and because the failure modes turned out to be more instructive than the successes.
+
+| Source | Died | What happened | Replaced by |
+|---|---|---|---|
+| **Stooq** | ~Mar 2026 | Introduced a mandatory API key. The keyless CSV endpoint now returns 404 for everyone and the site serves a JavaScript proof-of-work interstitial to non-browser clients. Direct CORS stopped being allowed at the same time. ([independently reported](https://github.com/pydata/pandas-datareader/issues/1012)) | **StockAnalysis** |
+| **CryptoCompare** | ~2026 | Moved under CoinDesk and retired anonymous access — `min-api.cryptocompare.com` now answers `401 {"message":"API key required"}`. | **Binance.US** + **Kraken** |
+| **Yahoo `/v7/finance/quote`** | 2025–26 | Returns `401 Unauthorized · User is unable to access this feature`. The batch quote endpoint is simply gone for unauthenticated callers. | Yahoo **v8 chart**, per symbol |
+| **Yahoo `/v6/finance/quote`** | earlier | `404` — endpoint removed. | as above |
+| **Yahoo crumb / `quoteSummary`** | 2023–26 | `401 Invalid Cookie`. Needs a consent cookie from `fc.yahoo.com`; a stateless CORS proxy can't carry one and the browser can't hold a cross-origin Yahoo cookie. **Unfixable without a backend** — see Known gaps. | FinnHub / Alpaca (key required) |
+| **CoinCap** | 2025 | `api.coincap.io` decommissioned; the v3 host at `rest.coincap.io` returns `401` without a key. | Coinbase, Binance.US, Kraken |
+| **IEX Cloud** | Aug 2024 | Shut down entirely. | — |
+| **FinnHub `/stock/dividend`** | — | Not dead, but **premium-only**: returns `403` on every free key. It was 1 of 5 calls fired per symbol, so a fifth of the fundamentals budget bought a guaranteed error. | `/stock/metric`, which carries the same fields on the free tier |
+| **`thingproxy.freeboard.io`** | ~2026 | NXDOMAIN — the domain no longer exists. | — |
+| **`crossorigin.me`** | years ago | Service shut down and the domain changed hands. Requests carried portfolio symbols in the URL to an unknown party for zero chance of a response. | — |
+| **`api.codetabs.com`** | ~Aug 2026 | Stopped answering. Notably it does not *refuse* — it **hangs**, burning the full 10 s timeout and holding a connection slot on every rotation. | `proxy.corsfix.com` |
+| **`corsproxy.io`** (keyless form) | ~2026 | Hard `403 keyless_legacy_url` — the anonymous URL form was retired in favour of account API keys, which a public static file can't ship. | as above |
+
+Two things this table taught the design:
+
+**A source that hangs is far worse than one that errors.** A fast `403` costs ~30 ms; a hang costs a full timeout *and* a connection slot, and if it sits in a blocking wave it stalls the entire first paint. Stooq and codetabs were both in that category, and between them they were the reason a keyless first load could sit blank for ~30 seconds. Everything that can fail now either fails fast or backs itself off. Which of the two matters: a source that refuses with an explicit status (`401`/`403`/`451`) is latched off for the session, because that will not resolve itself. A source that merely stops answering gets a 60-second circuit breaker instead — from a browser, "this endpoint is gone" and "the user's wifi dropped" are the same observable event, so a permanent latch there would disable a healthy source for the rest of the session over a passing blip.
+
+**Don't fix a dead source if the replacement is better anyway.** Stooq and CryptoCompare could both be revived with keys. Neither was worth it: Stooq's replacement is real-time instead of 15 minutes delayed and handles the dotted tickers Stooq skipped, and CryptoCompare's replacements are batched *and* carry real bid/ask, which it never did. Adding a key field to Settings would have been the smaller change and the worse outcome.
+
+### Checked and rejected
+
+Tested for keyless + direct-CORS access and found unusable, so nobody has to re-test them: **Binance.com, OKX, Bybit, KuCoin, Bitstamp, Bitfinex, Crypto.com** (no CORS headers from a browser); **CNBC, Nasdaq, WSJ** (no CORS); **Polygon, marketstack, Twelve Data, Alpha Vantage** (key required, and Alpha Vantage's free tier is 25 requests/day). **TradingView's scanner** does work batched with CORS, but needs exchange-prefixed tickers (`NASDAQ:AAPL`) that the app has no way to resolve.
+
+Also searched: a tokenized stand-in for **silver, platinum or copper**, the way PAXG works for gold. Kraken's full 1,383-pair list contains exactly two metal-backed tokens, PAXG and XAUT, and both are gold. There is no equivalent for the other commodities, which is why they remain on the delayed feed.
 
 ---
 
@@ -288,8 +332,11 @@ Corrupt entries are detected on load: the bad key is removed and the app boots w
 
 Being honest about what isn't done, and why:
 
-- **Commodities other than gold are 10–15 minutes delayed.** Real-time futures data requires a paid market-data subscription. Gold gets around this via PAXG; oil, silver, and copper have no equivalent token with a clean spot peg and a Coinbase listing.
-- **Yahoo depends on public CORS proxies**, which are the least reliable link in the chain. The keyless direct-CORS sources exist specifically to limit the blast radius, but a total proxy-fleet outage still degrades fundamentals and historical performance.
+- **Two sources were lost to key-gating and have been replaced.** Stooq and CryptoCompare both moved behind API keys; their replacements are better on every axis that matters, so no key support was added for either. Details in the graveyard below.
+- **Commodities other than gold are 10–15 minutes delayed.** Real-time futures data requires a paid market-data subscription. Gold gets around this via PAXG and XAUT; oil, silver and copper have no equivalent token with a clean spot peg on either Coinbase or Kraken — I checked both venues' full product lists. These rows are marked with a **D**, so the delay is visible rather than implied.
+- **Yahoo depends on public CORS proxies**, which are the least reliable link in the chain. This used to take stock prices down with it for no-key users; StockAnalysis now covers keyless equity prices without a proxy, so a proxy-fleet outage degrades **fundamentals, historical performance, and commodity futures** rather than the price column. Those three have no keyless direct-CORS source — adding a free FinnHub or Alpaca key is still the single biggest reliability upgrade available.
+- **The proxy pool needs periodic auditing.** Public CORS proxies quietly die. The last audit found two of the four then in the pool were dead — one returning a hard 403, the other *hanging* until timeout, which is far more expensive — and the pool now stands at three. If Yahoo data gets slow, check the pool before anything else.
+- **StockAnalysis and Yahoo are both unofficial endpoints.** Neither publishes a public API contract, so either can change shape or disappear without notice. That's the standing cost of the no-backend, no-key constraint, and it's why nothing in the app is allowed to be load-bearing on one source: every field either has a second provider or degrades to a dash.
 - **Price alerts are global, not per-portfolio.** They're keyed by symbol alone, so the same threshold applies everywhere.
 - **Colorblind ▲/▼ glyphs don't reach the mobile card's headline price/change line** — only the detail rows, table cells, and summary bar.
 - **No automated test suite.** Verification is manual against a local static server. For a single file with no build step this has been a reasonable trade so far; it would not scale to a second contributor.
@@ -332,6 +379,10 @@ Response *values* are treated the same way. Numeric fields are coerced by the fo
 
 **Column layout** loaded from a settings file is resolved through a `Map`, not a plain-object lookup. With an object, an entry of `__proto__` or `constructor` satisfies a truthiness check and injects `Object.prototype` into the column list, rendering phantom headers.
 
+**Portfolio names** index a plain object, so the same class of name misbehaves there too — and `__proto__` is the sharp one: `all['__proto__'] = {…}` doesn't create a property, it reassigns the prototype, so the portfolio is silently never stored while the UI switches to it. A short reserved-word list is rejected up front, and existence checks use `hasOwnProperty` rather than truthiness so an inherited key can't pass as a saved portfolio.
+
+**Every source is read through the app's own symbol map, never by iterating the response.** This is what keeps the response-key guard holding as the source count grows: Binance.US and Kraken responses are indexed by their pair, then looked up via our map; Kraken's internal keys (`XXBTZUSD`) never touch `quoteData` directly. None of the sources added recently contribute a free-text field to the DOM — their names come from our own tables and their numeric fields go through `Number()` — so the untrusted-string render surface did not grow with them.
+
 **Shared-URL imports** — parsed with a symbol whitelist (`[A-Z0-9.\-=]`), a 10-character cap, numeric coercion, and strict `YYYY-MM-DD` date validation, then gated behind a confirmation dialog. The date matters specifically because it flows into an HTML `value=""` attribute; it's validated on ingestion *and* escaped at every render site.
 
 </details>
@@ -340,4 +391,4 @@ Response *values* are treated the same way. Numeric fields are coerced by the fo
 
 ## Author
 
-Built by [Grant](https://github.com/gdy) · MIT licensed
+Built by [Grant](https://github.com/gdy) · [MIT licensed](LICENSE)

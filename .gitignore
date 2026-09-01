@@ -12,3 +12,7 @@ desktop.ini
 # Temp
 *.tmp
 *.bak
+
+# Local agent/tooling state — machine-specific paths and scratch worktrees,
+# nothing another clone can use.
+.claude/
