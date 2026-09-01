@@ -2734,6 +2734,25 @@ function prefetchSampleData() {
   };
   fetchStockAnalysisQuotes(syms).then(r => warm(r, false)).catch(() => {});                // fast: stocks (direct CORS)
   if (syms.some(s => COINGECKO_IDS[s])) fetchCryptoQuotes(syms).then(r => warm(r, true)).catch(() => {}); // fast: crypto
+  // Commodities need their own warm. Every sample set contains one, and the only
+  // fast source for a futures symbol is the tokenized overlay (gold via PAXG /
+  // XAUT) — neither StockAnalysis nor CoinGecko covers futures at all, so without
+  // this line the commodity row is the one that arrives late no matter how warm
+  // everything else is. Writes through the same shape the other warms use.
+  const _warmCommodities = syms.filter(isCommoditySymbol);
+  if (_warmCommodities.length > 0) {
+    _overlayRealtimeCommodities(_warmCommodities).then(rt => {
+      if (!rt) return;
+      for (const [sym, d] of Object.entries(rt)) {
+        if (!d || d.price == null) continue;
+        const cur = quoteData[sym];
+        if (cur && cur.price != null) continue;
+        const q = cur || { ...makeEmptyQuote(sym), name: commodityName(sym) };
+        quoteData[sym] = q;
+        _applyRealtimeCommodity(q, sym, d);
+      }
+    }).catch(() => {});
+  }
   fetchYahooQuotes(syms).then(r => warm(r, false)).catch(() => {});                        // slower: refines/fills gaps
 }
 function loadSampleData() {
@@ -4457,6 +4476,48 @@ function _saMarketState(ms, es) {
   if (m === 'closed') return 'CLOSED';
   return null;
 }
+// --- Commodity futures: Yahoo v8 chart, one proxy race per symbol ---
+// Futures are the one asset class with no keyless direct-CORS source: not
+// StockAnalysis (404s on GC=F), not CoinGecko, not the exchanges. Yahoo's v8
+// chart is the only thing that quotes them, which means a proxy hop.
+//
+// This exists as its OWN function so commodities can be fetched in wave 1
+// rather than riding along inside the main Yahoo batch. The batch is gated by
+// every other symbol in the portfolio plus the crumb prewarm, so a commodity
+// row used to wait on work that had nothing to do with it \u2014 measured at 6.3 s
+// to first paint for silver, against ~100 ms for the same chart fetched
+// directly through the proxy race. Same endpoint, same proxies; the entire
+// difference was when it got asked for.
+//
+// Gold usually beats this via the tokenized overlay (PAXG/XAUT, ~35 ms and
+// real-time). This is what the other commodities have, and it is also what
+// gives gold a previous close on days the token overlay is all we have.
+async function fetchCommodityQuotes(commoditySyms, signal) {
+  if (!commoditySyms || commoditySyms.length === 0) return null;
+  const results = {};
+  await Promise.all(commoditySyms.map(async (sym, i) => {
+    // Stagger slightly so a portfolio full of futures doesn't open every proxy
+    // connection in the same millisecond and self-congest.
+    if (i > 0) await new Promise(r => setTimeout(r, COMMODITY_STAGGER * i));
+    if (signal && signal.aborted) return;
+    try {
+      const chartUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) +
+                       '?range=2d&interval=5m&includePrePost=true';
+      const text = await fetchWithProxyRace(chartUrl, 3, PROXY_RACE_TIMEOUT, signal);
+      const data = JSON.parse(text);
+      if (data.chart && data.chart.result && data.chart.result[0]) {
+        const q = normalizeYahooChart(sym, data.chart.result[0]);
+        if (q && q.price) results[sym] = q;
+      }
+    } catch (e) {
+      // Silent: a commodity that misses here is retried after wave 2, and a
+      // valid futures symbol must never be marked an unknown ticker.
+      dbg('commodity fetch failed for', sym, e && e.message);
+    }
+  }));
+  return Object.keys(results).length > 0 ? { source: 'Yahoo Finance', data: results } : null;
+}
+
 async function fetchStockAnalysisQuotes(symbols, signal) {
   if (Date.now() < _saSkipUntil) return null;
   const stockSyms = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
@@ -5708,6 +5769,33 @@ async function _refreshAll(signal) {
   // stock prices essentially immediately instead of waiting on the Yahoo proxy
   // fan-out. This slot previously held Stooq, whose failure path was slow enough
   // to stall the whole first paint — see the Data graveyard in the README.
+  // ORDER MATTERS HERE, and not for readability. `fetch` is issued the moment
+  // each of these is constructed, and the browser will only keep ~6 connections
+  // open per host (plus a global cap). Wave 2's calls are the slow ones — proxied
+  // Yahoo fans out per symbol through a single proxy host — so creating them
+  // first let them claim the connection slots and left wave 1's fast direct-CORS
+  // calls queueing behind work nobody is waiting on. Measured: the same three
+  // wave-1 sources that answer in 23-72 ms standalone took ~920 ms to first
+  // paint. Construct wave 1 FIRST so the sources gating the interim paint get
+  // the sockets, and let the slow ones fill in behind them.
+
+  // --- Wave 1 sources: keyless, direct-CORS, no proxy hop ---
+  const pCrypto = hasCrypto ? fetchCryptoQuotes(symbols) : Promise.resolve(null);
+  const pStockAnalysis = hasStockAnalysisEligible ? fetchStockAnalysisQuotes(symbols, signal) : Promise.resolve(null);
+  // The tokenized-commodity overlay (gold via PAXG on Coinbase, XAUT on Kraken)
+  // is direct-CORS and answers in ~35 ms, so it belongs in wave 1 with the other
+  // fast sources. It used to be awaited only after wave 2 AND after the
+  // missing-commodity proxy retry, which meant gold queued behind the entire
+  // Yahoo proxy chain: measured at 18.5 s to first paint while AAPL and BTC
+  // landed in 0.5 s. Nothing about the overlay ever needed Yahoo — PAXG's own
+  // 24h open supplies the previous close — so the wait bought nothing.
+  const pCommodityRT = _overlayRealtimeCommodities(symbols.filter(isCommoditySymbol));
+  // Futures have no direct-CORS source, so this one does take a proxy hop \u2014 but
+  // it is a bounded, per-symbol race (~100 ms) rather than a wait on the whole
+  // Yahoo batch, which is what made commodities the slowest rows in the table.
+  const pCommodity = fetchCommodityQuotes(symbols.filter(isCommoditySymbol), signal);
+
+  // --- Wave 2 sources: keyed, and/or proxied ---
   const pFinnhub = hasFinnHub ? fetchFinnhubQuotes(symbols) : Promise.resolve(null);
   const pYahoo = fetchYahooQuotes(symbols, signal);
   const pAlpaca = hasAlpaca ? fetchAlpacaQuotes(symbols) : Promise.resolve(null);
@@ -5717,42 +5805,71 @@ async function _refreshAll(signal) {
   const pAlpacaCrypto = (hasAlpaca && symbols.some(isCryptoSymbol))
     ? fetchAlpacaCryptoQuotes(symbols) : Promise.resolve(null);
   const pFmp = hasFmp ? fetchFmpQuotes(symbols) : Promise.resolve(null);
-  const pCrypto = hasCrypto ? fetchCryptoQuotes(symbols) : Promise.resolve(null);
   const pFree = !hasFinnHub ? fetchFinnhubFreeQuotes(symbols) : Promise.resolve(null);
-  const pStockAnalysis = hasStockAnalysisEligible ? fetchStockAnalysisQuotes(symbols, signal) : Promise.resolve(null);
 
-  // --- Wave 1: interim paint from the fast, direct-CORS sources ---
-  const [cryptoResult, saResult] = await Promise.all([pCrypto, pStockAnalysis]);
-  if (signal && signal.aborted) return;
-  // Fill ONLY blank rows (symbols that have no price yet), merging price fields
-  // onto any existing/hydrated object instead of replacing it (so its
-  // fundamentals survive). Because we never touch an already-priced row, a
-  // steady-state tick is a no-op here — no double-flash — and the authoritative
-  // wave below still runs with every source and produces the final state. So
-  // this can only ever show a correct price ~1 s sooner, never a wrong one.
-  {
-    let interimPainted = false;
-    for (const src of [cryptoResult, saResult]) {
-      if (!src || !src.data) continue;
-      for (const [sym, d] of Object.entries(src.data)) {
-        if (!d || d.price == null) continue;
-        const cur = quoteData[sym];
-        if (cur && cur.price != null) continue; // already shown — let the final pass refine it
-        if (cur) {
-          cur.price = d.price;
-          if (d.change != null) cur.change = d.change;
-          if (d.changePct != null) cur.changePct = d.changePct;
-          if (d.prevClose != null) cur.prevClose = d.prevClose;
-          if (cur.name === sym && d.name && d.name !== sym) cur.name = d.name;
-          cur._lastUpdate = d._lastUpdate || Date.now();
-        } else {
-          quoteData[sym] = d;
-        }
-        interimPainted = true;
+  // --- Wave 1: interim paint, INCREMENTALLY as each fast source lands ---
+  //
+  // Each source paints the moment it resolves rather than all of them waiting on
+  // a shared Promise.all. That barrier meant the interim paint ran at the speed
+  // of the slowest member: adding the commodity racer (~100 ms per symbol, but
+  // staggered across several) pushed stocks and crypto from 230 ms out to 2.4 s,
+  // even though their own data had been sitting there the whole time. Painting
+  // per source keeps every row at the speed of its OWN source.
+  //
+  // Each paint fills ONLY blank rows (symbols with no price yet), merging price
+  // fields onto any existing/hydrated object instead of replacing it, so
+  // fundamentals survive. Because an already-priced row is never touched, a
+  // steady-state tick is a no-op here (no double-flash), later sources can't
+  // clobber an earlier one, and the authoritative merge below still runs with
+  // every source. So this can only ever show a correct price sooner.
+  const paintInterim = (src) => {
+    if (!src || !src.data || (signal && signal.aborted)) return;
+    let painted = false;
+    for (const [sym, d] of Object.entries(src.data)) {
+      if (!d || d.price == null) continue;
+      const cur = quoteData[sym];
+      if (cur && cur.price != null) continue; // already shown — let the final pass refine it
+      if (cur) {
+        cur.price = d.price;
+        if (d.change != null) cur.change = d.change;
+        if (d.changePct != null) cur.changePct = d.changePct;
+        if (d.prevClose != null) cur.prevClose = d.prevClose;
+        if (cur.name === sym && d.name && d.name !== sym) cur.name = d.name;
+        if (d.delayedBy != null) { cur.delayedBy = d.delayedBy; cur.delayedNote = d.delayedNote; }
+        cur._lastUpdate = d._lastUpdate || Date.now();
+      } else {
+        quoteData[sym] = d;
       }
+      painted = true;
     }
-    if (interimPainted) { renderTable(); updateSummary(); }
-  }
+    if (painted) { renderTable(); updateSummary(); }
+  };
+  // Tokenized commodities (gold via PAXG/XAUT) paint through their own applier,
+  // which re-derives change from the token's 24h open and asserts the price live.
+  const paintCommodityRT = (rt) => {
+    if (!rt || (signal && signal.aborted)) return;
+    let painted = false;
+    for (const [sym, d] of Object.entries(rt)) {
+      if (!d || d.price == null) continue;
+      if (quoteData[sym] && quoteData[sym].price != null) continue;
+      const q = quoteData[sym] || { ...makeEmptyQuote(sym), name: commodityName(sym) };
+      quoteData[sym] = q;
+      _applyRealtimeCommodity(q, sym, d);
+      errorSymbols.delete(sym);
+      painted = true;
+    }
+    if (painted) { renderTable(); updateSummary(); }
+  };
+  pCrypto.then(paintInterim).catch(() => {});
+  pStockAnalysis.then(paintInterim).catch(() => {});
+  pCommodity.then(paintInterim).catch(() => {});
+  pCommodityRT.then(paintCommodityRT).catch(() => {});
+  // Still await them all before wave 2 — the merge below needs the resolved
+  // values, and the paints above have already happened by the time we get here.
+  const [cryptoResult, saResult, rtCommodityEarly, commodityResult] = await Promise.all([
+    pCrypto, pStockAnalysis, pCommodityRT, pCommodity,
+  ]);
+  if (signal && signal.aborted) return;
 
   // --- Wave 2: the remaining sources (crypto already resolved above) ---
   const [finnhubResult, yahooResult, alpacaResult, fmpResult, freeResult, alpacaCryptoResult] = await Promise.all([
@@ -5772,7 +5889,8 @@ async function _refreshAll(signal) {
 
   // Pick primary source: prefer the one with the most matching symbols
   const allResults = [
-    finnhubResult, yahooFinal, freeResult, fmpResult, alpacaResult, cryptoResult, alpacaCryptoResult, saResult
+    finnhubResult, yahooFinal, freeResult, fmpResult, alpacaResult, cryptoResult, alpacaCryptoResult,
+    saResult, commodityResult
   ].filter(Boolean);
   function countHits(r) { return r ? symbols.filter(s => r.data[s]).length : 0; }
   // Priority order for tie-breaking: FinnHub > Yahoo > FinnHub free > FMP > Alpaca > CoinGecko > StockAnalysis
@@ -5790,12 +5908,14 @@ async function _refreshAll(signal) {
   // everything else fails.
   // CoinGecko/Coinbase stays ahead of Alpaca Crypto for crypto: it carries 24h
   // high/low, market cap and volume that Alpaca's snapshot has no equivalent for.
-  const mergeSources = [alpacaResult, fmpResult, cryptoResult, alpacaCryptoResult, freeResult, yahooFinal, saResult].filter(r => r && r !== result);
+  const mergeSources = [alpacaResult, fmpResult, cryptoResult, alpacaCryptoResult, freeResult, yahooFinal, saResult, commodityResult].filter(r => r && r !== result);
 
   // Retry commodity symbols that didn't get data — FinnHub/Alpaca/FMP don't support futures,
   // so commodities depend on Yahoo proxies which can fail under concurrent load.
   // Try the opposite Yahoo CDN domain (query1 vs query2) since query2 may be rate-limited.
   // Race proxies in parallel so this doesn't block the UI for 12+ seconds per symbol.
+  // Wave 1 already raced these; this is now a genuine second chance for the ones
+  // that failed, not the primary path.
   const missingCommodities = symbols.filter(s => isCommoditySymbol(s) && !allResults.some(r => r && r.data[s]));
   if (missingCommodities.length > 0) {
     const retryPromises = missingCommodities.map(async (sym, i) => {
@@ -5823,9 +5943,11 @@ async function _refreshAll(signal) {
   // patch into quoteData happens AFTER the secondary mergeSources loop has
   // filled prevClose — without that, the overlay can't re-derive change /
   // changePct when the primary source returned a price-only quote.
-  const realtimeCommodityOverlay = await _overlayRealtimeCommodities(
-    symbols.filter(isCommoditySymbol)
-  );
+  // Already resolved in wave 1 — reuse it rather than re-fetching. The apply
+  // below is still worth running: by now the merge has filled prevClose from
+  // Yahoo, so change/changePct can be re-derived against a real previous close
+  // rather than PAXG's 24h open.
+  const realtimeCommodityOverlay = rtCommodityEarly;
 
   if (result) {
     // Preserve existing bid/ask (including estimates) before overwriting

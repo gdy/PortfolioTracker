@@ -61,16 +61,27 @@ Push to GitHub → **Settings → Pages** → source `main`, folder `/` → visi
 
 ## How it works
 
-Every refresh runs as three waves, so the table paints as soon as *anything* useful arrives rather than blocking on the slowest source:
+Every refresh runs as three waves, and **each wave-1 source paints the moment it lands** rather than waiting for its siblings — so every row appears at the speed of its own source, not the slowest one:
 
 ```mermaid
 flowchart TD
-    T([Refresh tick]) --> W1["Wave 1 · keyless, direct CORS<br/>StockAnalysis · CoinGecko · Coinbase"]
-    T --> W2["Wave 2 · full fan-out<br/>Yahoo via proxy · FinnHub · Alpaca · FMP"]
-    W1 -->|"interim paint, ~300-500 ms<br/>blank rows only"| M["Merge · best-coverage source wins,<br/>the rest backfill missing fields<br/>→ authoritative paint"]
+    T([Refresh tick]) --> S["StockAnalysis · CoinGecko · Coinbase<br/>direct CORS, no proxy"]
+    T --> G["Tokenized commodities<br/>PAXG / XAUT for gold"]
+    T --> C["Commodity futures<br/>Yahoo v8 chart, proxy race per symbol"]
+    T --> W2["Wave 2 · full fan-out<br/>Yahoo batch via proxy · FinnHub · Alpaca · FMP"]
+    S -->|"~400 ms"| P["Wave 1 · incremental interim paint<br/>each source paints on arrival, blank rows only"]
+    G -->|"~35 ms"| P
+    C -->|"~2 s"| P
+    P --> M["Merge · best-coverage source wins,<br/>the rest backfill missing fields<br/>→ authoritative paint"]
     W2 --> M
     M --> D["Wave 3 · deferred, per-symbol<br/>fundamentals · performance · after-hours<br/>→ final paint, cached to localStorage"]
 ```
+
+Two scheduling rules do most of the work here, and both were learned the hard way:
+
+**Ask for the fast things first.** `fetch` fires when the promise is constructed, and browsers allow only ~6 connections per host. Constructing wave 2 first let the slow proxied calls claim the sockets while the fast direct-CORS calls queued behind work nobody was waiting on — sources that answer in 23–72 ms took 920 ms to reach the screen.
+
+**Never put a fast source behind a barrier with a slow one.** A single `Promise.all` around wave 1 meant the interim paint ran at the speed of its slowest member; adding the commodity racer to it pushed stocks and crypto from 230 ms to 2.4 s even though their data had already arrived. Painting per source fixed it. The same mistake, in a worse form, is what made gold take **18.5 seconds**: its real-time token price was fetched in ~35 ms but awaited only after the entire Yahoo proxy chain had finished.
 
 Four problems drove most of the design.
 
@@ -98,7 +109,7 @@ Free financial APIs rate-limit, go down, silently return empty results, or drop 
 
 - **WebSocket streaming.** FinnHub's WebSocket gives trade-by-trade stock prices with no proxy involved. Free tier caps at 50 symbols, so past that the app streams the **largest positions by cost basis** and lets the rest fall back to REST polling. Ranking by cost basis rather than live market value is deliberate: market value wobbles across the 50/51 boundary and would thrash subscriptions all day.
 - **Crypto needed a different fix.** CoinGecko's free endpoint updates server-side only every 30–60 s, so a 2 s poll returns identical data. Coinbase Exchange's public ticker is real-time and direct-CORS, so it's layered on top: CoinGecko supplies slow-moving fields (24h high/low, market cap, volume), Coinbase patches price/bid/ask every tick. Past 10 coins the per-symbol fan-out switches to **one batched Binance.US call** (browsers cap ~6 connections per origin, so a large fan-out just serializes), with **Kraken** filling anything Binance.US doesn't list and standing in wholesale if it fails. Both carry real bid/ask, so unlike the batch path they replaced there's no loss of spread data at scale.
-- **Real-time gold via a tokenized proxy.** Free futures feeds are 10–15 min delayed at source, and real-time futures data genuinely requires a paid subscription. For gold specifically, the app fetches `PAXG-USD` from Coinbase — PAX Gold is a redeemable claim on one troy ounce, trades 24/7, and tracks spot within ~1%. Its 24h open doubles as a previous close, so gold shows a real day change and range even on weekends when Yahoo isn't queried. **Kraken backs this up with both PAXG and XAUT** (Tether Gold — the same claim-on-an-ounce structure from a different issuer), so gold survives both a Coinbase outage and a problem specific to one token's peg. I checked Kraken's full 1,383-pair list for metal-backed tokens: PAXG and XAUT are the only two, both gold. No silver, platinum or copper equivalent exists, so those stay on the delayed feed — and are **marked** as delayed rather than quietly displayed next to live prices (see below).
+- **Real-time gold via a tokenized proxy.** Free futures feeds are 10–15 min delayed at source, and real-time futures data genuinely requires a paid subscription. For gold specifically, the app fetches `PAXG-USD` from Coinbase in wave 1 (~35 ms) — PAX Gold is a redeemable claim on one troy ounce, trades 24/7, and tracks spot within ~1%. Its 24h open doubles as a previous close, so gold shows a real day change and range even on weekends when Yahoo isn't queried. **Kraken backs this up with both PAXG and XAUT** (Tether Gold — the same claim-on-an-ounce structure from a different issuer), so gold survives both a Coinbase outage and a problem specific to one token's peg. I checked Kraken's full 1,383-pair list for metal-backed tokens: PAXG and XAUT are the only two, both gold. No silver, platinum or copper equivalent exists, so those stay on the delayed feed — and are **marked** as delayed rather than quietly displayed next to live prices (see below).
 - **Tiered scheduling.** Active hours (4 AM–8 PM ET weekdays) poll everything. Off-hours poll only crypto and commodities. Weekends pause entirely unless you hold 24/7 assets.
 - **Delayed prices say so.** Mixing sources means some rows are live and some aren't, and once a number is in the table there is nothing to distinguish them — the failure mode most likely to actually cost someone money. Every quote carries a tri-state provenance: a stated delay, a positive confirmation that it is real-time, or *unknown*. Anything delayed renders a superscript **D** with a tooltip naming the reason and the lag, and **unknown falls back to what the instrument implies** — so a futures row is marked from its very first paint rather than only once the refresh pass gets around to tagging it. The marker clears when a source positively asserts live: a streamed FinnHub trade, or the PAXG overlay taking gold real-time. Gold is marked until that overlay actually lands, because off-hours and during a Coinbase cooldown it genuinely is on the delayed feed.
 
