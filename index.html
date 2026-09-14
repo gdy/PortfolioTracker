@@ -7314,7 +7314,10 @@ function _syncHScrollProxyNow() {
   if (!isMobileView() && sw > cw + 1) {
     if (spacer.style.width !== sw + 'px') spacer.style.width = sw + 'px';
     proxy.style.display = 'block';
-    if (proxy.scrollLeft !== wrap.scrollLeft) proxy.scrollLeft = wrap.scrollLeft;
+    // Tolerant compare for the same reason as follow() in wireHScrollProxy: this
+    // runs after every render, including WebSocket ticks mid-scroll, and an exact
+    // !== is almost always true at fractional device-pixel positions.
+    if (Math.abs(proxy.scrollLeft - wrap.scrollLeft) > 1) proxy.scrollLeft = wrap.scrollLeft;
   } else {
     proxy.style.display = 'none';
   }
@@ -7326,10 +7329,122 @@ function wireHScrollProxy() {
   const proxy = document.getElementById('hscroll-proxy');
   if (!wrap || !proxy) return;
   _hscrollWired = true;
-  let lock = false;
-  wrap.addEventListener('scroll', () => { if (lock) return; lock = true; proxy.scrollLeft = wrap.scrollLeft; lock = false; }, { passive: true });
-  proxy.addEventListener('scroll', () => { if (lock) return; lock = true; wrap.scrollLeft = proxy.scrollLeft; lock = false; }, { passive: true });
+  // Mirror one element's position onto the other, but only when they actually
+  // disagree. This is load-bearing for smooth scrolling, not an optimisation:
+  // assigning scrollLeft CANCELS an in-progress smooth scroll on that element
+  // even when the value is unchanged. Each side's scroll event echoes back onto
+  // the side that is animating, so an unconditional write stopped Shift+wheel
+  // (and any smooth scroll) dead — measured at 0.8 px travelled of 300 wanted.
+  // Near the edges the two elements also clamp and snap to device pixels
+  // slightly differently (the spacer is an integer width, the table is not),
+  // so the echo came back a fraction off and fought the scroll there hardest.
+  //
+  // The tolerance is what actually breaks the loop. The old boolean lock could
+  // not: it was released synchronously, but scroll events are dispatched later,
+  // on the next rendering step, so the echo always arrived with the lock open.
+  const follow = (from, to) => {
+    if (Math.abs(to.scrollLeft - from.scrollLeft) > 1) to.scrollLeft = from.scrollLeft;
+  };
+  wrap.addEventListener('scroll', () => follow(wrap, proxy), { passive: true });
+  proxy.addEventListener('scroll', () => follow(proxy, wrap), { passive: true });
   window.addEventListener('resize', syncHScrollProxy);
+  // Wheel over the table (or its proxy scrollbar) scrolls sideways. Must be
+  // non-passive so it can preventDefault.
+  wrap.addEventListener('wheel', _onTableWheel, { passive: false });
+  proxy.addEventListener('wheel', _onTableWheel, { passive: false });
+}
+
+// ---- Mouse wheel -> horizontal table scroll ----
+// A plain vertical wheel is redirected sideways only when the page itself has
+// nothing to scroll vertically — otherwise it would hijack normal page
+// scrolling. Holding Alt or Shift forces the redirect regardless. Ctrl+wheel is
+// zoom and is never touched.
+//
+// Shift is handled here even though browsers already scroll sideways on
+// Shift+wheel, because Chrome's native animation for it crawls as it nears
+// either end of the table — reported against real Chrome, where the plain wheel
+// on this same easing did not. By the time this was taken over, the page itself
+// had been ruled out: no scroll-snap or overscroll CSS, no ancestor that can
+// scroll horizontally, and nothing writing scrollLeft during the scroll (see the
+// tolerant follow() in wireHScrollProxy). What remained was the browser's own
+// curve, so Shift now uses the same easing as the plain wheel and feels the same.
+//
+// Firefox on Windows is left entirely native for both modifiers: Alt+wheel has
+// its own binding there, and its Shift+wheel wasn't the one misbehaving.
+// In every mode, reaching the table's edge hands the wheel back to the browser.
+//
+// Browsers smooth their own wheel scrolling, so writing each notch's ~100 px
+// straight into scrollLeft reads as a jump. Deltas accumulate into a target
+// that a rAF loop eases toward instead (or applied at once under reduced motion).
+let _wheelTarget = null;
+let _wheelRaf = 0;
+let _wheelLastWritten = null;
+const _MODIFIER_WHEEL_IS_NATIVE = /Firefox\//.test(navigator.userAgent) && /Windows/.test(navigator.userAgent);
+function _pageScrollsVertically() {
+  const el = document.scrollingElement || document.documentElement;
+  return el.scrollHeight > el.clientHeight + 1;
+}
+function _wheelDeltaPx(delta, mode, wrap) {
+  if (mode === 1) return delta * 40;               // DOM_DELTA_LINE
+  if (mode === 2) return delta * wrap.clientWidth;  // DOM_DELTA_PAGE
+  return delta;                                     // DOM_DELTA_PIXEL
+}
+function _onTableWheel(e) {
+  if (e.ctrlKey || isMobileView()) return;
+  const forced = e.altKey || e.shiftKey;
+  if (forced && _MODIFIER_WHEEL_IS_NATIVE) return;  // Firefox on Windows keeps its own Alt/Shift+wheel
+  const wrap = document.getElementById('table-wrap');
+  if (!wrap) return;
+  const maxLeft = wrap.scrollWidth - wrap.clientWidth;
+  if (maxLeft <= 1) return;                         // table fits — nothing to scroll sideways
+  // A trackpad's own horizontal swipe already scrolls natively; only redirect
+  // gestures that are predominantly vertical (unless a modifier forces it).
+  const vertical = Math.abs(e.deltaY) >= Math.abs(e.deltaX);
+  if (!forced && (!vertical || _pageScrollsVertically())) return;
+  // Chrome reports Shift+wheel with the delta already moved to deltaX, so take
+  // whichever axis actually carries the movement.
+  const raw = vertical ? e.deltaY : e.deltaX;
+  if (!raw) return;
+  const delta = _wheelDeltaPx(raw, e.deltaMode, wrap);
+  // Drop an in-flight target if the table was moved some other way since our
+  // last write (e.g. dragging the scrollbar mid-ease) — otherwise this notch
+  // would be added to a stale position and jump back.
+  if (_wheelTarget != null && _wheelLastWritten != null && Math.abs(wrap.scrollLeft - _wheelLastWritten) > 2) {
+    _wheelTarget = null;
+  }
+  if (_wheelTarget == null) _wheelLastWritten = wrap.scrollLeft;
+  const from = _wheelTarget != null ? _wheelTarget : wrap.scrollLeft;
+  // Already at the edge in the direction of travel — let the event through.
+  // Compared with 1 px of slack, because scrollLeft is fractional on scaled
+  // displays and can sit slightly past the integer scrollWidth - clientWidth;
+  // an exact test would clamp it 1 px backwards and swallow the event.
+  if ((delta > 0 && from >= maxLeft - 1) || (delta < 0 && from <= 1)) return;
+  const next = Math.max(0, Math.min(maxLeft, from + delta));
+  e.preventDefault();
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    _wheelTarget = null;
+    wrap.scrollLeft = next;
+    return;
+  }
+  _wheelTarget = next;
+  if (!_wheelRaf) _wheelRaf = requestAnimationFrame(_stepWheelScroll);
+}
+function _stepWheelScroll() {
+  _wheelRaf = 0;
+  const wrap = document.getElementById('table-wrap');
+  if (!wrap || _wheelTarget == null) { _wheelTarget = null; return; }
+  const cur = wrap.scrollLeft;
+  // Something else moved the table since our last write (dragging the proxy
+  // bar, a re-render resetting scroll) — hand control back rather than fight it.
+  if (_wheelLastWritten != null && Math.abs(cur - _wheelLastWritten) > 2) { _wheelTarget = null; return; }
+  const diff = _wheelTarget - cur;
+  if (Math.abs(diff) <= 1) { wrap.scrollLeft = _wheelTarget; _wheelTarget = null; return; }
+  // At least 1 px per frame: scrollLeft rounds, so a sub-pixel step near the
+  // end of the ease would otherwise never arrive.
+  const step = Math.sign(diff) * Math.max(1, Math.abs(diff) * 0.3);
+  wrap.scrollLeft = cur + step;
+  _wheelLastWritten = wrap.scrollLeft;
+  _wheelRaf = requestAnimationFrame(_stepWheelScroll);
 }
 
 function isMobileView() {
