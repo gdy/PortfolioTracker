@@ -8,13 +8,15 @@
   'unsafe-inline' is required for the inline <style> + inline event handlers
   the app still uses; we keep script-src to 'self' + 'unsafe-inline' so a
   compromised CORS proxy or a crafted CSV field cannot inject a <script
-  src="evil.com">. connect-src whitelists only the financial data endpoints
-  and the CORS proxies the app talks to.
+  src="evil.com">. connect-src lists every host the app talks to and nothing
+  else, so even script that did get injected can't fetch() the API keys out to
+  an arbitrary server. Adding a data source means adding its host here too;
+  a missing host fails as a CSP violation in the console, not silently.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://stockanalysis.com https://finnhub.io wss://ws.finnhub.io https://data.alpaca.markets wss://stream.data.alpaca.markets https://api.coingecko.com https://api.exchange.coinbase.com https://api.binance.us https://api.kraken.com https://financialmodelingprep.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com https://api.allorigins.win; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
-<title>STONKS — Portfolio Tracker</title>
-<meta name="description" content="A real-time portfolio tracker for stocks, crypto, and commodities that runs entirely in one HTML file. No server, no build step, no dependencies, no account — your positions never leave your browser.">
+<title>Static Portfolio Tracker</title>
+<meta name="description" content="A real-time portfolio tracker for stocks, crypto, and commodities in a single static HTML file. No server, no build step, no dependencies, no account — your positions never leave your browser.">
 <meta name="author" content="Grant">
 <!--
   Link-preview cards. These are read by crawlers fetching the page, not by the
@@ -23,15 +25,15 @@
   Keep the URL pointed at the GitHub Pages deploy, which is the canonical copy.
 -->
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="STONKS">
-<meta property="og:title" content="STONKS — Portfolio Tracker">
-<meta property="og:description" content="Real-time stocks, crypto, and commodities in a single HTML file. No server, no build step, no account — your positions never leave your browser.">
+<meta property="og:site_name" content="Static Portfolio Tracker">
+<meta property="og:title" content="Static Portfolio Tracker">
+<meta property="og:description" content="Real-time stocks, crypto, and commodities in a single static HTML file. No server, no build step, no account — your positions never leave your browser.">
 <meta property="og:url" content="https://gdy.github.io/PortfolioTracker/">
 <meta property="og:image" content="https://gdy.github.io/PortfolioTracker/docs/screenshot.png">
-<meta property="og:image:alt" content="The STONKS portfolio tracker showing 17 positions across stocks, crypto and commodity futures, with the allocation donut, day movers and asset-class exposure panels open.">
+<meta property="og:image:alt" content="Static Portfolio Tracker showing 17 positions across stocks, crypto and commodity futures, with the allocation donut, day movers and asset-class exposure panels open.">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="STONKS — Portfolio Tracker">
-<meta name="twitter:description" content="Real-time stocks, crypto, and commodities in a single HTML file. No server, no build step, no account — your positions never leave your browser.">
+<meta name="twitter:title" content="Static Portfolio Tracker">
+<meta name="twitter:description" content="Real-time stocks, crypto, and commodities in a single static HTML file. No server, no build step, no account — your positions never leave your browser.">
 <meta name="twitter:image" content="https://gdy.github.io/PortfolioTracker/docs/screenshot.png">
 <link rel="canonical" href="https://gdy.github.io/PortfolioTracker/">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop offset='0%25' stop-color='%23003d1a'/%3E%3Cstop offset='100%25' stop-color='%230a0a0a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='url(%23g)'/%3E%3Cpolyline points='4,24 9,20 13,22 17,13 21,16 25,8 28,5' fill='none' stroke='%2300c853' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='25,5 28,5 28,8' fill='%2300c853'/%3E%3Cline x1='4' y1='27' x2='28' y2='27' stroke='%23333' stroke-width='1'/%3E%3C/svg%3E" />
@@ -422,10 +424,21 @@
     user-select: none;
   }
   .auto-refresh-toggle:hover { background: #1a3a2a; }
-  .auto-refresh-toggle:has(input:checked) {
+  /* On-state via a class set from JS (syncAutoRefreshToggle), not :has().
+     :has() arrived in Firefox only at 121, and with the real checkbox hidden,
+     older Firefox rendered this toggle as permanently OFF — no way to tell
+     whether auto-refresh was running. */
+  .auto-refresh-toggle.is-on {
     background: #1a4a2c;
     border-color: #4ed896;
     color: #7fffaf;
+  }
+  /* The checkbox is visually hidden, so its own focus ring is a 1px invisible
+     dot. Draw the keyboard focus ring on the label instead (class set only when
+     the checkbox matches :focus-visible, so mouse clicks don't show it). */
+  .auto-refresh-toggle.kbd-focus {
+    outline: 2px solid #4a9eff;
+    outline-offset: 1px;
   }
   /* Visually hide the real checkbox (kept for form/JS state + label click toggle) */
   .auto-refresh-toggle input[type="checkbox"] {
@@ -451,7 +464,7 @@
     width: 13px;
     height: 13px;
   }
-  .auto-refresh-toggle:has(input:checked)::before {
+  .auto-refresh-toggle.is-on::before {
     content: '\2713';
     font-weight: bold;
   }
@@ -1660,16 +1673,24 @@
         <span style="color:#666; font-size:11px;">200 req/min &mdash; alpaca.markets</span>
       </div>
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <label style="color:#aaa; display:flex; align-items:center; gap:6px; cursor:pointer;">
+          <input type="checkbox" id="toggle-alpaca-stream" onchange="setAlpacaStreamEnabled(this.checked)" style="cursor:pointer;" />
+          Stream live stock prices through Alpaca
+        </label>
+        <span id="alpaca-stream-status" style="color:#9ab; font-size:11px;" aria-live="polite"></span>
+        <span style="color:#666; font-size:11px; flex-basis:100%;">Uses your Alpaca account&rsquo;s one real-time data connection. If a trading bot or another app streams market data on the same account, turn this off so it isn&rsquo;t blocked.</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <label style="color:#888;">FMP API Key:</label>
         <input type="password" id="fmp-key" placeholder="Free key from financialmodelingprep.com" style="width:280px;" />
         <button class="btn" onclick="saveFmpKey()">Save</button>
         <span class="save-confirm" id="confirm-fmp">&#10003; Saved</span>
-        <span style="color:#666; font-size:11px;">250 req/day &mdash; financialmodelingprep.com</span>
+        <span style="color:#666; font-size:11px;">Only keys issued before Sept 2025 &mdash; FMP retired these endpoints for newer free plans</span>
       </div>
       <div style="display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:wrap;">
         <button class="btn btn-welcome-toggle" id="welcome-toggle-btn" onclick="showWelcomeBanner(true)" style="font-size:11px; padding:2px 10px;">Show Welcome Guide</button>
         <button class="btn" onclick="loadSampleData()" style="font-size:11px; padding:2px 10px;">Load Sample Data</button>
-        <button class="btn" onclick="exportSettings()" style="font-size:11px; padding:2px 10px;">Export Settings</button>
+        <button class="btn" onclick="exportSettings()" style="font-size:11px; padding:2px 10px;" title="The exported file contains your API keys and secret &mdash; don&rsquo;t share it or attach it to an issue">Export Settings</button>
         <label class="btn" style="font-size:11px; padding:2px 10px; cursor:pointer;">Import Settings<input type="file" accept=".json" onchange="importSettings(this.files[0])" style="display:none;" /></label>
         <span class="save-confirm" id="confirm-settings-io">&#10003; Done</span>
       </div>
@@ -1691,7 +1712,7 @@
      onclick="if(event.target===this)dismissWelcome()">
   <div class="welcome-banner" tabindex="-1">
       <button class="close-btn" onclick="dismissWelcome()" aria-label="Close welcome guide">&times;</button>
-      <h2 id="welcome-title">Welcome to Portfolio Tracker</h2>
+      <h2 id="welcome-title">Welcome to Static Portfolio Tracker</h2>
       <p class="welcome-lede">Real-time stocks, crypto, and commodities &mdash; running entirely in this browser tab. No account, and your positions are never uploaded anywhere.</p>
 
       <div class="welcome-section">Getting started</div>
@@ -1716,13 +1737,13 @@
       </div>
       <div class="step">
         <span class="step-num">2.</span>
-        <span><span class="key-name">Alpaca</span> &mdash; Sign up at <a href="https://app.alpaca.markets/signup" target="_blank" rel="noopener noreferrer">alpaca.markets</a> for free API keys. Provides real-time IEX quotes with bid/ask spreads and average volume.</span>
+        <span><span class="key-name">Alpaca</span> &mdash; Sign up at <a href="https://app.alpaca.markets/signup" target="_blank" rel="noopener noreferrer">alpaca.markets</a> for free API keys. Streams live prices for your 30 largest stock positions, plus real-time IEX quotes with bid/ask spreads and average volume.</span>
       </div>
       <div class="step">
         <span class="step-num">3.</span>
-        <span><span class="key-name">FMP</span> (optional) &mdash; Sign up at <a href="https://site.financialmodelingprep.com/register" target="_blank" rel="noopener noreferrer">financialmodelingprep.com</a> for an extra data source fallback.</span>
+        <span><span class="key-name">FMP</span> (optional) &mdash; Only useful if you already have a key from before September 2025, when FMP retired the endpoints this app uses for newer free plans. Adds one more quote fallback.</span>
       </div>
-      <p class="welcome-note" style="margin-top:12px; margin-bottom:0;">Without any key, live prices still work: stocks and ETFs from StockAnalysis, crypto from CoinGecko, Coinbase and Kraken, commodities from Yahoo Finance. A FinnHub key additionally unlocks real-time WebSocket streaming and full fundamentals. A superscript <span class="delay-mark" style="cursor:default">D</span> next to a price means that source serves it on a delay.</p>
+      <p class="welcome-note" style="margin-top:12px; margin-bottom:0;">Without any key, live prices still work: stocks and ETFs from StockAnalysis, crypto from CoinGecko, Coinbase and Kraken, commodities from Yahoo Finance. An Alpaca or FinnHub key additionally unlocks real-time streaming, and FinnHub adds full fundamentals. A superscript <span class="delay-mark" style="cursor:default">D</span> next to a price means that source serves it on a delay.</p>
 
       <div class="welcome-tips" id="welcome-tips">
         <button type="button" class="welcome-tips-summary" aria-label="Tips and shortcuts" aria-expanded="false" aria-controls="welcome-tips-body" onclick="toggleWelcomeTips(this)"><span class="welcome-tips-arrow">&#9656;</span> <strong style="color:#e0e0e0;">Tips &amp; shortcuts</strong> <span style="color:#666; font-weight:normal; font-size:11px;">8 things worth knowing</span></button>
@@ -1991,12 +2012,20 @@ const STILL_MISSING_BATCH = 4;
 const FILL_FUND_BATCH = 3;
 // Limits
 const MAX_WS_SYMBOLS = 50;
+// Alpaca's free (Basic) market-data plan allows 30 symbol subscriptions on its
+// real-time stream. If the server still answers "symbol limit exceeded" (405),
+// the cap steps down at runtime rather than trusting this number blindly.
+const ALPACA_WS_MAX_SYMBOLS = 30;
 const MAX_UNDO = 50;
 const CG_MIN_INTERVAL = 30000;           // default cache TTL between CoinGecko calls (large portfolios)
-// CoinGecko free tier is 30 req/min. /coins/markets is one batched call regardless
-// of token count, so a 3 s floor gives at most 20 calls/min — comfortably under
-// the limit with ~33% headroom for the occasional supplemental call.
-const CG_MIN_INTERVAL_SMALL = 3000;
+// CoinGecko's KEYLESS public API allows only 5-15 calls/min depending on load
+// (30+/min is the free-key Demo plan, which this app doesn't use), and caches most
+// data for 1-5 minutes anyway. /coins/markets is one batched call regardless of
+// token count, so a 12 s floor stays at 5 calls/min — within even the low end of
+// that range. The floor used to be 3 s (20 calls/min), sized for the Demo limit.
+// Nothing is lost: prices come from the Coinbase/Binance.US/Kraken overlay on
+// every tick, and CoinGecko only supplies slow fields (24h range, cap, volume).
+const CG_MIN_INTERVAL_SMALL = 12000;
 const CG_SMALL_PORTFOLIO_THRESHOLD = 5;  // ≤ this many cryptos = "small" → cache TTL tracks the user's refresh interval
 const CG_TICK_ALIGN_BUFFER = 1000;       // shave 1s off TTL so cache expires before the next tick fires
 const YF_CRUMB_TTL = 30 * 60 * 1000;     // crumbs expire ~30 minutes
@@ -2077,6 +2106,11 @@ const HYDRATE_STRIP_FIELDS = [...STICKY_QUOTE_FIELDS,
   'postMarketPrice', 'postMarketChange', 'preMarketPrice', 'preMarketChange', 'marketState'];
 
 // ==================== STATE ====================
+// NOTE: every localStorage key keeps the `stonks_` prefix from this project's
+// original name. Do NOT "tidy" it to match the current name — the prefix is the
+// storage format, and renaming it would orphan every existing user's portfolio,
+// alerts and API keys with no way to get them back.
+//
 // Parses localStorage JSON safely. `fallback` is a JSON string; if it's ever
 // malformed (shouldn't be — all callers pass a literal), or if the stored
 // value is corrupted, we return a hardcoded null/empty value rather than
@@ -2148,12 +2182,30 @@ let _wsConsecCloses = 0; // consecutive closes without a healthy open — drives
 let _wsOpenedRealTime = 0; // when the socket actually opened; drives the healthy-uptime check
                            // (wsOpenedAt is also bumped by syncWsSubscriptions for the
                            // stale-stream grace period, so it can't measure uptime)
-let wsLastTradeTime = {}; // track last trade time per symbol for freshness
+let wsLastTradeTime = {}; // track last trade time per symbol for freshness (any stream)
+// Alpaca real-time stream (wss://stream.data.alpaca.markets/v2/iex).
+let alpacaWs = null;
+let alpacaWsAuthed = false;
+let alpacaWsSubscribed = new Set();     // server-confirmed trade subscriptions
+let alpacaWsReconnectTimer = null;
+let _alpacaWsConsecCloses = 0;
+let _alpacaWsOpenedRealTime = 0;
+let _alpacaWsSymbolCap = ALPACA_WS_MAX_SYMBOLS;
+let _alpacaWsHalt = null;               // { code, note } once Alpaca refuses in a way retrying can't fix
 let wsRenderPending = false; // debounce WebSocket-triggered renders
 let wsOpenedAt = 0; // time WS last opened (for stale-stream grace period)
 let wsLastAnyTrade = 0; // time any WS trade last arrived (0 = none since open)
 let fetchedSummary = new Set(); // track symbols we already fetched quoteSummary for
 let fetchedAfterHours = new Set(); // track symbols we already tried after-hours fetch for
+// sym -> last time the after-hours hunt tried it and found nothing. Overnight
+// there IS no pre/post print, so without a cooldown every off-hours heavy
+// refresh (once a minute) re-ran a proxied chart request per symbol all night,
+// from every tab left open.
+const _ahLastMiss = new Map();
+// sym -> last proxied Yahoo attempt made only to learn the company name.
+const _yahooNameTriedAt = new Map();
+const YAHOO_NAME_RETRY_MS = 2 * 60 * 1000; // long enough to stop per-tick retries, short enough that a flaky proxy still fills names in
+const AH_MISS_COOLDOWN_MS = 10 * 60 * 1000;
 let fetchedFundamentals = new Set(); // track symbols with cached FinnHub fundamentals
 let fetchedPerformance = new Set(); // track symbols whose YTD/6M/1Y perf has been fetched
 let fundamentalsCache = {}; // cache profile, metrics, earnings, dividends from FinnHub
@@ -2175,7 +2227,26 @@ let hiddenColumns = lsGet('stonks_hidden_columns', '[]'); // column keys to hide
 // could be hidden — they're locked now and the picker won't render them as hidden.
 hiddenColumns = hiddenColumns.filter(k => !ESSENTIAL_COLUMN_KEYS.has(k));
 let columnOrder = lsGet('stonks_column_order', '[]'); // user-defined column order (keys); empty = default
-let alerts = lsGet('stonks_alerts', '{}'); // { symbol: { above: num|null, below: num|null } }
+// { symbol: { above: num|null, below: num|null } }
+// Sanitized on load AND on settings import. Thresholds are interpolated into
+// value="" attributes on the mobile cards, so an imported settings file with
+// `above: '"><img onerror=...>'` was script execution with access to the stored
+// API keys; a null entry also crashed saveAlerts. Keys follow the portfolio
+// symbol whitelist, and only finite numbers survive.
+function sanitizeAlerts(obj) {
+  const out = {};
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return out;
+  const num = v => { const n = (typeof v === 'string' && v.trim() !== '') ? Number(v) : v; return (typeof n === 'number' && isFinite(n)) ? n : null; };
+  for (const k of Object.keys(obj)) {
+    if (!/^[A-Z0-9.\-=]{1,32}$/.test(k)) continue; // matches the portfolio symbol whitelist, with headroom
+    const a = obj[k];
+    if (!a || typeof a !== 'object') continue;
+    const above = num(a.above), below = num(a.below);
+    if (above != null || below != null) out[k] = { above, below };
+  }
+  return out;
+}
+let alerts = sanitizeAlerts(lsGet('stonks_alerts', '{}'));
 
 // ==================== UNDO / REDO ====================
 // Undo tracks portfolio + notes (the structured data the user directly edits).
@@ -2393,6 +2464,7 @@ function saveAlerts() {
   // Strip volatile _notified flag and drop entries where both thresholds are null
   const clean = {};
   for (const k of Object.keys(alerts)) {
+    if (!alerts[k] || typeof alerts[k] !== 'object') continue;
     const above = alerts[k].above ?? null;
     const below = alerts[k].below ?? null;
     if (above != null || below != null) clean[k] = { above, below };
@@ -2427,6 +2499,11 @@ function saveAlpacaKeys() {
   else localStorage.removeItem('stonks_alpaca_secret');
   _closeWelcome(); // restores focus + syncs the Settings toggle label
   flashConfirm('confirm-alpaca');
+  // New keys get a fresh attempt at the stream: drop any halt from the old ones.
+  _alpacaWsHalt = null;
+  _alpacaWsConsecCloses = 0;
+  disconnectAlpacaWebSocket();
+  connectAlpacaWebSocket();
   refreshAll().catch(e => console.warn('refreshAll failed:', e));
 }
 function getAlpacaKeys() {
@@ -2818,7 +2895,7 @@ function loadSampleData() {
   // refreshAll's overlap guard — same as addPosition.
   if (refreshInProgress) pendingRefreshAfter = true;
   refreshAll().catch(e => console.warn('refreshAll failed:', e))
-    .then(() => { syncWsSubscriptions(); connectFinnhubWebSocket(); });
+    .then(() => { syncWsSubscriptions(); connectStreams(); });
 }
 
 function removePosition(symbol) {
@@ -2936,6 +3013,7 @@ function exportSettings() {
     finnhubKey: getApiKey(),
     alpacaKeyId: getAlpacaKeys().keyId,
     alpacaSecret: getAlpacaKeys().secret,
+    alpacaStream: localStorage.getItem('stonks_alpaca_stream'),
     fmpKey: getFmpKey(),
     hiddenColumns: hiddenColumns,
     columnOrder: columnOrder,
@@ -2947,7 +3025,7 @@ function exportSettings() {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'stonks-settings-' + new Date().toISOString().slice(0, 10) + '.json';
+  a.download = 'portfolio-tracker-settings-' + new Date().toISOString().slice(0, 10) + '.json';
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -2959,16 +3037,18 @@ function importSettings(file) {
       const data = JSON.parse(reader.result);
       if (data._format !== 'stonks_settings_v1') { alert('Invalid settings file.'); return; }
       if (!confirm('Import settings? This will overwrite your current API keys, column settings, and alerts.')) return;
-      if (data.finnhubKey) safeSet('stonks_finnhub_key', data.finnhubKey);
-      if (data.alpacaKeyId) safeSet('stonks_alpaca_key_id', data.alpacaKeyId);
-      if (data.alpacaSecret) safeSet('stonks_alpaca_secret', data.alpacaSecret);
-      if (data.fmpKey) safeSet('stonks_fmp_key', data.fmpKey);
-      if (Array.isArray(data.hiddenColumns)) { hiddenColumns = data.hiddenColumns; saveHiddenColumns(); }
-      if (Array.isArray(data.columnOrder)) { columnOrder = data.columnOrder; saveColumnOrder(); }
-      if (data.alerts && typeof data.alerts === 'object') { alerts = data.alerts; saveAlerts(); }
-      if (data.refreshInterval) safeSet('stonks_refresh_interval', data.refreshInterval);
-      if (data.autoRefresh != null) safeSet('stonks_auto_refresh', data.autoRefresh);
-      if (data.showPortfolioBar != null) safeSet('stonks_show_portfolio_bar', data.showPortfolioBar);
+      const priorFinnhubKey = getApiKey();
+      if (typeof data.finnhubKey === 'string' && data.finnhubKey) safeSet('stonks_finnhub_key', data.finnhubKey.trim());
+      if (typeof data.alpacaKeyId === 'string' && data.alpacaKeyId) safeSet('stonks_alpaca_key_id', data.alpacaKeyId.trim());
+      if (typeof data.alpacaSecret === 'string' && data.alpacaSecret) safeSet('stonks_alpaca_secret', data.alpacaSecret.trim());
+      if (data.alpacaStream === '0' || data.alpacaStream === '1') safeSet('stonks_alpaca_stream', data.alpacaStream);
+      if (typeof data.fmpKey === 'string' && data.fmpKey) safeSet('stonks_fmp_key', data.fmpKey.trim());
+      if (Array.isArray(data.hiddenColumns)) { hiddenColumns = data.hiddenColumns.filter(k => typeof k === 'string' && !ESSENTIAL_COLUMN_KEYS.has(k)); saveHiddenColumns(); }
+      if (Array.isArray(data.columnOrder)) { columnOrder = data.columnOrder.filter(k => typeof k === 'string'); saveColumnOrder(); }
+      if (data.alerts && typeof data.alerts === 'object') { alerts = sanitizeAlerts(data.alerts); saveAlerts(); }
+      if (/^\d{1,3}$/.test(String(data.refreshInterval))) safeSet('stonks_refresh_interval', String(data.refreshInterval));
+      if (data.autoRefresh === '0' || data.autoRefresh === '1') safeSet('stonks_auto_refresh', data.autoRefresh);
+      if (data.showPortfolioBar === '0' || data.showPortfolioBar === '1') safeSet('stonks_show_portfolio_bar', data.showPortfolioBar);
       // Refresh UI
       document.getElementById('finnhub-key').value = getApiKey();
       const alpaca = getAlpacaKeys();
@@ -2976,7 +3056,21 @@ function importSettings(file) {
       document.getElementById('alpaca-secret').value = alpaca.secret;
       document.getElementById('fmp-key').value = getFmpKey();
       applyPortfolioBarVisibility();
+      initAlpacaStreamSetting();
       buildHeader(); renderTable(); updateSummary();
+      // Imported keys and stream preference take effect without a reload. An
+      // open FinnHub socket is still authenticated with the old key, so it has
+      // to be replaced when the key changed (connectFinnhubWebSocket leaves an
+      // open socket alone).
+      _alpacaWsHalt = null;
+      disconnectAlpacaWebSocket();
+      if (finnhubWs && getApiKey() !== priorFinnhubKey) {
+        try { finnhubWs.close(); } catch (_) {}
+        finnhubWs = null;
+        wsConnected = false;
+        wsSubscribedSymbols.clear();
+      }
+      connectStreams();
       const conf = document.getElementById('confirm-settings-io');
       if (conf) { conf.style.opacity = '1'; setTimeout(() => conf.style.opacity = '0', 2000); }
     } catch (e) { alert('Failed to parse settings file: ' + e.message); }
@@ -3387,8 +3481,14 @@ function executeImport() {
 // ==================== DATA FETCHING ====================
 const PROXIES = [
   url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
-  url => 'https://proxy.cors.sh/' + url,
-  url => 'https://proxy.corsfix.com/?' + url,
+  // Pruned (2026-09), both found while auditing from the PRODUCTION origin:
+  //   proxy.cors.sh — the hostname no longer resolves (NXDOMAIN). A lapsed proxy
+  //     domain is worse than a dead one: whoever registers it next receives
+  //     every user's ticker symbols and controls the JSON the app parses.
+  //   proxy.corsfix.com — answers 403 {"corsfix_error":"domain_not_registered"}
+  //     for any origin except localhost (free use is localhost-only). It looked
+  //     like the fastest proxy in local testing and never worked on the
+  //     deployed site — test proxies from the real origin, not localhost.
   // Pruned (2026-06): thingproxy.freeboard.io is NXDOMAIN — the domain no
   // longer exists, so every rotation through it was a guaranteed dead attempt.
   // crossorigin.me's proxy service shut down years ago and the domain has
@@ -3757,12 +3857,16 @@ async function fetchYahooSummary(sym, signal) {
   urls.push(base2);
   urls.push(base1);
 
+  // Numbers only. This body arrives through a third-party CORS proxy, so any
+  // field can be any type; a string `raw` used to flow into quoteData and from
+  // there into innerHTML (analystCount was interpolated unformatted).
   const getVal = (obj) => {
     if (!obj) return null;
-    if (typeof obj === 'number') return obj;
-    if (obj.raw != null) return obj.raw;
-    if (obj.fmt != null) return parseFloat(obj.fmt.replace(/,/g, ''));
-    return null;
+    let v = null;
+    if (typeof obj === 'number') v = obj;
+    else if (obj.raw != null) v = obj.raw;
+    else if (typeof obj.fmt === 'string') v = parseFloat(obj.fmt.replace(/,/g, ''));
+    return (typeof v === 'number' && isFinite(v)) ? v : null;
   };
   const getFmt = (obj) => {
     if (!obj) return null;
@@ -3978,7 +4082,10 @@ function ratingLabelFromScore(score) {
 // { rating, score, count } or null when there are no analysts.
 function ratingFromFinnhubRow(row) {
   if (!row) return null;
-  const sb = row.strongBuy || 0, b = row.buy || 0, h = row.hold || 0, s = row.sell || 0, ss = row.strongSell || 0;
+  // Coerce: a non-number here would string-concatenate into `total` and reach
+  // the breakdown popover's innerHTML.
+  const n = v => { const x = Number(v); return isFinite(x) && x > 0 ? Math.round(x) : 0; };
+  const sb = n(row.strongBuy), b = n(row.buy), h = n(row.hold), s = n(row.sell), ss = n(row.strongSell);
   const total = sb + b + h + s + ss;
   if (total === 0) return null;
   const score = (1 * sb + 2 * b + 3 * h + 4 * s + 5 * ss) / total;
@@ -4320,7 +4427,13 @@ async function fetchAlpacaCryptoQuotes(symbols) {
   return null;
 }
 
-// --- Financial Modeling Prep API (free, 250 req/day, quotes + after-hours) ---
+// --- Financial Modeling Prep API (250 req/day, quotes + after-hours) ---
+// LEGACY KEYS ONLY. This calls FMP's /api/v3/quote, which FMP restricted to
+// accounts with subscriptions from before 2025-08-31; free plans created since
+// then only get the newer "stable" API. The replacement quote endpoint takes one
+// symbol per call, which a 250-calls/day plan can't sustain for live quotes, so
+// the integration is kept for existing keys rather than ported. A newer key
+// simply gets an error here and the other sources cover the gap.
 async function fetchFmpQuotes(symbols) {
   const key = getFmpKey();
   if (!key) return null;
@@ -4636,7 +4749,7 @@ let _cgCache = { data: null, time: 0 };
 // Coinbase Exchange public ticker — direct CORS, no CDN caching, real-time
 // price/bid/ask. Used as an overlay on top of CoinGecko's slower /coins/markets
 // payload so BTC/ETH/etc. actually move on every refresh tick instead of waiting
-// for CoinGecko's free-tier 30–60 s server-side update cycle. Coinbase product
+// for CoinGecko's free-tier cache, which holds most data for 1–5 minutes. Coinbase product
 // IDs match our 'BTC-USD' format. Per-symbol failures (coin not listed on
 // Coinbase Exchange, transient network blip) silently leave the existing price
 // in place so we never regress data.
@@ -4964,10 +5077,11 @@ async function fetchCryptoQuotes(symbols) {
   // the new symbol when the user adds a crypto right after a refresh.
   //
   // Cache TTL scales with portfolio size: with ≤5 cryptos a single call
-  // updates everything, so we let the cache turn over as fast as the user's
-  // chosen refresh interval (with a 3 s hard floor) — well under CoinGecko's
-  // ~30 req/min free limit. Larger portfolios stay on the conservative 30 s
-  // TTL since they're more likely to be combined with other API pressure.
+  // updates everything, so we let the cache turn over with the user's chosen
+  // refresh interval, but never faster than CG_MIN_INTERVAL_SMALL (12 s), which
+  // keeps within CoinGecko's keyless 5-15 calls/min. Larger portfolios stay on
+  // the conservative 30 s TTL since they're more likely to be combined with
+  // other API pressure.
   //
   // We subtract a 1 s alignment buffer from the TTL so the cache reliably
   // expires *before* the next refresh tick fires. Without it, _cgCache.time
@@ -5797,7 +5911,39 @@ async function _refreshAll(signal) {
 
   // --- Wave 2 sources: keyed, and/or proxied ---
   const pFinnhub = hasFinnHub ? fetchFinnhubQuotes(symbols) : Promise.resolve(null);
-  const pYahoo = fetchYahooQuotes(symbols, signal);
+  // Proxied Yahoo only for what the direct sources couldn't cover. It used to
+  // run for EVERY symbol on EVERY heavy refresh, and with Yahoo's v7 batch
+  // 401ing that meant one chart request per stock, raced across the whole proxy
+  // pool — ~60 proxy requests per tick for 20 stocks at the 2 s setting, from
+  // every open tab, all through the same free community proxy. StockAnalysis
+  // already supplies everything the chart endpoint does except the company
+  // name, so a stock is skipped once it's priced and its name is known (names
+  // persist in the quote cache, so steady state is zero proxy calls).
+  // Commodities are excluded outright: fetchCommodityQuotes above and the
+  // missing-commodity retry below already run the identical chart race.
+  const yahooNeeded = [];
+  // Settle, don't all-or-nothing: if a wave-1 source REJECTS, Yahoo is needed
+  // more than ever, so a rejection must read as "covered nothing" rather than
+  // skipping the fallback entirely.
+  const _settled = pr => pr.then(r => r, () => null);
+  const pYahoo = Promise.all([_settled(pStockAnalysis), _settled(pCrypto)]).then(([sa, cr]) => {
+    if (signal && signal.aborted) return null;
+    for (const s of symbols) {
+      if (isCommoditySymbol(s)) continue;
+      const priced = (sa && sa.data && sa.data[s]) || (cr && cr.data && cr.data[s]);
+      if (!priced) { yahooNeeded.push(s); continue; }
+      if (isCryptoSymbol(s)) continue;
+      const cur = quoteData[s];
+      if (cur && cur.name && cur.name !== s) continue;
+      // Name-only lookups back off: while the proxy is down (or Yahoo simply has
+      // no name) this would otherwise re-fire v7 + chart + v6 every refresh.
+      const now = Date.now();
+      if (now - (_yahooNameTriedAt.get(s) || 0) < YAHOO_NAME_RETRY_MS) continue;
+      _yahooNameTriedAt.set(s, now);
+      yahooNeeded.push(s);
+    }
+    return yahooNeeded.length > 0 ? fetchYahooQuotes(yahooNeeded, signal) : null;
+  }).catch(() => null);
   const pAlpaca = hasAlpaca ? fetchAlpacaQuotes(symbols) : Promise.resolve(null);
   // Alpaca's crypto endpoint is a separate call on a separate host path with no
   // feed tiers — free and real-time, unlike the equity IEX/SIP split. Only worth
@@ -5883,8 +6029,8 @@ async function _refreshAll(signal) {
 
   // If Yahoo failed, try v6 endpoint as last resort
   let yahooFinal = yahooResult;
-  if (!yahooFinal) {
-    yahooFinal = await fetchYahooV6Quotes(symbols, signal);
+  if (!yahooFinal && yahooNeeded.length > 0) {
+    yahooFinal = await fetchYahooV6Quotes(yahooNeeded, signal);
   }
 
   // Pick primary source: prefer the one with the most matching symbols
@@ -6000,6 +6146,11 @@ async function _refreshAll(signal) {
           for (const k of STICKY_QUOTE_FIELDS) {
             if (q[k] == null && p.prev[k] != null) q[k] = p.prev[k];
           }
+          // Company name too. StockAnalysis (usually primary) carries none, so a
+          // fresh primary object resets it to the ticker; previously the proxied
+          // Yahoo pass re-supplied it every refresh. Now that Yahoo is skipped
+          // for already-named rows, the name has to survive the overwrite here.
+          if ((!q.name || q.name === sym) && p.prev.name && p.prev.name !== sym) q.name = p.prev.name;
         }
       }
     }
@@ -6317,12 +6468,14 @@ async function _refreshAll(signal) {
       // whole portfolio. marketState refreshes with each quote, so this releases
       // by itself the moment the session flips to POST (no sticky set involved).
       q.marketState !== 'REGULAR' &&
-      q.postMarketPrice == null && q.preMarketPrice == null;
+      q.postMarketPrice == null && q.preMarketPrice == null &&
+      !(Date.now() - (_ahLastMiss.get(s) || 0) < AH_MISS_COOLDOWN_MS);
   });
   if (needsAfterHours.length > 0) {
     let ahUpdated = false;
     // Strategy 1: Yahoo v7 batch — one proxy request for ALL symbols (race both CDN domains)
-    try {
+    // Skipped while v7 is latched as failing (it 401s for anonymous callers).
+    if (!yahooV7Failed) try {
       const crumb = await getYahooCrumb();
       const ahSymList = needsAfterHours.map(yfEnc).join(',');
       const ahBase1 = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + ahSymList;
@@ -6409,6 +6562,13 @@ async function _refreshAll(signal) {
         })();
       }
     }
+    if (!(signal && signal.aborted)) {
+      const now = Date.now();
+      for (const s of needsAfterHours) {
+        const q = quoteData[s];
+        if (q && q.postMarketPrice == null && q.preMarketPrice == null) _ahLastMiss.set(s, now);
+      }
+    }
     if (ahUpdated) {
       renderTable();
       updateSummary();
@@ -6457,6 +6617,11 @@ async function _refreshAll(signal) {
 
 // ==================== FORMATTING ====================
 function esc(s) { if (!s) return s; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+// Numeric guards for values interpolated into markup without a formatter.
+// The fmt* helpers are already safe (Intl.NumberFormat only emits digits); these
+// cover the few places a raw count or score is concatenated directly.
+function _finiteOrNull(v) { return (typeof v === 'number' && isFinite(v)) ? v : null; }
+function _countOrNull(v) { return (typeof v === 'number' && isFinite(v) && v > 0) ? Math.round(v) : null; }
 function escAttr(s) { return (s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 // Display-only strings taken VERBATIM out of a third-party JSON payload —
 // Yahoo's pre-formatted `fmt` values for ex-dividend and earnings dates, and the
@@ -6732,14 +6897,15 @@ function getCellHtml(col, pos, q, computed) {
           : 'Add a free FinnHub API key in Settings to show analyst ratings';
         return `<td title="${escAttr(_at)}" style="cursor:help; ${getApiKey() ? '' : 'text-decoration:underline; text-decoration-style:dotted; text-decoration-color:#555; text-underline-offset:2px;'}">\u2014</td>`;
       }
-      const sc = q.analystScore;
+      const sc = _finiteOrNull(q.analystScore);
+      const _ac = _countOrNull(q.analystCount);
       let cls = 'neutral';
       if (sc != null) {
         if (sc < 2.5) cls = 'pos';
         else if (sc >= 3.5) cls = 'neg';
       }
-      const cnt = q.analystCount ? ` (${q.analystCount})` : '';
-      const ttl = sc != null ? `Consensus ${sc.toFixed(2)}/5${q.analystCount ? ' from ' + q.analystCount + ' analysts' : ''} \u2014 click for breakdown` : esc(q.analystRating) + ' \u2014 click for breakdown';
+      const cnt = _ac ? ` (${_ac})` : '';
+      const ttl = sc != null ? `Consensus ${sc.toFixed(2)}/5${_ac ? ' from ' + _ac + ' analysts' : ''} \u2014 click for breakdown` : esc(q.analystRating) + ' \u2014 click for breakdown';
       return `<td class="${cls} analyst-cell" style="font-size:11px; cursor:pointer; text-decoration:underline; text-decoration-style:dotted; text-decoration-color:#555; text-underline-offset:2px;" title="${escAttr(ttl)}" onclick="event.stopPropagation();openAnalystPopover('${sym}',this)">${esc(q.analystRating)}${cnt}</td>`;
     }
     case 'notes': return `<td><input class="cell-input notes" type="text" value="${noteVal}" onchange="updateNotes('${sym}', this.value)" placeholder="..." /></td>`;
@@ -7614,9 +7780,10 @@ function renderMobileCards() {
     let analystCls = '';
     let analystTap = ''; // tap-to-open-popover attrs, empty until we have a rating
     if (q.analystRating) {
-      const sc = q.analystScore;
+      const sc = _finiteOrNull(q.analystScore);
+      const _ac = _countOrNull(q.analystCount);
       analystCls = (sc != null && sc < 2.5) ? 'pos' : (sc != null && sc >= 3.5) ? 'neg' : 'neutral';
-      analystInner = esc(q.analystRating) + (q.analystCount ? ' (' + q.analystCount + ')' : '');
+      analystInner = esc(q.analystRating) + (_ac ? ' (' + _ac + ')' : '');
       analystTap = ` onclick="event.stopPropagation();openAnalystPopover('${sym}',this)" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; text-decoration-color:#555; text-underline-offset:2px;"`;
     } else {
       // Same discoverability hint as the desktop cell (see getCellHtml).
@@ -7712,8 +7879,8 @@ function renderMobileCards() {
           <div class="mobile-edit-group"><label>Note</label><input type="text" value="${noteVal}" onchange="updateNotes('${sym}', this.value)" placeholder="..." /></div>
         </div>
         <div class="mobile-card-actions" onclick="event.stopPropagation()" style="border-top:none; padding-top:0; margin-top:4px;">
-          <div class="mobile-edit-group"><label style="color:#3c8;">Alert&gt;</label><input type="number" step="0.01" value="${(alerts[pos.symbol]&&alerts[pos.symbol].above!=null)?alerts[pos.symbol].above:''}" onchange="setMobileAlert('${sym}','above',this.value)" placeholder="Above $" /></div>
-          <div class="mobile-edit-group"><label style="color:#e55;">Alert&lt;</label><input type="number" step="0.01" value="${(alerts[pos.symbol]&&alerts[pos.symbol].below!=null)?alerts[pos.symbol].below:''}" onchange="setMobileAlert('${sym}','below',this.value)" placeholder="Below $" /></div>
+          <div class="mobile-edit-group"><label style="color:#3c8;">Alert&gt;</label><input type="number" step="0.01" value="${alerts[pos.symbol] ? (_finiteOrNull(alerts[pos.symbol].above) ?? '') : ''}" onchange="setMobileAlert('${sym}','above',this.value)" placeholder="Above $" /></div>
+          <div class="mobile-edit-group"><label style="color:#e55;">Alert&lt;</label><input type="number" step="0.01" value="${alerts[pos.symbol] ? (_finiteOrNull(alerts[pos.symbol].below) ?? '') : ''}" onchange="setMobileAlert('${sym}','below',this.value)" placeholder="Below $" /></div>
         </div>
       </div>
     </div>`;
@@ -8181,7 +8348,7 @@ function openAnalystPopover(symbol, el) {
     periodEl.textContent = '';
   }
   // Rating label + score
-  const sc = q.analystScore;
+  const sc = _finiteOrNull(q.analystScore);
   const labelEl = document.getElementById('ap-rating-label');
   labelEl.textContent = q.analystRating;
   labelEl.classList.remove('pos','neg','neutral');
@@ -8206,7 +8373,11 @@ function openAnalystPopover(symbol, el) {
   const bar = document.getElementById('ap-breakdown-bar');
   const list = document.getElementById('ap-breakdown-list');
   if (q.analystBreakdown) {
-    const bd = q.analystBreakdown;
+    const _bd = q.analystBreakdown;
+    const bd = {
+      strongBuy: _countOrNull(_bd.strongBuy), buy: _countOrNull(_bd.buy), hold: _countOrNull(_bd.hold),
+      sell: _countOrNull(_bd.sell), strongSell: _countOrNull(_bd.strongSell),
+    };
     const total = (bd.strongBuy || 0) + (bd.buy || 0) + (bd.hold || 0) + (bd.sell || 0) + (bd.strongSell || 0);
     const buckets = [
       { key: 'strongbuy',  label: 'Strong Buy',  count: bd.strongBuy  || 0 },
@@ -8231,7 +8402,7 @@ function openAnalystPopover(symbol, el) {
   }
   // Meta line — source attribution + analyst count
   const meta = document.getElementById('ap-meta');
-  const cnt = q.analystCount;
+  const cnt = _countOrNull(q.analystCount);
   const source = q.analystBreakdown ? 'FinnHub' : 'Yahoo Finance';
   meta.textContent = `${cnt ? cnt + ' analyst' + (cnt === 1 ? '' : 's') + ' • ' : ''}via ${source}`;
   // Position: pin near the clicked element, but clamp to viewport so the
@@ -9362,27 +9533,42 @@ function setStatus(text, type = '') {
 function updateWsIndicator() {
   const el = document.getElementById('ws-indicator');
   const statusEl = document.getElementById('status-text');
-  if (wsConnected) {
+  const alpacaLive = _alpacaStreamLive();
+  if (wsConnected || alpacaLive) {
     el.style.display = '';
-    // Flag the stream as "no data" when market is active, stocks are actually
-    // subscribed, but no trades have arrived within WS_STALE_THRESHOLD of the
-    // last trade (or of WS open). The subscription-count guard avoids a false
-    // warning on crypto-only / empty portfolios where no trades are expected.
-    // Common cause of genuine staleness: FinnHub free plan doesn't stream realtime US equities.
-    const phase = getMarketPhase();
+    const count = n => `${n} stock${n === 1 ? '' : 's'}`;
+    const streams = [
+      alpacaLive && { name: 'Alpaca', n: alpacaWsSubscribed.size },
+      wsConnected && { name: 'FinnHub', n: wsSubscribedSymbols.size },
+    ].filter(Boolean);
+    // Name only the streams actually carrying stocks. With a small portfolio
+    // Alpaca holds everything and FinnHub sits connected but empty, and
+    // "FinnHub (0 stocks)" reads like a fault.
+    const carrying = streams.filter(x => x.n > 0);
+    const via = (carrying.length ? carrying : streams).map(x => `${x.name} (${count(x.n)})`).join(' + ');
+    const subscribedCount = (alpacaLive ? alpacaWsSubscribed.size : 0) + (wsConnected ? wsSubscribedSymbols.size : 0);
+    // Flag the stream as "no data" when stocks are subscribed but no trades have
+    // arrived within WS_STALE_THRESHOLD of the last trade (or of subscribing).
+    // Checked only during the regular session: pre- and post-market trading is
+    // thin enough — especially on IEX, the only exchange Alpaca's free stream
+    // carries — that a quiet minute there is normal, not a fault.
     const sinceLast = wsLastAnyTrade ? Date.now() - wsLastAnyTrade : Date.now() - wsOpenedAt;
-    const stale = phase === 'active'
+    const stale = isRegularMarketHours()
       && wsOpenedAt > 0
-      && wsSubscribedSymbols.size > 0
+      && subscribedCount > 0
       && sinceLast > WS_STALE_THRESHOLD;
     if (stale) {
       el.style.color = '#c93';
       el.textContent = '\u25CF Live (no data)';
-      el.title = 'WebSocket connected but no trades received \u2014 FinnHub free plan may not include realtime US stock data. REST polling continues.';
+      el.title = 'Streaming via ' + via + ', but no trades have arrived in the last minute. '
+        + (alpacaLive
+          ? 'Alpaca\u2019s free stream only carries trades on the IEX exchange, which can be quiet for less-traded stocks. '
+          : 'FinnHub\u2019s free plan may not include real-time US stock data. ')
+        + 'Prices keep refreshing on the normal schedule.';
     } else {
       el.style.color = '#3c8';
       el.textContent = '\u25CF Live';
-      el.title = 'FinnHub WebSocket connected \u2014 real-time trade updates active';
+      el.title = 'Real-time trades streaming via ' + via;
     }
     if (statusEl.textContent.includes('Data via') && !statusEl.textContent.includes('WS streaming')) {
       statusEl.textContent += ' | WS streaming';
@@ -9390,6 +9576,82 @@ function updateWsIndicator() {
   } else {
     el.style.display = 'none';
     statusEl.textContent = statusEl.textContent.replace(' | WS streaming', '');
+  }
+}
+
+// ==================== STREAMED TRADES (shared by every stream) ====================
+// Both real-time streams (Alpaca and FinnHub) hand their trades to this one
+// function, so a row behaves identically whichever stream its price came from:
+// same flash, same change recalculation, same alert check, same render batching.
+// `latest` maps symbol -> latest trade price from one message batch.
+function _applyStreamTrades(latest) {
+  let updated = false;
+  for (const sym of Object.keys(latest)) {
+    const price = Number(latest[sym]);
+    if (!isFinite(price) || price <= 0) continue;
+    // Own-property check, not truthiness: quoteData["constructor"] is truthy
+    // via inheritance, so a malformed upstream symbol would otherwise write
+    // price fields onto Object.prototype members instead of being skipped.
+    if (!Object.prototype.hasOwnProperty.call(quoteData, sym)) continue;
+
+    const q = quoteData[sym];
+    const oldPrice = q.price;
+
+    // Only set prevPrices if not already set this render cycle,
+    // so flash animations compare against the pre-stream price
+    if (prevPrices[sym] == null || !wsRenderPending) {
+      prevPrices[sym] = oldPrice;
+    }
+    q.price = price;
+
+    // Recalculate change from prevClose
+    if (q.prevClose != null) {
+      q.change = price - q.prevClose;
+      q.changePct = (q.change / q.prevClose) * 100;
+    }
+
+    // Update day high/low
+    if (q.dayHigh == null || price > q.dayHigh) q.dayHigh = price;
+    if (q.dayLow == null || price < q.dayLow) q.dayLow = price;
+
+    // Don't accumulate volume — REST provides accurate cumulative day volume
+
+    // Re-estimate bid/ask from new price
+    const spread = price > 100 ? 0.02 : price > 10 ? 0.01 : 0.005;
+    if (q.bidEstimated) q.bid = +(price - spread).toFixed(4);
+    if (q.askEstimated) q.ask = +(price + spread).toFixed(4);
+
+    // A streamed trade is by definition live, so it supersedes any delay
+    // an earlier delayed_sip fill recorded on this row. 0 asserts
+    // live rather than merely unsetting it (see makeEmptyQuote).
+    q.delayedBy = 0; q.delayedNote = null;
+    wsLastTradeTime[sym] = Date.now();
+    updated = true;
+  }
+  if (updated) wsLastAnyTrade = Date.now();
+  // Debounce renders — batch all trades within one animation frame
+  // Skip rendering if a full REST refresh is in progress (it will render when done)
+  if (updated && !wsRenderPending && !refreshInProgress) {
+    wsRenderPending = true;
+    requestAnimationFrame(() => {
+      wsRenderPending = false;
+      if (!refreshInProgress) {
+        // Prefer targeted in-place updates on every tick — they preserve input
+        // focus/selection, expanded mobile cards, and avoid rebuilding ~N×30
+        // cells per tick. Only fall back to reordering rows when the active
+        // sort column depends on live price, since a tick can reorder rows.
+        if (_currentSortNeedsFullRender()) {
+          bumpPortfolioVersion();
+          reorderTableToSort();
+        } else if (isMobileView()) {
+          updateMobileCardPrices();
+        } else {
+          updatePriceCells();
+        }
+        updateSummary();
+        document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString() + ' (live)';
+      }
+    });
   }
 }
 
@@ -9445,85 +9707,12 @@ function connectFinnhubWebSocket() {
     try {
       const msg = JSON.parse(event.data);
       if (msg.type === 'trade' && Array.isArray(msg.data)) {
-        // FinnHub batches trades — process the latest price per symbol only
-        const latestBySymbol = {};
+        // FinnHub batches trades — keep only the latest price per symbol.
+        const latest = {};
         for (const trade of msg.data) {
-          if (trade.s && trade.p) {
-            latestBySymbol[trade.s] = trade;
-          }
+          if (trade && typeof trade.s === 'string' && trade.p) latest[trade.s] = trade.p;
         }
-        let updated = false;
-        for (const sym of Object.keys(latestBySymbol)) {
-          const trade = latestBySymbol[sym];
-          const price = trade.p;
-          // Own-property check, not truthiness: quoteData["constructor"] is truthy
-          // via inheritance, so a malformed upstream symbol would otherwise write
-          // price fields onto Object.prototype members instead of being skipped.
-          if (!Object.prototype.hasOwnProperty.call(quoteData, sym)) continue;
-
-          const q = quoteData[sym];
-          const oldPrice = q.price;
-
-          // Only set prevPrices if not already set this render cycle,
-          // so flash animations compare against the pre-WebSocket price
-          if (prevPrices[sym] == null || !wsRenderPending) {
-            prevPrices[sym] = oldPrice;
-          }
-          q.price = price;
-
-          // Recalculate change from prevClose
-          if (q.prevClose != null) {
-            q.change = price - q.prevClose;
-            q.changePct = (q.change / q.prevClose) * 100;
-          }
-
-          // Update day high/low
-          if (q.dayHigh == null || price > q.dayHigh) q.dayHigh = price;
-          if (q.dayLow == null || price < q.dayLow) q.dayLow = price;
-
-          // Don't accumulate volume — REST provides accurate cumulative day volume
-
-          // Re-estimate bid/ask from new price
-          const spread = price > 100 ? 0.02 : price > 10 ? 0.01 : 0.005;
-          if (q.bidEstimated) q.bid = +(price - spread).toFixed(4);
-          if (q.askEstimated) q.ask = +(price + spread).toFixed(4);
-
-          // A streamed trade is by definition live, so it supersedes any delay
-          // an earlier delayed_sip fill recorded on this row. 0 asserts
-          // live rather than merely unsetting it (see makeEmptyQuote).
-          q.delayedBy = 0; q.delayedNote = null;
-          wsLastTradeTime[sym] = Date.now();
-          updated = true;
-        }
-        if (updated) wsLastAnyTrade = Date.now();
-        // Debounce renders — batch all trades within one animation frame
-        // Skip rendering if a full REST refresh is in progress (it will render when done)
-        if (updated && !wsRenderPending && !refreshInProgress) {
-          wsRenderPending = true;
-          requestAnimationFrame(() => {
-            wsRenderPending = false;
-            if (!refreshInProgress) {
-              // Prefer targeted in-place updates on every WS tick — they
-              // preserve input focus/selection, expanded mobile cards, and
-              // avoid rebuilding ~N×30 cells per tick. Only fall back to a
-              // full renderTable when the active sort column depends on live
-              // price, since a tick can reorder rows in that case.
-              if (_currentSortNeedsFullRender()) {
-                // Prices changed — invalidate the sort cache, then reorder the
-                // existing rows into the new order + patch prices rather than
-                // rebuilding every cell on each WS frame (cheap at 50+ rows).
-                bumpPortfolioVersion();
-                reorderTableToSort();
-              } else if (isMobileView()) {
-                updateMobileCardPrices();
-              } else {
-                updatePriceCells();
-              }
-              updateSummary();
-              document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString() + ' (live)';
-            }
-          });
-        }
+        _applyStreamTrades(latest);
       }
     } catch (e) {
       // Ignore parse errors from ping/pong frames
@@ -9555,26 +9744,213 @@ function connectFinnhubWebSocket() {
       // opens the socket, rejects the token, and closes within milliseconds.
       if (uptime >= WS_HEALTHY_MS) _wsConsecCloses = 0;
       _wsConsecCloses++;
-      const backoff = Math.min(WS_RECONNECT_DELAY * Math.pow(2, _wsConsecCloses - 1), 60000);
+      // +/-20% jitter: when a provider drops every connection at once, thousands
+      // of tabs on identical timers would otherwise all reconnect in the same instant.
+      const backoff = Math.min(WS_RECONNECT_DELAY * Math.pow(2, _wsConsecCloses - 1), 60000) * (0.8 + Math.random() * 0.4);
       if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
       wsReconnectTimer = setTimeout(() => connectFinnhubWebSocket(), backoff);
     }
   };
 }
 
-function syncWsSubscriptions() {
-  if (!finnhubWs || finnhubWs.readyState !== WebSocket.OPEN) return;
-  const stockSymbols = portfolio
-    .map(p => p.symbol)
-    .filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
+// ==================== ALPACA WEBSOCKET (real-time IEX trades) ====================
+// Alpaca's free plan includes a real-time stream of trades on the IEX exchange,
+// authenticated with the same keys the REST quotes already use. It carries the
+// largest positions when available, and FinnHub's free stream (also real-time,
+// 50 symbols) carries the next ones. Alpaca goes first for consistency rather
+// than because FinnHub is worse: its REST snapshots already come from the same
+// IEX feed, so a row's streamed and polled prices agree.
+//
+// One constraint shapes everything below: Alpaca limits each user to ONE
+// concurrent connection to this stream on the free plan, and refuses a second
+// with error 406. That makes the stream a shared resource of the user's Alpaca
+// account, not just of this page — a trading bot on the same account, or a
+// second tab of this app, competes for the same slot. So:
+//   - it is a visible Settings switch, with that cost spelled out next to it;
+//   - a 406 halts the stream for this page instead of retrying, because retrying
+//     would keep snatching the slot back from whatever else needs it;
+//   - so do bad keys (402) and a plan without the feed (409) — no amount of
+//     reconnecting fixes those. Toggling the switch or saving keys clears the halt.
+// Browsers can't set headers on a WebSocket, so auth is Alpaca's documented
+// message form, sent right after the server's "connected" greeting. The keys go
+// only to stream.data.alpaca.markets, exactly like the REST calls.
+function isAlpacaStreamEnabled() {
+  return localStorage.getItem('stonks_alpaca_stream') !== '0';
+}
+function _alpacaStreamUsable() {
+  const { keyId, secret } = getAlpacaKeys();
+  return !!(keyId && secret) && isAlpacaStreamEnabled() && !_alpacaWsHalt;
+}
+function _alpacaStreamLive() {
+  return !!(alpacaWs && alpacaWs.readyState === WebSocket.OPEN && alpacaWsAuthed);
+}
+function setAlpacaStreamEnabled(on) {
+  safeSet('stonks_alpaca_stream', on ? '1' : '0');
+  _alpacaWsHalt = null;          // an explicit toggle is the user asking to try again
+  _alpacaWsConsecCloses = 0;
+  _alpacaWsSymbolCap = ALPACA_WS_MAX_SYMBOLS;
+  if (on) connectAlpacaWebSocket(); else disconnectAlpacaWebSocket();
+}
+function initAlpacaStreamSetting() {
+  const cb = document.getElementById('toggle-alpaca-stream');
+  if (cb) cb.checked = isAlpacaStreamEnabled();
+  renderAlpacaStreamStatus();
+}
+function renderAlpacaStreamStatus() {
+  const el = document.getElementById('alpaca-stream-status');
+  if (!el) return;
+  const { keyId, secret } = getAlpacaKeys();
+  let text;
+  if (!keyId || !secret) text = 'Add Alpaca keys above to use it.';
+  else if (!isAlpacaStreamEnabled()) text = 'Off.';
+  else if (_alpacaWsHalt) text = _alpacaWsHalt.note;
+  else if (_alpacaStreamLive()) {
+    const n = alpacaWsSubscribed.size;
+    text = n ? `Streaming ${n} stock${n === 1 ? '' : 's'}.` : 'Connected \u2014 no stocks to stream yet.';
+  } else if (alpacaWs && alpacaWs.readyState <= WebSocket.OPEN) text = 'Connecting\u2026';
+  else if (alpacaWsReconnectTimer) text = 'Reconnecting\u2026';
+  else text = 'Not connected.';
+  el.textContent = text;
+}
+function disconnectAlpacaWebSocket() {
+  if (alpacaWsReconnectTimer) { clearTimeout(alpacaWsReconnectTimer); alpacaWsReconnectTimer = null; }
+  const sock = alpacaWs;
+  alpacaWs = null;               // detach first: the old socket's onclose sees it is stale and stays quiet
+  alpacaWsAuthed = false;
+  alpacaWsSubscribed.clear();
+  _alpacaWsOpenedRealTime = 0;
+  if (sock) { try { sock.close(); } catch (_) {} }
+  syncWsSubscriptions();         // hand these positions back to FinnHub, if it's connected
+  updateWsIndicator();
+  renderAlpacaStreamStatus();
+}
+function _haltAlpacaStream(code, note) {
+  _alpacaWsHalt = { code, note };
+  console.warn('Alpaca stream stopped (' + code + '): ' + note);
+  disconnectAlpacaWebSocket();
+}
+function connectAlpacaWebSocket() {
+  if (!_alpacaStreamUsable()) {
+    if (alpacaWs) disconnectAlpacaWebSocket();
+    renderAlpacaStreamStatus();
+    return;
+  }
+  if (alpacaWs && alpacaWs.readyState === WebSocket.OPEN) { if (alpacaWsAuthed) syncWsSubscriptions(); return; }
+  if (alpacaWs && alpacaWs.readyState === WebSocket.CONNECTING) return;
+  if (alpacaWsReconnectTimer) { clearTimeout(alpacaWsReconnectTimer); alpacaWsReconnectTimer = null; }
 
-  // FinnHub's free WebSocket caps at 50 concurrent symbols (raising the cap just
-  // makes it silently drop the overflow subscriptions). When a portfolio exceeds
-  // that, subscribe the LARGEST positions so the most significant rows stream
-  // live and the rest fall back to REST polling. Rank by cost-basis value, which
-  // is stable across price ticks — ranking by live market value would thrash the
-  // subscriptions whenever a price wobbled near the 50/51 boundary. Falls back to
-  // market value for positions with no cost basis entered.
+  let sock;
+  try {
+    sock = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
+  } catch (e) {
+    console.warn('Alpaca WebSocket failed to create:', e.message);
+    return;
+  }
+  alpacaWs = sock;
+  alpacaWsAuthed = false;
+  alpacaWsSubscribed.clear();
+  renderAlpacaStreamStatus();
+
+  sock.onmessage = (event) => {
+    if (alpacaWs !== sock) return;
+    let batch;
+    try { batch = JSON.parse(event.data); } catch (_) { return; }
+    if (!Array.isArray(batch)) return;
+    const latest = {};
+    for (const m of batch) {
+      if (!m || typeof m !== 'object') continue;
+      if (m.T === 't') {
+        // Trade: S = symbol, p = price. Batches can hold several trades per symbol;
+        // later entries are newer, so the last one wins.
+        if (typeof m.S === 'string' && m.p) latest[m.S] = m.p;
+      } else if (m.T === 'success' && m.msg === 'connected') {
+        const { keyId, secret } = getAlpacaKeys();
+        try { sock.send(JSON.stringify({ action: 'auth', key: keyId, secret })); } catch (_) {}
+      } else if (m.T === 'success' && m.msg === 'authenticated') {
+        alpacaWsAuthed = true;
+        _alpacaWsOpenedRealTime = Date.now();
+        wsOpenedAt = Date.now();
+        wsLastAnyTrade = 0;
+        console.log('Alpaca WebSocket authenticated');
+        syncWsSubscriptions();
+        updateWsIndicator();
+        renderAlpacaStreamStatus();
+      } else if (m.T === 'subscription') {
+        // The server's list is the source of truth — including after a
+        // rejected request, when our view of what's subscribed would be wrong.
+        alpacaWsSubscribed = new Set(Array.isArray(m.trades) ? m.trades.filter(x => typeof x === 'string') : []);
+        updateWsIndicator();
+        renderAlpacaStreamStatus();
+      } else if (m.T === 'error') {
+        const code = Number(m.code);
+        if (code === 402) _haltAlpacaStream(code, 'Stopped: Alpaca rejected these keys. Check them and save again.');
+        else if (code === 406) _haltAlpacaStream(code, 'Stopped: your Alpaca account\u2019s one streaming connection is already in use by another tab or app. Close it, then turn this off and on.');
+        else if (code === 409 || code === 410) _haltAlpacaStream(code, 'Stopped: this Alpaca account can\u2019t access the real-time IEX stream.');
+        else if (code === 405) {
+          // More symbols than the plan allows. Step the cap down and resync
+          // against the server-confirmed set; bounded, so it can't loop.
+          _alpacaWsSymbolCap = Math.max(1, Math.floor(_alpacaWsSymbolCap * 0.8));
+          console.warn('Alpaca stream symbol limit hit; capping at ' + _alpacaWsSymbolCap);
+          syncWsSubscriptions();
+        } else if (code === 403) {
+          /* already authenticated — harmless */
+        } else if (code === 400) {
+          // "invalid syntax": a malformed request, most plausibly a symbol Alpaca
+          // won't accept. Reconnecting would just resubscribe the same symbol and
+          // loop, so log it and keep the healthy socket. _alpacaStreamable()
+          // filters symbols up front so this should not normally happen.
+          console.warn('Alpaca stream rejected a request (400): ' + m.msg);
+        } else {
+          // 401/404/407/500: transient or ours to recover from. Drop the socket;
+          // onclose schedules a reconnect with backoff.
+          console.warn('Alpaca stream error ' + code + ': ' + m.msg);
+          try { sock.close(); } catch (_) {}
+        }
+      }
+    }
+    if (Object.keys(latest).length) _applyStreamTrades(latest);
+  };
+
+  sock.onerror = () => { /* onclose follows and handles recovery */ };
+
+  sock.onclose = () => {
+    if (alpacaWs !== sock) return;   // replaced or deliberately disconnected
+    const uptime = _alpacaWsOpenedRealTime ? Date.now() - _alpacaWsOpenedRealTime : 0;
+    alpacaWs = null;
+    alpacaWsAuthed = false;
+    alpacaWsSubscribed.clear();
+    _alpacaWsOpenedRealTime = 0;
+    syncWsSubscriptions();           // FinnHub takes these positions back meanwhile
+    updateWsIndicator();
+    if (_alpacaStreamUsable()) {
+      // Same capped backoff as the FinnHub stream: 5 s doubling to 60 s, cleared
+      // only by a connection that stayed up for WS_HEALTHY_MS.
+      if (uptime >= WS_HEALTHY_MS) _alpacaWsConsecCloses = 0;
+      _alpacaWsConsecCloses++;
+      const backoff = Math.min(WS_RECONNECT_DELAY * Math.pow(2, _alpacaWsConsecCloses - 1), 60000) * (0.8 + Math.random() * 0.4); // jittered, see FinnHub
+      alpacaWsReconnectTimer = setTimeout(() => { alpacaWsReconnectTimer = null; connectAlpacaWebSocket(); }, backoff);
+    }
+    renderAlpacaStreamStatus();
+  };
+}
+
+// Start (or re-sync) every configured stream.
+function connectStreams() {
+  connectAlpacaWebSocket();
+  connectFinnhubWebSocket();
+}
+
+// ==================== STREAM SUBSCRIPTIONS ====================
+// Decide which positions each stream carries, then diff against what each is
+// currently subscribed to. Positions are ranked by size — cost-basis value,
+// which is stable across price ticks (ranking by live market value would thrash
+// subscriptions whenever a price wobbled near a cutoff), falling back to market
+// value for positions with no cost basis entered.
+//
+// Alpaca, when live, takes the largest positions up to its cap. FinnHub takes the
+// next ones up to its own 50-symbol cap, so a portfolio with both keys streams up
+// to 80 positions. When Alpaca isn't live, FinnHub goes back to the top 50.
+function _rankedStreamSymbols() {
   const posBySym = new Map(portfolio.map(p => [p.symbol, p]));
   const sizeOf = sym => {
     const pos = posBySym.get(sym);
@@ -9584,12 +9960,39 @@ function syncWsSubscriptions() {
     const q = quoteData[sym];
     return (q && q.price != null) ? Math.abs(pos.shares * q.price) : 0;
   };
-  const desired = new Set(
-    stockSymbols.slice().sort((a, b) => sizeOf(b) - sizeOf(a)).slice(0, MAX_WS_SYMBOLS)
-  );
+  return portfolio
+    .map(p => p.symbol)
+    .filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s))
+    .sort((a, b) => sizeOf(b) - sizeOf(a));
+}
+// Alpaca's stream is US equities only and uses dotted share classes (BRK.B).
+// A symbol in any other shape could get a whole subscription batch rejected, so
+// those go to FinnHub or polling instead. The class suffix is limited to A-C on
+// purpose: other single letters after a dot are mostly foreign exchanges in
+// Yahoo-style tickers (VOD.L London, XYZ.V TSX Venture), and two-letter
+// suffixes nearly always are (SHOP.TO, SAP.DE).
+function _alpacaStreamable(sym) {
+  return /^[A-Z]{1,5}(\.[A-C])?$/.test(sym);
+}
+function syncWsSubscriptions() {
+  const ranked = _rankedStreamSymbols();
+  const alpacaWant = new Set(_alpacaStreamLive() ? ranked.filter(_alpacaStreamable).slice(0, _alpacaWsSymbolCap) : []);
 
-  // Unsubscribe anything no longer wanted — removed from the portfolio OR bumped
-  // out of the top 50 by a larger position.
+  // --- Alpaca: one batched request each way. No optimistic bookkeeping: the
+  // server answers with a "subscription" message that replaces our set.
+  if (_alpacaStreamLive()) {
+    const add = [...alpacaWant].filter(s => !alpacaWsSubscribed.has(s));
+    const drop = [...alpacaWsSubscribed].filter(s => !alpacaWant.has(s));
+    try {
+      if (drop.length) alpacaWs.send(JSON.stringify({ action: 'unsubscribe', trades: drop }));
+      if (add.length) alpacaWs.send(JSON.stringify({ action: 'subscribe', trades: add }));
+    } catch (_) {}
+    if (add.length) { wsOpenedAt = Date.now(); wsLastAnyTrade = 0; }
+  }
+
+  // --- FinnHub: the positions Alpaca isn't carrying, up to its own cap.
+  if (!finnhubWs || finnhubWs.readyState !== WebSocket.OPEN) return;
+  const desired = new Set(ranked.filter(s => !alpacaWant.has(s)).slice(0, MAX_WS_SYMBOLS));
   const toRemove = [];
   for (const sym of wsSubscribedSymbols) {
     if (!desired.has(sym)) toRemove.push(sym);
@@ -9598,7 +10001,6 @@ function syncWsSubscriptions() {
     try { finnhubWs.send(JSON.stringify({ type: 'unsubscribe', symbol: sym })); } catch(_){}
     wsSubscribedSymbols.delete(sym);
   }
-  // Subscribe the wanted symbols not already streaming.
   let subscribed = false;
   for (const sym of desired) {
     if (!wsSubscribedSymbols.has(sym)) {
@@ -9996,6 +10398,24 @@ async function refreshAlwaysOnOnly() {
 }
 
 const DEFAULT_REFRESH_SECONDS = 30;
+// Background tabs poll at most once a minute. A tracker left open in a hidden
+// tab was polling every source on the user's interval (as fast as 2 s) all day;
+// multiplied across everyone who opens it, that load lands on free providers and
+// the shared proxy for data nobody is looking at. Browsers only partly throttle
+// hidden timers, and not immediately. Streams keep running, so streamed stocks
+// and price alerts on them stay live; on return the tab catches up at once.
+const HIDDEN_TAB_REFRESH_MS = 60000;
+let _lastHiddenTick = 0;
+let _hiddenTickSkipped = false;
+let _autoRefreshTick = null;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { _lastHiddenTick = Date.now(); return; }
+  if (_hiddenTickSkipped && _autoRefreshTick) {
+    _hiddenTickSkipped = false;
+    _lastHeavyStart = 0; // stale after a long absence: allow a heavy refresh now
+    _autoRefreshTick();
+  }
+});
 function setupAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   // Guard the parse. Assigning a <select> a value that isn't one of its options
@@ -10006,11 +10426,15 @@ function setupAutoRefresh() {
   const rawInterval = parseInt(document.getElementById('refresh-interval').value, 10);
   const seconds = (isFinite(rawInterval) && rawInterval > 0) ? rawInterval : DEFAULT_REFRESH_SECONDS;
   const userInterval = seconds * 1000;
-  refreshTimer = setInterval(() => {
+  _autoRefreshTick = () => {
     // Refresh the WS indicator every tick so a stalled stream flips to
     // "Live (no data)" within one auto-refresh interval, independent of
     // the auto-refresh checkbox.
     updateWsIndicator();
+    if (document.hidden) {
+      if (Date.now() - _lastHiddenTick < HIDDEN_TAB_REFRESH_MS) { _hiddenTickSkipped = true; return; }
+      _lastHiddenTick = Date.now();
+    }
     if (document.getElementById('auto-refresh').checked && portfolio.length > 0) {
       const phase = getMarketPhase();
       if (phase === 'active') {
@@ -10059,7 +10483,8 @@ function setupAutoRefresh() {
         }
       }
     }
-  }, userInterval);
+  };
+  refreshTimer = setInterval(() => _autoRefreshTick(), userInterval);
 }
 
 // Persist auto-refresh settings to localStorage
@@ -10067,8 +10492,21 @@ document.getElementById('refresh-interval').addEventListener('change', function(
   safeSet('stonks_refresh_interval', this.value);
   setupAutoRefresh();
 });
+function syncAutoRefreshToggle() {
+  const cb = document.getElementById('auto-refresh');
+  if (cb && cb.parentElement) cb.parentElement.classList.toggle('is-on', cb.checked);
+}
 document.getElementById('auto-refresh').addEventListener('change', function() {
   safeSet('stonks_auto_refresh', this.checked ? '1' : '0');
+  syncAutoRefreshToggle();
+});
+document.getElementById('auto-refresh').addEventListener('focus', function() {
+  let kbd = true;
+  try { kbd = this.matches(':focus-visible'); } catch (_) { /* very old engines: assume keyboard */ }
+  this.parentElement.classList.toggle('kbd-focus', kbd);
+});
+document.getElementById('auto-refresh').addEventListener('blur', function() {
+  this.parentElement.classList.remove('kbd-focus');
 });
 
 // ==================== KEYBOARD ====================
@@ -10112,6 +10550,7 @@ if (savedInterval) {
 }
 const savedAutoRefresh = localStorage.getItem('stonks_auto_refresh');
 if (savedAutoRefresh !== null) document.getElementById('auto-refresh').checked = savedAutoRefresh === '1';
+syncAutoRefreshToggle(); // programmatic .checked changes don't fire 'change'
 
 // Apply portfolio-bar visibility (hidden by default to save vertical space).
 // Runs in the synchronous boot path so the bar's state is set before first
@@ -10264,8 +10703,15 @@ syncHScrollProxy();
 initDragReorder();
 initRowContextMenu();  // right-click on Symbol / Name cells
 showWelcomeBanner();
-if (portfolio.length > 0) refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => connectFinnhubWebSocket());
-else connectFinnhubWebSocket();
+initAlpacaStreamSetting();
+// Streams connect immediately rather than after the first full refresh. Waiting
+// bought nothing — subscriptions are ranked from the portfolio, not from loaded
+// quotes, and a trade for a row with no quote yet is skipped harmlessly — but it
+// cost live prices at startup: the first refresh can take 10+ seconds when the
+// proxied sources are slow. The refresh re-syncs subscriptions when it lands,
+// once cost-basis-less positions can be ranked by market value.
+connectStreams();
+if (portfolio.length > 0) refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
 // Warm sample-data quotes in the background for first-time users (empty portfolio,
 // welcome guide not yet dismissed) so the Load Sample Data button paints instantly
 // instead of cycling through "loading...". Best-effort; the click works regardless.
