@@ -2168,6 +2168,12 @@ const WS_STALE_THRESHOLD = 60000;         // flag WS as "no data" if no trades i
 // shuffling subscriptions would achieve nothing.
 const WS_SYMBOL_QUIET_MS = 180000;        // no trade for this long => hand it over
 const WS_STREAM_ALIVE_MS = 60000;         // ...but only if the stream printed something this recently
+// Oldest volume sample still worth comparing against. Past this the two readings
+// aren't a window any more: the tab may have been backgrounded (refreshes back
+// off to once a minute), or a whole session may have elapsed, and day volume
+// restarts at zero each morning - so a stale sample can make a quiet open look
+// like a stream that missed everything.
+const WS_VOL_WINDOW_MAX_MS = 900000;
 const OFF_HOURS_FULL_INTERVAL = 60000;    // min interval between full off-hours refreshes
 const WS_RECONNECT_DELAY = 5000;
 const WS_HEALTHY_MS = 30000;              // socket must stay open this long to clear the reconnect backoff
@@ -10442,6 +10448,7 @@ function reviewQuietAlpacaSymbols() {
     // works when the portfolio holds a single stock.
     if (vol != null) {
       if (!seen) { _restVolSeen.set(sym, { vol, t: now }); continue; }
+      if (now - seen.t > WS_VOL_WINDOW_MAX_MS) { _restVolSeen.set(sym, { vol, t: now }); continue; }
       const windowLongEnough = now - seen.t >= WS_SYMBOL_QUIET_MS;
       if (vol > seen.vol) {
         if (windowLongEnough && quietSince && quietSince <= seen.t) {
