@@ -9599,6 +9599,17 @@ function deletePortfolioPrompt() {
   const all = lsGet('stonks_portfolios', '{}');
   if (Object.keys(all).length <= 1) { alert('Cannot delete the last portfolio.'); return; }
   if (!confirm('Delete portfolio "' + portfolioName + '"?')) return;
+  // Stop the outgoing portfolio's refresh before touching any state, exactly as
+  // switchPortfolio does. Deleting a portfolio you just added a ticker to left
+  // that ticker's refresh in flight, so refreshInProgress was still true when
+  // the refreshAll() at the end of this function ran - it hit the overlap guard
+  // and returned immediately, having already cleared every cached quote. The
+  // surviving portfolio was then a wall of "loading..." until some later tick
+  // happened to fire, which with auto-refresh off is never.
+  abortRefresh();
+  if (_deferredCommodityAbort) { _deferredCommodityAbort.abort(); _deferredCommodityAbort = null; }
+  refreshInProgress = false;
+  pendingRefreshAfter = false;
   // Flush pending writes for the soon-to-be-deleted portfolio so it isn't
   // re-created by a timer that fires after the delete.
   flushPendingSaves();
@@ -9610,18 +9621,14 @@ function deletePortfolioPrompt() {
   notes = all[portfolioName].notes || {};
   safeSet('stonks_portfolio', JSON.stringify(portfolio));
   safeSet('stonks_notes', JSON.stringify(notes));
-  // Match clearAll: purge every per-symbol cache so the switched-to portfolio
-  // doesn't inherit stale error flags, prev-price flashes, or cached fundamentals.
-  quoteData = {}; fundamentalsCache = {};
-  prevPrices = {}; wsLastTradeTime = {};
-  errorSymbols.clear();
-  fetchedSummary.clear();
-  fetchedFundamentals.clear();
-  fetchedPerformance.clear();
-  fetchedAfterHours.clear();
-  attemptedSymbols.clear();
-  _summaryFailCounts = {};
-  _notFoundStreak = {};
+  // Prune rather than purge, which is what switchPortfolio does: these caches
+  // are keyed by symbol, so a position the surviving portfolio also holds
+  // renders instantly from cache instead of flashing "loading...". Wiping them
+  // wholesale was the other half of the bug above - it guaranteed a blank table
+  // even when the refresh did run. pruneQuoteCache drops every per-symbol entry
+  // and flag (including error and attempted state) for symbols no portfolio
+  // holds any more, so nothing stale survives the delete.
+  pruneQuoteCache();
   _resetCoinbaseOverlayState();
   undoStack.length = 0; redoStack.length = 0;
   updateUndoRedoButtons();
