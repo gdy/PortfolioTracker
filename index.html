@@ -13,7 +13,7 @@
   an arbitrary server. Adding a data source means adding its host here too;
   a missing host fails as a CSP violation in the console, not silently.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://stockanalysis.com https://finnhub.io wss://ws.finnhub.io https://data.alpaca.markets wss://stream.data.alpaca.markets https://api.coingecko.com https://api.exchange.coinbase.com https://api.binance.us https://api.kraken.com https://financialmodelingprep.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com https://api.allorigins.win; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://stockanalysis.com https://finnhub.io wss://ws.finnhub.io https://data.alpaca.markets wss://stream.data.alpaca.markets https://api.coingecko.com https://api.exchange.coinbase.com https://api.binance.us https://api.kraken.com https://api.gold-api.com https://financialmodelingprep.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com https://api.allorigins.win; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Static Portfolio Tracker</title>
 <meta name="description" content="A real-time portfolio tracker for stocks, crypto, and commodities in a single static HTML file. No server, no build step, no dependencies, no account — your positions never leave your browser.">
@@ -187,6 +187,30 @@
   .status-bar .error { color: #e55; }
   .status-bar .loading { color: #4a9eff; }
 
+  /* One-time notice for WebKit users: Safari deletes localStorage after seven
+     days away, and this app keeps everything there. Amber, not red - it is a
+     heads-up about a real risk, not an error. */
+  .storage-notice {
+    display: none;
+    background: #2a2109;
+    border-bottom: 1px solid #5a4a12;
+    color: #e8d9a0;
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    display: none;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .storage-notice.show { display: flex; }
+  .storage-notice strong { color: #ffe9a8; }
+  .storage-notice .sn-body { flex: 1; min-width: 0; }
+  .storage-notice .sn-dismiss {
+    background: none; border: 1px solid #6a5a1a; color: #e8d9a0;
+    font-family: inherit; font-size: 11px; padding: 3px 10px;
+    border-radius: 3px; cursor: pointer; flex: 0 0 auto; white-space: nowrap;
+  }
+  .storage-notice .sn-dismiss:hover { background: #3a2f0c; color: #fff; }
   .summary-bar {
     background: #0f0f1f;
     padding: 8px 12px;
@@ -951,6 +975,23 @@
     position: fixed; background: #12122a; border: 1px solid #444;
     border-radius: 6px; padding: 12px; z-index: 6000; width: 220px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  /* The two fields are flex:1 inside a fixed 220px popover, and a number
+     input's intrinsic min-content width (~20 characters) is wider than the
+     space left beside the label. Flex items don't shrink below that unless
+     min-width is set explicitly, so both fields overflowed the popover's right
+     edge by ~8px. */
+  .alert-popover input[type="number"] {
+    min-width: 0;
+    /* And drop the native spinner, as the toolbar's number fields already do:
+       in a field this narrow it ate the value. Arrow keys still step. */
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  .alert-popover input[type="number"]::-webkit-inner-spin-button,
+  .alert-popover input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
   }
   /* Quick-actions menu opened by clicking a row's symbol or company name. */
   .row-menu {
@@ -1839,6 +1880,16 @@
   <span id="last-update"></span>
 </div>
 
+<div class="storage-notice" id="storage-notice" role="note">
+  <span class="sn-body">
+    <strong>Safari clears saved data after 7 days away.</strong>
+    Your positions live in this browser only, and Safari deletes that storage if you don&rsquo;t open the page for a week.
+    Open it weekly, keep a backup with <strong>Settings &rarr; Export Settings</strong>, or use <strong>Share</strong> to save a link to your positions.
+    Adding it to your Home Screen also keeps the data outside Safari&rsquo;s cleanup.
+  </span>
+  <button class="sn-dismiss" onclick="dismissStorageNotice()">Got it</button>
+</div>
+
 <div class="summary-bar" role="region" aria-label="Portfolio summary" aria-live="polite">
   <div class="summary-item">
     <span class="summary-label">Market Value:</span>
@@ -2042,6 +2093,37 @@ const FINNHUB_QUOTE_DELAY = 200;          // between sequential FinnHub /quote c
 const FINNHUB_BATCH_DELAY = 1500;         // between fundamentals batches
 const PERF_SYMBOL_DELAY = 300;            // between sequential perf requests (session-cached, only first load)
 const COMMODITY_STAGGER = 200;            // stagger between parallel commodity fetches
+// Futures are the only rows with no direct-CORS source, so they live or die by
+// the proxy - and the pool is down to one intermittent service (see the README
+// graveyard: every alternative is dead, localhost-only, or rate-limited to
+// nothing). Measured against it: ~4 of 5 tries return in 2-5 s and the rest
+// hang until they 522 at ~19 s. One 8 s shot was therefore a coin flip, which
+// is what left crude stuck on "retrying...". The answer is several SHORT tries
+// instead of one long one: a retry only happens when the previous attempt
+// failed, so a healthy proxy still costs exactly one request per symbol.
+// Measured against the live proxy: successes come back in 2-7 s, failures hang
+// until they 522 at ~19 s. A short timeout is therefore the wrong tool - it
+// cancels slow-but-fine responses. Hedge instead: if the first request hasn't
+// answered within HEDGE_DELAY, fire a second at Yahoo's OTHER CDN host and take
+// whichever answers first. A healthy proxy still costs exactly one request;
+// only a slow or failed one is ever paid for twice.
+const COMMODITY_HEDGE_DELAY = 6000;       // start a second, parallel try after this
+const COMMODITY_MAX_ATTEMPTS = 3;         // in flight at once, worst case
+const COMMODITY_DEADLINE = 9000;          // wave-1 budget: keeps the refresh short
+const COMMODITY_RETRY_DEADLINE = 8000;    // the post-merge retry's budget
+// The backfill runs detached, so it can afford to be patient where the refresh
+// cannot. That matters because the proxy's latency is bimodal: when it is
+// struggling, a SUCCESSFUL response can take ~19 s (measured), which every
+// in-refresh budget necessarily cuts off. Waiting that out off the critical
+// path is the difference between a priced row and one stuck on "retrying...".
+const COMMODITY_BACKFILL_DEADLINE = 26000;
+const COMMODITY_BACKFILL_HEDGE = 8000;    // and hedge lazily: 1-2 in flight, not 3
+// Tries made AFTER the refresh has finished, for anything still missing. These
+// run detached so a stubborn symbol can keep trying without holding the refresh
+// (or the next tick) open, and paint the row the moment one lands.
+const COMMODITY_BACKFILL_DELAYS = [2000, 7000, 15000];
+const COMMODITY_BACKFILL_DEFER = 1500;    // re-check gap while a refresh owns the proxy
+const COMMODITY_BACKFILL_MAX_DEFERRALS = 30;
 const COMMODITY_RETRY_DELAY = 1500;       // initial delay before deferred commodity retry
 const COMMODITY_RETRY_GAP = 1200;         // gap between deferred retry symbols
 const STILL_MISSING_BATCH_DELAY = 600;    // between batches of v8 fallback fetches
@@ -2613,6 +2695,19 @@ const COMMODITY_NAMES = {
   'SB=F': 'Sugar', 'KC=F': 'Coffee', 'CT=F': 'Cotton',
 };
 function commodityName(sym) { return COMMODITY_NAMES[sym] || sym; }
+// The one place a raw symbol becomes a canonical one. Brokers disagree about
+// share classes: Schwab exports BRK/B, while every source here - StockAnalysis,
+// Alpaca, FinnHub - wants BRK.B. Simply stripping the slash against the
+// whitelist produced BRKB, which resolves nowhere (StockAnalysis 404s on both
+// BRKB and BRK-B), so a Schwab import of Berkshire imported a row that could
+// never price. Map the slash to a dot first, then apply the whitelist.
+function normalizeSymbolInput(raw) {
+  return String(raw == null ? '' : raw)
+    .toUpperCase()
+    .replace(/\s+/g, '')      // stray spaces from pasted cells
+    .replace(/\//g, '.')      // BRK/B -> BRK.B
+    .replace(/[^A-Z0-9.\-=]/g, '');
+}
 // Also accept the Yahoo symbol directly
 const COMMODITY_SYMBOLS = new Set(Object.values(COMMODITY_MAP));
 const CRYPTO_VALUES = new Set(Object.values(CRYPTO_MAP));
@@ -2690,7 +2785,7 @@ function addPosition() {
   const sharesEl = document.getElementById('shares-input');
   const costEl = document.getElementById('cost-input');
   const dateEl = document.getElementById('date-input');
-  let symbol = tickerEl.value.trim().toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+  let symbol = normalizeSymbolInput(tickerEl.value);
   // Validation: missing/invalid fields focus the offending input and leave
   // every other input — including the ticker — untouched.
   if (!symbol) {
@@ -2810,7 +2905,7 @@ function _pickRandom(arr, n) {
 // (reusing the same picks the quotes were warmed for); a later load re-randomizes.
 let _samplePrefetch = null;
 function _samplePickToSymbol(item) {
-  let s = item.symbol.toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+  let s = normalizeSymbolInput(item.symbol);
   if (CRYPTO_MAP[s]) s = CRYPTO_MAP[s];
   if (COMMODITY_MAP[s]) s = COMMODITY_MAP[s];
   return s;
@@ -3159,7 +3254,13 @@ function handleImportFile(file) {
 }
 
 const PREVIEW_MAX_ROWS = 200; // rows drawn in the import preview (import is uncapped)
-function parseCSVLine(line) {
+// Excel writes CSV with the LOCALE's list separator: a comma in the US, but a
+// semicolon across most of Europe (where the comma is the decimal mark). Parsing
+// a semicolon file on a comma split silently produced garbage rows -
+// "AAPL;10;150,25" became the symbol AAPL10150 with 25 shares - which is worse
+// than refusing the file, because it imports positions that were never real.
+function parseCSVLine(line, delim) {
+  delim = delim || ',';
   const result = [];
   let current = '';
   let inQuotes = false;
@@ -3171,7 +3272,7 @@ function parseCSVLine(line) {
       else current += ch;
     } else {
       if (ch === '"') inQuotes = true;
-      else if (ch === ',' || ch === '\t') { result.push(current.trim()); current = ''; }
+      else if (ch === delim || ch === '\t') { result.push(current.trim()); current = ''; }
       else current += ch;
     }
   }
@@ -3186,6 +3287,23 @@ function parseCSVLine(line) {
 // dropped by the column-count guard. Falls back to naive line splitting if the
 // quotes turn out to be unbalanced (a malformed paste), so a single stray quote
 // can't swallow the whole file into one record.
+// Sniff the delimiter from the first few lines: whichever candidate appears
+// most often outside quotes wins, with a comma as the tie-break default.
+function _detectDelimiter(lines) {
+  const candidates = [',', ';', '\t'];
+  const score = { ',': 0, ';': 0, '\t': 0 };
+  for (const line of lines.slice(0, 10)) {
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuotes = !inQuotes; continue; }
+      if (!inQuotes && candidates.indexOf(ch) >= 0) score[ch]++;
+    }
+  }
+  let best = ',';
+  for (const c of candidates) if (score[c] > score[best]) best = c;
+  return score[best] > 0 ? best : ',';
+}
 function splitCsvRecords(text) {
   const records = [];
   let cur = '';
@@ -3211,9 +3329,16 @@ function splitCsvRecords(text) {
   return records;
 }
 
-function parseNumber(val) {
+function parseNumber(val, decimalComma) {
   if (typeof val !== 'string') return NaN;
-  return parseFloat(val.replace(/[$,%]/g, '').replace(/\((.+)\)/, '-$1'));
+  let v = val.trim().replace(/\((.+)\)/, '-$1');
+  if (decimalComma) {
+    // European notation: 1.234,56 - dots group thousands, the comma is the
+    // decimal mark. Strip the groupers first, then normalise the comma.
+    v = v.replace(/\./g, '').replace(',', '.');
+    return parseFloat(v.replace(/[^0-9.\-]/g, ''));
+  }
+  return parseFloat(v.replace(/[$,%]/g, ''));
 }
 
 // Column name mappings for auto-detection
@@ -3271,7 +3396,11 @@ function detectColumns(headers) {
   costIdx = claim(tryMatch([
     'cost basis per share', 'cost/share', 'cost per share',
     'average cost', 'avg cost', 'avg price', 'average price',
-    'price paid', 'unit cost', 'purchase price', 'cost per'
+    // 'cost price' (Webull) has to be claimed HERE: the last/current-price
+    // detector below matches 'price' as a substring, so in a file whose only
+    // price-ish column is the cost, it would claim it and the position would
+    // import with no cost basis at all.
+    'price paid', 'unit cost', 'purchase price', 'cost price', 'cost per'
   ]));
 
   // 4. Total cost basis
@@ -3296,7 +3425,8 @@ function detectColumns(headers) {
   ]));
 
   // 7. Type/side
-  typeIdx = claim(tryMatch(['side', 'action', 'transaction type', 'order type', 'position type', 'transaction description', 'type']));
+  typeIdx = claim(tryMatch(['side', 'action', 'transaction type', 'order type', 'position type',
+    'transaction description', 'trans code', 'transaction code', 'activity type', 'type']));
 
   // Fallback: if neither per-share nor total cost was found, try bare "cost"
   if (costIdx < 0 && totalCostIdx < 0) {
@@ -3330,6 +3460,10 @@ function parseDate(val) {
 function parseImportData(text) {
   const lines = splitCsvRecords(text).map(l => l.trim()).filter(l => l.length > 0);
   if (lines.length === 0) return [];
+  const delim = _detectDelimiter(lines);
+  // A semicolon file is European Excel, where the comma is the decimal mark.
+  const decComma = delim === ';';
+  const num = (v) => parseNumber(v, decComma);
 
   // Scan first several lines for the header row (some brokers have metadata rows before headers)
   let symIdx = -1, sharesIdx = -1, costIdx = -1, totalCostIdx = -1, dateIdx = -1, typeIdx = -1, priceIdx = -1;
@@ -3338,7 +3472,7 @@ function parseImportData(text) {
   let _debugHeader = null; // for preview diagnostics
 
   for (let h = 0; h < Math.min(lines.length, 20); h++) {
-    const row = parseCSVLine(lines[h]);
+    const row = parseCSVLine(lines[h], delim);
     const detected = detectColumns(row);
     if (detected.symIdx >= 0 && detected.sharesIdx >= 0) {
       ({ symIdx, sharesIdx, costIdx, totalCostIdx, dateIdx, typeIdx, priceIdx } = detected);
@@ -3351,10 +3485,10 @@ function parseImportData(text) {
 
   if (!headerFound) {
     // No headers found — assume simple format: Symbol, Shares, Cost, Date
-    const firstRow = parseCSVLine(lines[0]);
+    const firstRow = parseCSVLine(lines[0], delim);
     symIdx = 0; sharesIdx = 1; costIdx = 2; dateIdx = firstRow.length >= 4 ? 3 : -1;
     // Check if first row looks like data (second field is a number)
-    if (firstRow.length >= 2 && !isNaN(parseNumber(firstRow[1]))) {
+    if (firstRow.length >= 2 && !isNaN(num(firstRow[1]))) {
       startLine = 0;
     } else {
       startLine = 1; // skip unknown header
@@ -3368,30 +3502,43 @@ function parseImportData(text) {
     if (/^(disclaimer|the data|brokerage|end of|total|cash|account total)/i.test(line)) continue;
     // Skip lines that look like section separators or empty-ish
     if (/^[-=,\s]+$/.test(line)) continue;
-    const cols = parseCSVLine(line);
+    const cols = parseCSVLine(line, delim);
     if (cols.length <= Math.max(symIdx, sharesIdx)) continue;
 
-    let symbol = (cols[symIdx] || '').toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+    let symbol = normalizeSymbolInput(cols[symIdx]);
     if (!symbol || symbol.length > 10) continue;
 
-    let shares = parseNumber(cols[sharesIdx]);
+    let shares = num(cols[sharesIdx]);
     if (isNaN(shares) || shares === 0) continue;
 
-    // Detect short positions from type/side column
+    // Detect short/sold lots from the type, side or transaction-code column.
+    // Brokers spell it several ways, and a transaction export uses the past
+    // tense ("Sold"/"SLD"), so a Robinhood history imported every sale as if it
+    // were another purchase - 10 bought and 4 sold became 14 shares held.
+    let isTxnRow = false;
     if (typeIdx >= 0 && cols[typeIdx]) {
       const type = cols[typeIdx].toLowerCase().trim();
-      if ((type === 'short' || type === 'sell' || type === 'sell short') && shares > 0) {
+      isTxnRow = /^(buy|bought|bot|sell|sold|sld|sale)\b/.test(type);
+      if (/^(short|sell|sold|sld|sale|sell short)\b/.test(type) && shares > 0) {
         shares = -shares;
       }
     }
 
     let costBasis = 0;
+    // In a transaction row the price IS what was paid per share, which is the
+    // cost basis; in a positions export the same column is today's market price
+    // and must not be mistaken for one. Only trust it when the row identified
+    // itself as a trade AND the file carries no cost column of its own.
+    if (isTxnRow && costIdx < 0 && totalCostIdx < 0 && priceIdx >= 0 && cols[priceIdx]) {
+      const paid = num(cols[priceIdx]);
+      if (isFinite(paid) && paid > 0) costBasis = paid;
+    }
     if (costIdx >= 0 && cols[costIdx]) {
       // Per-share cost column found (e.g., "Price Paid", "Avg Cost", "Cost Per Share")
-      costBasis = parseNumber(cols[costIdx]);
+      costBasis = num(cols[costIdx]);
     } else if (totalCostIdx >= 0 && cols[totalCostIdx]) {
       // Only total cost basis available — derive per-share cost
-      const total = parseNumber(cols[totalCostIdx]);
+      const total = num(cols[totalCostIdx]);
       if (!isNaN(total) && shares !== 0) costBasis = Math.abs(total / shares);
     }
     if (isNaN(costBasis)) costBasis = 0;
@@ -3399,7 +3546,7 @@ function parseImportData(text) {
     // Capture last/current price from CSV (useful when APIs are unavailable)
     let lastPrice = null;
     if (priceIdx >= 0 && cols[priceIdx]) {
-      const p = parseNumber(cols[priceIdx]);
+      const p = num(cols[priceIdx]);
       if (!isNaN(p) && p > 0) lastPrice = p;
     }
 
@@ -4650,7 +4797,136 @@ function _saMarketState(ms, es) {
 // Gold usually beats this via the tokenized overlay (PAXG/XAUT, ~35 ms and
 // real-time). This is what the other commodities have, and it is also what
 // gives gold a previous close on days the token overlay is all we have.
+// One commodity chart, fetched with hedged requests across Yahoo's two CDN
+// hosts. query1 and query2 fail independently and the proxy's failures are
+// transient, so a second, overlapping try converts most misses without waiting
+// for the first to time out. Returns a normalized quote or null; only aborts
+// throw.
+async function _fetchCommodityChart(sym, { signal, startHost = 1, deadline = COMMODITY_DEADLINE, hedgeDelay = COMMODITY_HEDGE_DELAY, maxAttempts = COMMODITY_MAX_ATTEMPTS } = {}) {
+  const t0 = Date.now();
+  const live = [];
+  let started = 0;
+  const addAttempt = () => {
+    const host = ((startHost + started) % 2 === 1) ? 'query1' : 'query2';
+    started++;
+    const url = 'https://' + host + '.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) +
+                '?range=2d&interval=5m&includePrePost=true';
+    const budget = Math.max(2500, deadline - (Date.now() - t0));
+    const attempt = fetchWithProxyRace(url, 3, budget, signal).then(text => {
+      const data = JSON.parse(text);
+      const r = data.chart && data.chart.result && data.chart.result[0];
+      const q = r ? normalizeYahooChart(sym, r) : null;
+      if (!q || q.price == null) throw new Error('empty chart');
+      return q;
+    });
+    // Losers of the race still settle later; give them a handler of their own so
+    // a late rejection isn't reported as unhandled.
+    attempt.catch(() => {});
+    live.push(attempt);
+  };
+
+  // Resolves the moment the refresh is cancelled, so a superseded refresh stops
+  // waiting on the hedge timer instead of lingering for seconds.
+  const abortSignalled = signal ? new Promise(r => {
+    if (signal.aborted) return r(null);
+    signal.addEventListener('abort', () => r(null), { once: true });
+  }) : null;
+
+  addAttempt();
+  for (;;) {
+    if (signal && signal.aborted) throw new DOMException('Refresh aborted', 'AbortError');
+    const left = deadline - (Date.now() - t0);
+    if (left <= 0) return null;
+    let timer;
+    const waiters = [
+      Promise.any(live),
+      new Promise(r => { timer = setTimeout(() => r(null), Math.min(hedgeDelay, left)); }),
+    ];
+    if (abortSignalled) waiters.push(abortSignalled);
+    const winner = await Promise.race(waiters).catch(() => null);  // null = every attempt so far has failed
+    clearTimeout(timer);
+    if (winner) return winner;
+    if (signal && signal.aborted) throw new DOMException('Refresh aborted', 'AbortError');
+    if (started >= maxAttempts || Date.now() - t0 >= deadline) {
+      // Out of attempts: wait out whatever is still in flight rather than
+      // discarding a request that may yet answer.
+      return await Promise.any(live).catch(() => null);
+    }
+    addAttempt();
+  }
+}
+
+// Detached retries for commodities that missed every in-refresh attempt. Without
+// this the row sat on "retrying..." until the next heavy refresh, which is up to
+// 30 s away on the default interval - long enough to read as broken on a first
+// visit, which is exactly how it was reported.
+const _commodityBackfillTimers = new Map(); // sym -> timeout id
+function scheduleCommodityBackfill(syms) {
+  for (const sym of syms) {
+    if (_commodityBackfillTimers.has(sym)) continue; // one chain per symbol
+    let attempt = 0, deferrals = 0;
+    const schedule = () => {
+      if (attempt >= COMMODITY_BACKFILL_DELAYS.length) { _commodityBackfillTimers.delete(sym); return; }
+      _commodityBackfillTimers.set(sym, setTimeout(run, COMMODITY_BACKFILL_DELAYS[attempt++]));
+    };
+    const run = async () => {
+      _commodityBackfillTimers.delete(sym);
+      // Drop it if the row is gone or somebody else already priced it.
+      if (!portfolio.some(pos => pos.symbol === sym)) return;
+      if (quoteData[sym] && quoteData[sym].price != null) return;
+      // Never compete with a live refresh for the single proxy - it is already
+      // trying this symbol itself. Re-check shortly WITHOUT consuming an
+      // attempt; deferrals used to eat the whole budget, so the backfill could
+      // expire having never issued a request.
+      if (refreshInProgress) {
+        if (deferrals++ < COMMODITY_BACKFILL_MAX_DEFERRALS) {
+          _commodityBackfillTimers.set(sym, setTimeout(run, COMMODITY_BACKFILL_DEFER));
+        }
+        return;
+      }
+      let q = null;
+      try {
+        q = await _fetchCommodityChart(sym, {
+          deadline: COMMODITY_BACKFILL_DEADLINE,
+          hedgeDelay: COMMODITY_BACKFILL_HEDGE,
+          maxAttempts: 2,   // patient, not noisy: at most two in flight per run
+          startHost: 1 + (attempt % 2),
+        });
+      } catch (_) {}
+      if (!q || q.price == null) { schedule(); return; }
+      if (!portfolio.some(pos => pos.symbol === sym)) return;
+      if (quoteData[sym] && quoteData[sym].price != null) return;
+      if (!q.name || q.name === sym) q.name = commodityName(sym);
+      if (q.delayedBy == null && !COMMODITY_REALTIME_PROXY[sym]) {
+        q.delayedBy = 15;
+        q.delayedNote = _futuresDelayNote(sym);
+      }
+      quoteData[sym] = q;
+      errorSymbols.delete(sym);
+      renderTable();
+      updateSummary();
+      saveQuotes();
+    };
+    schedule();
+  }
+}
+
+// How long a spot-covered metal's futures leg stays good for. Its only jobs are
+// supplying the previous close to convert onto the spot basis and the session
+// range; neither changes tick to tick, so re-fetching it every refresh spent
+// scarce proxy connections on a row that is already live from a direct source -
+// and starved the rows that have no alternative (crude, natural gas) of the
+// ~6 connections the browser allows to that single proxy host.
+const SPOT_BASIS_REFRESH_MS = 10 * 60 * 1000;
+function _spotBasisIsFresh(sym) {
+  if (!COMMODITY_SPOT_SYMBOL[sym]) return false;
+  const q = quoteData[sym];
+  return !!(q && q._spotBasis && q.price != null &&
+            Date.now() - (q._spotBasisAt || 0) < SPOT_BASIS_REFRESH_MS);
+}
+
 async function fetchCommodityQuotes(commoditySyms, signal) {
+  if (commoditySyms && commoditySyms.length) commoditySyms = commoditySyms.filter(s => !_spotBasisIsFresh(s));
   if (!commoditySyms || commoditySyms.length === 0) return null;
   const results = {};
   await Promise.all(commoditySyms.map(async (sym, i) => {
@@ -4659,14 +4935,8 @@ async function fetchCommodityQuotes(commoditySyms, signal) {
     if (i > 0) await new Promise(r => setTimeout(r, COMMODITY_STAGGER * i));
     if (signal && signal.aborted) return;
     try {
-      const chartUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) +
-                       '?range=2d&interval=5m&includePrePost=true';
-      const text = await fetchWithProxyRace(chartUrl, 3, PROXY_RACE_TIMEOUT, signal);
-      const data = JSON.parse(text);
-      if (data.chart && data.chart.result && data.chart.result[0]) {
-        const q = normalizeYahooChart(sym, data.chart.result[0]);
-        if (q && q.price) results[sym] = q;
-      }
+      const q = await _fetchCommodityChart(sym, { signal, deadline: COMMODITY_DEADLINE });
+      if (q) results[sym] = q;
     } catch (e) {
       // Silent: a commodity that misses here is retried after wave 2, and a
       // valid futures symbol must never be marked an unknown ticker.
@@ -6107,26 +6377,32 @@ async function _refreshAll(signal) {
   // Race proxies in parallel so this doesn't block the UI for 12+ seconds per symbol.
   // Wave 1 already raced these; this is now a genuine second chance for the ones
   // that failed, not the primary path.
-  const missingCommodities = symbols.filter(s => isCommoditySymbol(s) && !allResults.some(r => r && r.data[s]));
+  // A metal priced live by the spot overlay never appears in a source result,
+  // so without the delayedBy check it would look "missing" and burn a proxy
+  // retry every refresh despite already showing a live price.
+  const missingCommodities = symbols.filter(s => isCommoditySymbol(s) &&
+    !allResults.some(r => r && r.data[s]) &&
+    !(quoteData[s] && quoteData[s].price != null && quoteData[s].delayedBy === 0));
   if (missingCommodities.length > 0) {
     const retryPromises = missingCommodities.map(async (sym, i) => {
       if (i > 0) await new Promise(r => setTimeout(r, COMMODITY_STAGGER * i));
       try {
-        const chartUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true';
-        const text = await fetchWithProxyRace(chartUrl, 4, 8000, signal);
-        const data = JSON.parse(text);
-        if (data.chart && data.chart.result && data.chart.result[0]) {
-          const q = normalizeYahooChart(sym, data.chart.result[0]);
-          if (q && q.price) {
-            quoteData[sym] = q;
-            errorSymbols.delete(sym);
-          }
+        // Start on query2: wave 1 just tried query1 for this symbol.
+        const q = await _fetchCommodityChart(sym, { signal, startHost: 2, deadline: COMMODITY_RETRY_DEADLINE });
+        if (q) {
+          quoteData[sym] = q;
+          errorSymbols.delete(sym);
         }
       } catch (e) {
         // Don't mark known commodities as errors — they're valid symbols, proxy just failed
       }
     });
     await Promise.all(retryPromises);
+    // Anything STILL missing keeps trying in the background rather than waiting
+    // out the gap to the next heavy refresh.
+    if (!(signal && signal.aborted)) {
+      scheduleCommodityBackfill(missingCommodities.filter(s => !(quoteData[s] && quoteData[s].price != null)));
+    }
   }
 
   // Fetch the real-time tokenized-commodity overlay (currently PAXG for gold)
@@ -6379,7 +6655,7 @@ async function _refreshAll(signal) {
     if (!q || q.price == null || q.delayedBy != null) continue;
     if (COMMODITY_REALTIME_PROXY[sym]) continue; // live via its token overlay
     q.delayedBy = 15;
-    q.delayedNote = 'Futures feed is delayed at the exchange';
+    q.delayedNote = _futuresDelayNote(sym);
   }
 
   // Apply FinnHub fundamentalsCache to fill gaps (in case FinnHub wasn't primary source)
@@ -8204,11 +8480,25 @@ function openAlertPopover(symbol, el) {
   const a = alerts[symbol] || {};
   document.getElementById('alert-above').value = a.above != null ? a.above : '';
   document.getElementById('alert-below').value = a.below != null ? a.below : '';
-  // Position near the clicked element
+  // Position near the clicked element, clamped into the viewport. The popover
+  // must be displayed before measuring: offsetWidth/Height are 0 while hidden.
+  // Without the vertical clamp, a bell on one of the last rows opened the box
+  // ~122px below the fold on a phone, putting Set and Clear out of reach - the
+  // row and analyst menus already flip for exactly this reason.
   const rect = el.getBoundingClientRect();
   pop.style.display = 'block';
-  pop.style.left = Math.min(rect.left, window.innerWidth - 240) + 'px';
-  pop.style.top = (rect.bottom + 4) + 'px';
+  const pad = 4;
+  const pw = pop.offsetWidth || 220;
+  const ph = pop.offsetHeight || 130;
+  let left = Math.min(rect.left, window.innerWidth - pw - pad);
+  if (left < pad) left = pad;
+  let top = rect.bottom + pad;
+  if (top + ph > window.innerHeight - pad) {
+    const above = rect.top - ph - pad;          // flip above the anchor
+    top = above >= pad ? above : Math.max(pad, window.innerHeight - ph - pad);
+  }
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
   // Auto-focus the "Above" input so Enter immediately saves
   setTimeout(() => {
     const inp = document.getElementById('alert-above');
@@ -9132,7 +9422,7 @@ function sanitizePortfolio(list) {
   const out = [];
   for (const p of list) {
     if (!p || typeof p !== 'object') continue;
-    const symbol = String(p.symbol == null ? '' : p.symbol).toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+    const symbol = normalizeSymbolInput(p.symbol);
     if (!symbol) continue;
     const shares = parseFloat(p.shares);
     const cost = parseFloat(p.costBasis);
@@ -9508,7 +9798,7 @@ function loadFromURL() {
   for (const part of parts) {
     const [rawSym, shares, cost, date] = part.split(':');
     if (!rawSym) continue;
-    const symbol = rawSym.toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+    const symbol = normalizeSymbolInput(rawSym);
     if (!symbol || symbol.length > 10) continue; // sanitize + length-limit
     const sh = parseFloat(shares);
     if (!isFinite(sh) || sh === 0) continue; // skip malformed entries
@@ -9987,28 +10277,58 @@ function connectStreams() {
 
 // ==================== STREAM SUBSCRIPTIONS ====================
 // Decide which positions each stream carries, then diff against what each is
-// currently subscribed to. Positions are ranked by size — cost-basis value,
-// which is stable across price ticks (ranking by live market value would thrash
-// subscriptions whenever a price wobbled near a cutoff), falling back to market
-// value for positions with no cost basis entered.
+// currently subscribed to. Positions are ranked by size, and what "size" means
+// here had to change:
+//
+// Ranking by COST BASIS was wrong twice over. Cost basis is optional, so a
+// portfolio that never entered one ranked every position at zero and streamed
+// essentially at random; and a long-held winner bought at a tenth of today's
+// price ranked at a tenth of its real weight, which is precisely backwards -
+// the position most worth streaming looked like the least. Worse, the old code
+// fell back to market value only for the rows missing a basis, so the sort
+// compared two different quantities against each other.
+//
+// Ranking by LIVE market value is the obvious fix and the wrong one: a price
+// wobbling either side of the 30th-place cutoff would resubscribe both streams
+// all day.
+//
+// So: market value at a SESSION-STABLE price. Previous close is fixed for the
+// whole session, so the ranking is as steady as cost basis was while actually
+// reflecting position size. Open is the next best (fixed once trading starts),
+// then the current price, and only a quote-less row - the first seconds of a
+// cold load - falls back to cost basis.
 //
 // Alpaca, when live, takes the largest positions up to its cap. FinnHub takes the
 // next ones up to its own 50-symbol cap, so a portfolio with both keys streams up
 // to 80 positions. When Alpaca isn't live, FinnHub goes back to the top 50.
+// A price that does not move during the session, so the ranking built from it
+// doesn't either.
+function _stableRefPrice(q) {
+  if (!q) return null;
+  if (typeof q.prevClose === 'number' && isFinite(q.prevClose) && q.prevClose > 0) return q.prevClose;
+  if (typeof q.open === 'number' && isFinite(q.open) && q.open > 0) return q.open;
+  if (typeof q.price === 'number' && isFinite(q.price) && q.price > 0) return q.price;
+  return null;
+}
 function _rankedStreamSymbols() {
   const posBySym = new Map(portfolio.map(p => [p.symbol, p]));
   const sizeOf = sym => {
     const pos = posBySym.get(sym);
     if (!pos) return 0;
-    const basis = Math.abs(pos.shares) * (pos.costBasis || 0);
-    if (basis > 0) return basis;
-    const q = quoteData[sym];
-    return (q && q.price != null) ? Math.abs(pos.shares * q.price) : 0;
+    const ref = _stableRefPrice(quoteData[sym]);
+    // Shares can be negative (shorts); a big short is still a big position.
+    if (ref != null) return Math.abs(pos.shares) * ref;
+    // No quote yet. Cost basis is the only size signal that exists this early,
+    // and the refresh re-syncs subscriptions the moment real prices land.
+    return Math.abs(pos.shares) * (pos.costBasis || 0);
   };
   return portfolio
     .map(p => p.symbol)
     .filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s))
-    .sort((a, b) => sizeOf(b) - sizeOf(a));
+    // Symbol as the tiebreak so equal-sized rows (notably a cold load where
+    // every size is 0) order deterministically instead of drifting between
+    // renders and churning subscriptions for no reason.
+    .sort((a, b) => (sizeOf(b) - sizeOf(a)) || a.localeCompare(b));
 }
 // Alpaca's stream is US equities only and uses dotted share classes (BRK.B).
 // A symbol in any other shape could get a whole subscription batch rejected, so
@@ -10141,6 +10461,43 @@ function _preserveAcrossTick(fresh, existing, fields) {
 // an existing quote. The heavy refresh and both light-tick paths carried three
 // byte-identical copies of this.
 function _applyRealtimeCommodity(q, sym, rt) {
+  if (rt.spot) {
+    // Spot feeds send a price and nothing else, and they quote SPOT while the
+    // row is a dated futures contract - silver spot 64.93 against "Silver Dec
+    // 26" at 65.15, for instance. Carrying the futures previous close across
+    // untouched would fold that basis straight into the day change: 0.34% of
+    // $65 is $0.22, against a typical daily move of about $1. So convert the
+    // previous close onto the spot basis using the ratio between the two
+    // prices as observed at the same instant, before the futures price is
+    // overwritten. Done once per quote object; a heavy refresh replaces that
+    // object with a fresh futures one, which re-arms the conversion.
+    const futPrice = q.price, futPrev = q.prevClose;
+    q.price = rt.price;
+    if (!q._spotBasis && futPrice != null && futPrev != null && futPrice > 0) {
+      const ratio = rt.price / futPrice;
+      q.prevClose = futPrev * ratio;
+      if (q.dayHigh != null) q.dayHigh *= ratio;
+      if (q.dayLow != null) q.dayLow *= ratio;
+      q._spotBasis = true;
+      q._spotBasisAt = Date.now();
+    }
+    if (q.prevClose != null) {
+      q.change = q.price - q.prevClose;
+      q.changePct = (q.change / q.prevClose) * 100;
+    } else {
+      // No futures quote to convert against (the proxy is down). Show the live
+      // price with an honest dash for the change rather than inventing one -
+      // and the row is priced at all, instead of sitting on "retrying...".
+      q.change = null;
+      q.changePct = null;
+    }
+    if (q.dayHigh != null && q.price > q.dayHigh) q.dayHigh = q.price;
+    if (q.dayLow != null && q.price < q.dayLow) q.dayLow = q.price;
+    if (!q.name || q.name === sym) q.name = commodityName(sym);
+    q.delayedBy = 0; q.delayedNote = null;
+    q._lastUpdate = Date.now();
+    return;
+  }
   q.price = rt.price;
   // PAXG carries a 24h "open" we use as prevClose so gold shows a day change even
   // off-hours, when Yahoo (the usual futures prevClose source) isn't queried.
@@ -10264,8 +10621,74 @@ async function _krakenCommodityStats(pairs) {
   } catch (_) { /* fall through to null — caller keeps the delayed price */ }
   return null;
 }
+// Spot metals, keyless and direct-CORS (Access-Control-Allow-Origin: *), so
+// these rows never touch the proxy fleet. This is the answer to the only
+// commodities that had no real-time route: a tokenized stand-in exists for gold
+// and nothing else (PAXG does ~$177M/day; the nearest silver token, Kinesis
+// KAG, does ~$84K and is listed on none of the venues this app can reach).
+// Verified against a live reference: XAU read 4333.30 while PAXG traded at
+// 4333.35, and the feed restamps every 30 s.
+//
+// These are SPOT prices; the rows are dated futures contracts. _applyRealtimeCommodity
+// converts the previous close onto the spot basis so the day change stays
+// honest. Copper is 'HG' here, not the XCU you would expect.
+// Commodities with no real-time route at all (no token, no spot feed): crude,
+// Brent, natural gas and the ags. There IS a real-time, keyless, direct-CORS
+// quote for an ETF that tracks each - but an ETF is a different instrument, not
+// a better feed (USO trades near $162 while WTI is near $104, and the ratio
+// drifts with roll), so it is offered as a pointer in the delay tooltip rather
+// than silently substituted for the price.
+const COMMODITY_ETF_HINT = {
+  'CL=F': 'USO', 'BZ=F': 'BNO', 'NG=F': 'UNG',
+  'ZC=F': 'CORN', 'ZW=F': 'WEAT', 'ZS=F': 'SOYB', 'SB=F': 'CANE',
+};
+function _futuresDelayNote(sym) {
+  const etf = COMMODITY_ETF_HINT[sym];
+  return 'Futures feed is delayed at the exchange' +
+         (etf ? ' (' + etf + ' tracks it in real time)' : '');
+}
+const COMMODITY_SPOT_SYMBOL = {
+  'GC=F': 'XAU',  // gold: only reached when both token venues fail
+  'SI=F': 'XAG',
+  'PL=F': 'XPT',
+  'PA=F': 'XPD',
+  'HG=F': 'HG',
+};
+const SPOT_METAL_TIMEOUT = 2500;
+const SPOT_METAL_TTL = 12000;             // upstream restamps every ~30 s
+const SPOT_METAL_FAIL_THRESHOLD = 3;
+const SPOT_METAL_COOLDOWN = 60000;
+const _spotMetalCache = new Map();        // code -> { price, t }
+let _spotMetalSkipUntil = 0;
+let _spotMetalFailStreak = 0;
+// An anonymous free service with no SLA, so it is strictly an overlay: every
+// failure falls straight back to the delayed futures quote underneath.
+async function _spotMetalPrice(code) {
+  const hit = _spotMetalCache.get(code);
+  if (hit && Date.now() - hit.t < SPOT_METAL_TTL) return hit.price;
+  if (Date.now() < _spotMetalSkipUntil) return null;
+  try {
+    const r = await fetch('https://api.gold-api.com/price/' + encodeURIComponent(code),
+                          { signal: AbortSignal.timeout(SPOT_METAL_TIMEOUT) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    const price = Number(j && j.price);
+    if (!isFinite(price) || price <= 0) throw new Error('no price');
+    _spotMetalFailStreak = 0;
+    _spotMetalCache.set(code, { price, t: Date.now() });
+    return price;
+  } catch (_) {
+    if (++_spotMetalFailStreak >= SPOT_METAL_FAIL_THRESHOLD) {
+      _spotMetalSkipUntil = Date.now() + SPOT_METAL_COOLDOWN;
+      _spotMetalFailStreak = 0;
+      dbg('spot metals unreachable - backing off for ' + (SPOT_METAL_COOLDOWN / 1000) + 's');
+    }
+    return null;
+  }
+}
+
 async function _overlayRealtimeCommodities(commoditySyms) {
-  const targets = commoditySyms.filter(s => COMMODITY_REALTIME_PROXY[s] || COMMODITY_KRAKEN_PROXY[s]);
+  const targets = commoditySyms.filter(s => COMMODITY_REALTIME_PROXY[s] || COMMODITY_KRAKEN_PROXY[s] || COMMODITY_SPOT_SYMBOL[s]);
   if (targets.length === 0) return null;
   const cbOpen = Date.now() >= _cbSkipUntil; // Coinbase breaker closed?
   const overlay = {}; // user sym → { price, prevClose?, dayHigh?, dayLow? }
@@ -10276,8 +10699,15 @@ async function _overlayRealtimeCommodities(commoditySyms) {
     let st = null;
     if (cbOpen && COMMODITY_REALTIME_PROXY[sym]) st = await _coinbaseStats(COMMODITY_REALTIME_PROXY[sym]);
     if (!st && COMMODITY_KRAKEN_PROXY[sym]) st = await _krakenCommodityStats(COMMODITY_KRAKEN_PROXY[sym]);
+    // Last tier: spot. For silver/platinum/palladium/copper it is the ONLY
+    // real-time route (no token exists); for gold it is a third fallback behind
+    // Coinbase and Kraken.
+    if (!st && COMMODITY_SPOT_SYMBOL[sym]) {
+      const spot = await _spotMetalPrice(COMMODITY_SPOT_SYMBOL[sym]);
+      if (spot != null) st = { price: spot, spot: true };
+    }
     if (!st) return;
-    overlay[sym] = { price: st.price, prevClose: st.prevClose, dayHigh: st.dayHigh, dayLow: st.dayLow };
+    overlay[sym] = { price: st.price, prevClose: st.prevClose, dayHigh: st.dayHigh, dayLow: st.dayLow, spot: st.spot === true };
   }));
   return Object.keys(overlay).length > 0 ? overlay : null;
 }
@@ -10635,6 +11065,39 @@ function _closeWelcome() {
   }
   _welcomeLastFocus = null;
 }
+// WebKit's tracking prevention deletes all script-writable storage - localStorage
+// included - after seven days of browser use without a visit to the site. Every
+// position, alert and key this app has lives in localStorage, so a Safari user
+// who looks away for a week can come back to an empty portfolio. Chrome and
+// Firefox don't do this, so the notice is shown only where it is true.
+//
+// Every iOS browser is WebKit under the hood and inherits the same limit, so the
+// test is "WebKit and not Chromium/Gecko", which covers Safari on macOS and
+// every browser on iOS/iPadOS.
+function _isWebKitStorageCapped() {
+  const ua = navigator.userAgent;
+  const iOS = /iP(hone|od|ad)/.test(ua) ||
+              (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPadOS 13+ claims to be a Mac
+  const safariDesktop = /Safari/.test(ua) && !/Chrome|Chromium|Edg|OPR|Firefox/.test(ua) &&
+                        (navigator.vendor || '').indexOf('Apple') === 0;
+  return iOS || safariDesktop;
+}
+function dismissStorageNotice() {
+  const el = document.getElementById('storage-notice');
+  if (el) el.classList.remove('show');
+  safeSet('stonks_storage_notice_seen', '1');
+}
+// Only worth saying once, and only once there is something to lose: on an empty
+// portfolio the warning is noise. If storage really is wiped, the dismissal flag
+// goes with it and the notice returns - which is the right behaviour, since by
+// then the user has just lived through the thing it warns about.
+function maybeShowStorageNotice() {
+  if (!_isWebKitStorageCapped()) return;
+  if (localStorage.getItem('stonks_storage_notice_seen') === '1') return;
+  if (!portfolio || portfolio.length === 0) return;
+  const el = document.getElementById('storage-notice');
+  if (el) el.classList.add('show');
+}
 function showWelcomeBanner(force) {
   const wrap = document.getElementById('welcome-wrap');
   if (force) {
@@ -10748,13 +11211,14 @@ syncHScrollProxy();
 initDragReorder();
 initRowContextMenu();  // right-click on Symbol / Name cells
 showWelcomeBanner();
+maybeShowStorageNotice();  // Safari-only: 7-day storage cap (no-op elsewhere)
 initAlpacaStreamSetting();
 // Streams connect immediately rather than after the first full refresh. Waiting
-// bought nothing — subscriptions are ranked from the portfolio, not from loaded
-// quotes, and a trade for a row with no quote yet is skipped harmlessly — but it
-// cost live prices at startup: the first refresh can take 10+ seconds when the
-// proxied sources are slow. The refresh re-syncs subscriptions when it lands,
-// once cost-basis-less positions can be ranked by market value.
+// bought nothing — a trade for a row with no quote yet is skipped harmlessly —
+// but it cost live prices at startup: the first refresh can take 10+ seconds
+// when the proxied sources are slow. The refresh re-syncs subscriptions when it
+// lands, which is also when ranking switches from the cold-start cost-basis
+// fallback to real market value.
 connectStreams();
 if (portfolio.length > 0) refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
 // Warm sample-data quotes in the background for first-time users (empty portfolio,
