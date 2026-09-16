@@ -2159,6 +2159,15 @@ const YF_CRUMB_TTL = 30 * 60 * 1000;     // crumbs expire ~30 minutes
 const YF_V7_RETRY_MS = 3 * 60 * 1000;    // retry v7 after 3 minutes
 const WS_FRESH_MS = 10000;               // how recent a WS trade must be to skip REST quote
 const WS_STALE_THRESHOLD = 60000;         // flag WS as "no data" if no trades in this long during active hours
+// Per-symbol failover from Alpaca to FinnHub. Alpaca's free stream carries IEX
+// only, which is a single venue with a few percent of consolidated volume, so a
+// thinly-traded name can sit silent there for minutes while printing elsewhere.
+// FinnHub's free stream isn't tied to one exchange, so those symbols are better
+// off there. The connection itself is only worth suspecting when OTHER symbols
+// on it are printing - otherwise it's a quiet market, not a bad feed, and
+// shuffling subscriptions would achieve nothing.
+const WS_SYMBOL_QUIET_MS = 180000;        // no trade for this long => hand it over
+const WS_STREAM_ALIVE_MS = 60000;         // ...but only if the stream printed something this recently
 const OFF_HOURS_FULL_INTERVAL = 60000;    // min interval between full off-hours refreshes
 const WS_RECONNECT_DELAY = 5000;
 const WS_HEALTHY_MS = 30000;              // socket must stay open this long to clear the reconnect backoff
@@ -2322,6 +2331,19 @@ let _alpacaWsHalt = null;               // { code, note } once Alpaca refuses in
 let wsRenderPending = false; // debounce WebSocket-triggered renders
 let wsOpenedAt = 0; // time WS last opened (for stale-stream grace period)
 let wsLastAnyTrade = 0; // time any WS trade last arrived (0 = none since open)
+// Per-stream last-trade times, so the indicator can say WHICH stream went quiet
+// instead of guessing, and so failover can tell "this symbol is silent" from
+// "this whole stream is silent".
+let alpacaLastTrade = 0;
+let finnhubLastTrade = 0;
+// Symbols pulled off Alpaca because it had no trades for them. They stay with
+// FinnHub until Alpaca reconnects, which is the natural reset point: a fresh
+// socket may well be a different story, and re-litigating every sync would
+// bounce a borderline symbol between streams all session.
+const _alpacaQuietSyms = new Set();
+// When each symbol's Alpaca subscription was confirmed — a symbol can't be
+// judged quiet before it has had time to print.
+const _alpacaSubAt = new Map();
 let fetchedSummary = new Set(); // track symbols we already fetched quoteSummary for
 let fetchedAfterHours = new Set(); // track symbols we already tried after-hours fetch for
 // sym -> last time the after-hours hunt tried it and found nothing. Overnight
@@ -9899,18 +9921,39 @@ function updateWsIndicator() {
       && wsOpenedAt > 0
       && subscribedCount > 0
       && sinceLast > WS_STALE_THRESHOLD;
+    // Which stream is quiet, rather than guessing from whichever is connected.
+    // Each is judged on its own last trade, falling back to when subscriptions
+    // were last (re)made, and only counts if it is actually carrying symbols.
+    const quietNames = [];
+    if (isRegularMarketHours() && wsOpenedAt > 0) {
+      if (alpacaLive && alpacaWsSubscribed.size > 0 &&
+          Date.now() - (alpacaLastTrade || wsOpenedAt) > WS_STALE_THRESHOLD) quietNames.push('Alpaca');
+      if (wsConnected && wsSubscribedSymbols.size > 0 &&
+          Date.now() - (finnhubLastTrade || wsOpenedAt) > WS_STALE_THRESHOLD) quietNames.push('FinnHub');
+    }
+    // Symbols already handed over, so the tooltip explains the split rather than
+    // leaving the user to wonder why a big position moved streams.
+    const _moved = _alpacaQuietSyms.size;
+    const movedNote = _moved
+      ? (_moved === 1
+          ? ' 1 symbol moved to FinnHub after Alpaca had no trades for it.'
+          : ' ' + _moved + ' symbols moved to FinnHub after Alpaca had no trades for them.')
+      : '';
     if (stale) {
       el.style.color = '#c93';
       el.textContent = '\u25CF Live (no data)';
-      el.title = 'Streaming via ' + via + ', but no trades have arrived in the last minute. '
+      el.title = 'Streaming via ' + via + ', but no trades have arrived in the last minute'
+        + (quietNames.length ? ' (quiet: ' + quietNames.join(' and ') + ')' : '') + '. '
         + (alpacaLive
           ? 'Alpaca\u2019s free stream only carries trades on the IEX exchange, which can be quiet for less-traded stocks. '
           : 'FinnHub\u2019s free plan may not include real-time US stock data. ')
-        + 'Prices keep refreshing on the normal schedule.';
+        + 'Prices keep refreshing on the normal schedule.' + movedNote;
     } else {
       el.style.color = '#3c8';
       el.textContent = '\u25CF Live';
-      el.title = 'Real-time trades streaming via ' + via;
+      el.title = 'Real-time trades streaming via ' + via
+        + (quietNames.length ? '. No trades from ' + quietNames.join(' or ') + ' in the last minute; the other stream is still printing.' : '')
+        + movedNote;
     }
     if (statusEl.textContent.includes('Data via') && !statusEl.textContent.includes('WS streaming')) {
       statusEl.textContent += ' | WS streaming';
@@ -9926,7 +9969,7 @@ function updateWsIndicator() {
 // function, so a row behaves identically whichever stream its price came from:
 // same flash, same change recalculation, same alert check, same render batching.
 // `latest` maps symbol -> latest trade price from one message batch.
-function _applyStreamTrades(latest) {
+function _applyStreamTrades(latest, source) {
   let updated = false;
   for (const sym of Object.keys(latest)) {
     const price = Number(latest[sym]);
@@ -9970,7 +10013,11 @@ function _applyStreamTrades(latest) {
     wsLastTradeTime[sym] = Date.now();
     updated = true;
   }
-  if (updated) wsLastAnyTrade = Date.now();
+  if (updated) {
+    wsLastAnyTrade = Date.now();
+    if (source === 'alpaca') alpacaLastTrade = wsLastAnyTrade;
+    else if (source === 'finnhub') finnhubLastTrade = wsLastAnyTrade;
+  }
   // Debounce renders — batch all trades within one animation frame
   // Skip rendering if a full REST refresh is in progress (it will render when done)
   if (updated && !wsRenderPending && !refreshInProgress) {
@@ -10054,7 +10101,7 @@ function connectFinnhubWebSocket() {
         for (const trade of msg.data) {
           if (trade && typeof trade.s === 'string' && trade.p) latest[trade.s] = trade.p;
         }
-        _applyStreamTrades(latest);
+        _applyStreamTrades(latest, 'finnhub');
       }
     } catch (e) {
       // Ignore parse errors from ping/pong frames
@@ -10191,6 +10238,11 @@ function connectAlpacaWebSocket() {
   alpacaWs = sock;
   alpacaWsAuthed = false;
   alpacaWsSubscribed.clear();
+  // A new socket gets a clean slate: symbols handed to FinnHub because the last
+  // connection was silent on them are eligible for Alpaca again.
+  _alpacaQuietSyms.clear();
+  _alpacaSubAt.clear();
+  alpacaLastTrade = 0;
   renderAlpacaStreamStatus();
 
   sock.onmessage = (event) => {
@@ -10221,6 +10273,13 @@ function connectAlpacaWebSocket() {
         // The server's list is the source of truth — including after a
         // rejected request, when our view of what's subscribed would be wrong.
         alpacaWsSubscribed = new Set(Array.isArray(m.trades) ? m.trades.filter(x => typeof x === 'string') : []);
+        // Start each symbol's quiet clock when the server confirms it, not when
+        // we asked: an unconfirmed symbol was never really subscribed.
+        {
+          const _now = Date.now();
+          for (const sym of alpacaWsSubscribed) if (!_alpacaSubAt.has(sym)) _alpacaSubAt.set(sym, _now);
+          for (const sym of [..._alpacaSubAt.keys()]) if (!alpacaWsSubscribed.has(sym)) _alpacaSubAt.delete(sym);
+        }
         updateWsIndicator();
         renderAlpacaStreamStatus();
       } else if (m.T === 'error') {
@@ -10250,7 +10309,7 @@ function connectAlpacaWebSocket() {
         }
       }
     }
-    if (Object.keys(latest).length) _applyStreamTrades(latest);
+    if (Object.keys(latest).length) _applyStreamTrades(latest, 'alpaca');
   };
 
   sock.onerror = () => { /* onclose follows and handles recovery */ };
@@ -10346,9 +10405,39 @@ function _rankedStreamSymbols() {
 function _alpacaStreamable(sym) {
   return /^[A-Z]{1,5}(\.[A-C])?$/.test(sym);
 }
+// Move symbols Alpaca is silent on over to FinnHub. Returns true if the split
+// changed, in which case the caller re-syncs. Deliberately conservative: it only
+// fires while the regular session is open (pre/post-market on IEX is thin enough
+// that silence means nothing), only when FinnHub is connected with room to take
+// them, and only when Alpaca is demonstrably working — some other symbol on that
+// same socket printed within the last WS_STREAM_ALIVE_MS. That last condition is
+// what separates "this symbol is quiet" from "the market is quiet", and it also
+// means a single-symbol subscription can never exile itself.
+function reviewQuietAlpacaSymbols() {
+  if (!_alpacaStreamLive() || !wsConnected) return false;
+  if (!isRegularMarketHours()) return false;
+  if (wsSubscribedSymbols.size >= MAX_WS_SYMBOLS) return false;   // nowhere to put them
+  const now = Date.now();
+  if (!alpacaLastTrade || now - alpacaLastTrade > WS_STREAM_ALIVE_MS) return false;
+  let changed = false;
+  for (const sym of alpacaWsSubscribed) {
+    if (_alpacaQuietSyms.has(sym)) continue;
+    const since = wsLastTradeTime[sym] || _alpacaSubAt.get(sym) || 0;
+    if (!since || now - since < WS_SYMBOL_QUIET_MS) continue;
+    _alpacaQuietSyms.add(sym);
+    changed = true;
+    dbg('alpaca quiet on ' + sym + ' — handing it to FinnHub');
+  }
+  return changed;
+}
+
 function syncWsSubscriptions() {
   const ranked = _rankedStreamSymbols();
-  const alpacaWant = new Set(_alpacaStreamLive() ? ranked.filter(_alpacaStreamable).slice(0, _alpacaWsSymbolCap) : []);
+  // Quiet symbols are excluded from Alpaca's set, which both frees the slot for
+  // the next-largest position and drops them into FinnHub's list below.
+  const alpacaWant = new Set(_alpacaStreamLive()
+    ? ranked.filter(s => _alpacaStreamable(s) && !_alpacaQuietSyms.has(s)).slice(0, _alpacaWsSymbolCap)
+    : []);
 
   // --- Alpaca: one batched request each way. No optimistic bookkeeping: the
   // server answers with a "subscription" message that replaces our set.
@@ -10913,6 +11002,8 @@ function setupAutoRefresh() {
     // "Live (no data)" within one auto-refresh interval, independent of
     // the auto-refresh checkbox.
     updateWsIndicator();
+    // Hand over any symbol Alpaca has gone quiet on (see reviewQuietAlpacaSymbols).
+    if (reviewQuietAlpacaSymbols()) { syncWsSubscriptions(); updateWsIndicator(); }
     if (document.hidden) {
       if (Date.now() - _lastHiddenTick < HIDDEN_TAB_REFRESH_MS) { _hiddenTickSkipped = true; return; }
       _lastHiddenTick = Date.now();
