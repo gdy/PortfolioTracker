@@ -10447,23 +10447,31 @@ function reviewQuietAlpacaSymbols() {
     // missing prints, not the market standing still. This is the proof that
     // works when the portfolio holds a single stock.
     if (vol != null) {
-      if (!seen) { _restVolSeen.set(sym, { vol, t: now }); continue; }
-      if (now - seen.t > WS_VOL_WINDOW_MAX_MS) { _restVolSeen.set(sym, { vol, t: now }); continue; }
+      if (!seen) { _restVolSeen.set(sym, { vol, t: now, qAt: q._lastUpdate || now }); continue; }
+      if (now - seen.t > WS_VOL_WINDOW_MAX_MS) { _restVolSeen.set(sym, { vol, t: now, qAt: q._lastUpdate || now }); continue; }
+      // The baseline READING has to come from the session too, not just the
+      // moment we took it. The review starts at 09:30, but the quote in hand can
+      // still be a pre-open one; three minutes later its volume has grown by the
+      // whole opening auction, which no amount of IEX streaming would have
+      // carried, and the symbol gets blamed for it. The closing cross is the same
+      // trade in reverse - which is the real reason this stays inside regular
+      // hours rather than following the extended session.
+      if (!isRegularMarketHours(seen.qAt)) { _restVolSeen.set(sym, { vol, t: now, qAt: q._lastUpdate || now }); continue; }
       const windowLongEnough = now - seen.t >= WS_SYMBOL_QUIET_MS;
       if (vol > seen.vol) {
         if (windowLongEnough && quietSince && quietSince <= seen.t) {
           _alpacaQuietSyms.add(sym);
           changed = true;
           dbg('alpaca missed ' + (vol - seen.vol) + ' shares of ' + sym + ' volume — handing it to FinnHub');
-          _restVolSeen.set(sym, { vol, t: now });
+          _restVolSeen.set(sym, { vol, t: now, qAt: q._lastUpdate || now });
           continue;
         }
         // Traded, and the stream did report it: slide the window forward.
-        if (quietSince > seen.t) _restVolSeen.set(sym, { vol, t: now });
+        if (quietSince > seen.t) _restVolSeen.set(sym, { vol, t: now, qAt: q._lastUpdate || now });
       } else if (windowLongEnough) {
         // No trades at all in the window - the stock is genuinely idle, so the
         // stream isn't at fault. Start a fresh window rather than accusing it.
-        _restVolSeen.set(sym, { vol, t: now });
+        _restVolSeen.set(sym, { vol, t: now, qAt: q._lastUpdate || now });
       }
       continue;
     }
@@ -10531,8 +10539,8 @@ function syncWsSubscriptions() {
 // US Eastern wall-clock as a Date whose UTC fields read as ET. Uses UTC offset
 // arithmetic (not toLocaleString) to avoid locale/polyfill issues. DST per the
 // 2nd-Sunday-March / 1st-Sunday-November rule.
-function _etNow() {
-  const now = new Date();
+function _etNow(ts) {
+  const now = ts != null ? new Date(ts) : new Date();
   const utcMs = now.getTime();
   const year = now.getUTCFullYear();
   const mar1 = new Date(Date.UTC(year, 2, 1)); // March 1
@@ -10557,8 +10565,8 @@ function getMarketPhase() {
 }
 // True during the US regular cash session (9:30am-4:00pm ET, weekdays) — the
 // window in which there is NO current pre/post-market price to show.
-function isRegularMarketHours() {
-  const et = _etNow();
+function isRegularMarketHours(ts) {
+  const et = _etNow(ts);
   const day = et.getUTCDay();
   if (day === 0 || day === 6) return false;
   const mins = et.getUTCHours() * 60 + et.getUTCMinutes();
