@@ -2344,6 +2344,11 @@ const _alpacaQuietSyms = new Set();
 // When each symbol's Alpaca subscription was confirmed — a symbol can't be
 // judged quiet before it has had time to print.
 const _alpacaSubAt = new Map();
+// sym -> { vol, t }: cumulative day volume from the REST feed, and when it was
+// sampled. Rising volume with no streamed trade in the same window is direct
+// evidence the stream is missing prints for that symbol - evidence that works
+// for a one-stock portfolio, where "another symbol is printing" cannot.
+const _restVolSeen = new Map();
 let fetchedSummary = new Set(); // track symbols we already fetched quoteSummary for
 let fetchedAfterHours = new Set(); // track symbols we already tried after-hours fetch for
 // sym -> last time the after-hours hunt tried it and found nothing. Overnight
@@ -10242,6 +10247,7 @@ function connectAlpacaWebSocket() {
   // connection was silent on them are eligible for Alpaca again.
   _alpacaQuietSyms.clear();
   _alpacaSubAt.clear();
+  _restVolSeen.clear();
   alpacaLastTrade = 0;
   renderAlpacaStreamStatus();
 
@@ -10418,15 +10424,50 @@ function reviewQuietAlpacaSymbols() {
   if (!isRegularMarketHours()) return false;
   if (wsSubscribedSymbols.size >= MAX_WS_SYMBOLS) return false;   // nowhere to put them
   const now = Date.now();
-  if (!alpacaLastTrade || now - alpacaLastTrade > WS_STREAM_ALIVE_MS) return false;
+  // Is the socket as a whole demonstrably delivering? Used as a fallback proof
+  // for symbols whose volume we can't read.
+  const streamProvenAlive = !!alpacaLastTrade && now - alpacaLastTrade <= WS_STREAM_ALIVE_MS;
   let changed = false;
   for (const sym of alpacaWsSubscribed) {
     if (_alpacaQuietSyms.has(sym)) continue;
-    const since = wsLastTradeTime[sym] || _alpacaSubAt.get(sym) || 0;
-    if (!since || now - since < WS_SYMBOL_QUIET_MS) continue;
+    const q = quoteData[sym];
+    const vol = q && typeof q.volume === 'number' && isFinite(q.volume) ? q.volume : null;
+    const seen = _restVolSeen.get(sym);
+    const quietSince = wsLastTradeTime[sym] || _alpacaSubAt.get(sym) || 0;
+    const quietFor = quietSince ? now - quietSince : 0;
+
+    // Proof A - the symbol's own REST volume. The polled quote is independent of
+    // the stream, so volume climbing while no trade arrives is the stream
+    // missing prints, not the market standing still. This is the proof that
+    // works when the portfolio holds a single stock.
+    if (vol != null) {
+      if (!seen) { _restVolSeen.set(sym, { vol, t: now }); continue; }
+      const windowLongEnough = now - seen.t >= WS_SYMBOL_QUIET_MS;
+      if (vol > seen.vol) {
+        if (windowLongEnough && quietSince && quietSince <= seen.t) {
+          _alpacaQuietSyms.add(sym);
+          changed = true;
+          dbg('alpaca missed ' + (vol - seen.vol) + ' shares of ' + sym + ' volume — handing it to FinnHub');
+          _restVolSeen.set(sym, { vol, t: now });
+          continue;
+        }
+        // Traded, and the stream did report it: slide the window forward.
+        if (quietSince > seen.t) _restVolSeen.set(sym, { vol, t: now });
+      } else if (windowLongEnough) {
+        // No trades at all in the window - the stock is genuinely idle, so the
+        // stream isn't at fault. Start a fresh window rather than accusing it.
+        _restVolSeen.set(sym, { vol, t: now });
+      }
+      continue;
+    }
+
+    // Proof B - no volume for this symbol, so fall back to the socket-level
+    // signal: other symbols are printing while this one has been silent.
+    if (!streamProvenAlive) continue;
+    if (!quietSince || quietFor < WS_SYMBOL_QUIET_MS) continue;
     _alpacaQuietSyms.add(sym);
     changed = true;
-    dbg('alpaca quiet on ' + sym + ' — handing it to FinnHub');
+    dbg('alpaca quiet on ' + sym + ' while other symbols print — handing it to FinnHub');
   }
   return changed;
 }
