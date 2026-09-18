@@ -27,7 +27,7 @@ Most of what's interesting here is the consequences of that constraint.
 
 | | |
 |---|---|
-| **10 data sources, automatic failover** | Picks whichever source covers the most symbols, then backfills individual missing fields from the others. Five are keyless *and* direct-CORS — including stocks — so the no-key path never depends on the proxy fleet for a price. |
+| **10 data sources, automatic failover** | Picks whichever source covers the most symbols, then backfills individual missing fields from the others. Six are keyless *and* direct-CORS — including stocks, and Alpaca's crypto snapshots — so the no-key path never depends on the proxy fleet for a price. |
 | **Real-time streaming** | Trade-by-trade stock prices over WebSocket from Alpaca (IEX) and FinnHub, split so a portfolio with both keys streams up to 80 positions; Coinbase Exchange overlay so crypto ticks on a 2-second interval instead of waiting on CoinGecko's free API, which caches most data for 1–5 minutes. |
 | **Delayed data is labelled** | Any price its source serves on a delay — futures, Alpaca's delayed-SIP fallback — carries a superscript **D** with the reason and the lag, and it clears only when a source positively confirms the price is live. A stale price is never shown as if it were live. |
 | **Works with zero configuration** | No API key required. Keys unlock more columns and streaming, but the app is useful on first open. |
@@ -50,6 +50,8 @@ That's it. No install, no `npm`, no server.
 A **Welcome Guide** opens as a dialog on first launch, and **Load Sample Data** fills the table with a few well-known positions if you want to see it working before entering your own. Dismiss the guide with its close button, the backdrop, or `Esc`; re-open it any time from **Settings → Show Welcome Guide**.
 
 **Optional free API keys** (Settings panel) unlock the rest: [Alpaca](https://app.alpaca.markets/signup) adds a real-time trade stream for your 30 largest stock positions, real bid/ask, real-time crypto, and a delayed-SIP fallback that covers names IEX alone misses; [FinnHub](https://finnhub.io/register) adds a second stream plus P/E, EPS, beta, dividends, earnings dates, and analyst ratings; an [FMP](https://site.financialmodelingprep.com/register) key adds a third quote fallback, but only keys issued before September 2025 (FMP retired the endpoint this app uses for newer free plans).
+
+Generate Alpaca keys from a **paper-trading** account. The Basic market-data plan is identical for paper and live keys, and a paper key can't move real money if it ever leaks from your browser — the keys live in `localStorage`, readable by any script on the origin.
 
 A key is optional. Without one you still get real-time stock and crypto prices, day P&L, and the 52-week range — what a key adds is the data no keyless source publishes: P/E, EPS, beta, dividends, earnings dates, analyst ratings, real bid/ask, and WebSocket streaming.
 
@@ -94,7 +96,7 @@ Free financial APIs rate-limit, go down, silently return empty results, or drop 
 
 - **Ten sources run concurrently.** The one covering the most requested symbols becomes primary; the rest are merged in field-by-field to fill gaps (a source might have the price but not the 52-week range).
 - **Yahoo Finance has no CORS headers**, so it goes through a public CORS proxy — and only for what the direct sources can't cover: a row StockAnalysis already priced and named makes no proxy call at all, and a name-only lookup that fails backs off for 2 minutes. In steady state the only proxied requests are commodity futures, which have no direct source. The pool code still races multiple proxies in parallel when there are several, but after the September 2026 audit only one free proxy works from a deployed site (see the graveyard).
-- **Five sources are keyless *and* direct-CORS** — StockAnalysis for equities and ETFs, CoinGecko, Coinbase, Binance.US and Kraken for crypto. This is the structural change that matters most: a no-key portfolio of stocks and crypto now gets every price, day change, and 52-week range without touching a proxy at all. Yahoo is still keyless, but it is the only keyless source that needs the proxy fleet, and it is now used for what nothing else provides (fundamentals, historical performance, futures) rather than for prices.
+- **Six sources are keyless *and* direct-CORS** — StockAnalysis for equities and ETFs; CoinGecko, Coinbase, Binance.US, Kraken and Alpaca's crypto snapshots for crypto (Alpaca's crypto endpoint answers without a key and sends CORS headers, so it runs for every visitor). This is the structural change that matters most: a no-key portfolio of stocks and crypto now gets every price, day change, and 52-week range without touching a proxy at all. Yahoo is still keyless, but it is the only keyless source that needs the proxy fleet, and it is now used for what nothing else provides (fundamentals, historical performance, futures) rather than for prices.
 - **Two venues for every asset class.** Equities have StockAnalysis and Yahoo; crypto has Coinbase (per-symbol) plus Binance.US and Kraken (batched); gold has PAXG on Coinbase with PAXG *and* XAUT on Kraken behind it. No single outage takes a whole asset class down.
 - **Sources that can't succeed stop trying.** A source that cannot succeed is worse than a slow one, because every refresh pays its full timeout. A refusal that won't resolve itself latches that source off for the session: FinnHub's public demo token on its first 401, Binance.US and Kraken on a geo-block (403/451), and Alpaca's stream on bad keys or a connection already in use. A source that merely stops answering, like StockAnalysis, gets a 60-second circuit breaker instead, since from a browser a dead endpoint and a dropped connection look identical. (Sources that died outright were removed — see the graveyard.)
 - **Circuit breakers.** Three consecutive all-symbol failures on the Coinbase overlay trigger a 30 s cooldown. Symbols Coinbase Exchange has no product for are excluded from that tally, so a listing gap can't be mistaken for an outage.
@@ -272,7 +274,7 @@ Auto-detects exports from **Robinhood · E\*Trade · Fidelity · Charles Schwab 
 | **Yahoo Finance** | — | via CORS proxies | Quotes (v8 chart), fundamentals, after-hours, historical performance, and commodity futures |
 | **FinnHub** | free | 60/min + WebSocket | WebSocket streaming (stocks), quotes, profiles, P/E, EPS, beta, dividends, earnings, analyst ratings |
 | **Alpaca Markets** | free | 200/min + 1 stream (30 symbols) | Real-time IEX trade stream, IEX snapshots, delayed-SIP fallback for names IEX doesn't cover, real bid/ask, avg volume, historical bars |
-| **Alpaca Crypto** | free | 200/min | Real-time crypto snapshots — no feed tiers and no delay on the free plan, unlike equities |
+| **Alpaca Crypto** | — | 200/min | Real-time crypto snapshots with real bid/ask — no key, no feed tiers and no delay, unlike equities. Runs for every visitor; keys are sent when present. |
 | **Financial Modeling Prep** | legacy keys only | 250/day | Quotes with after-hours, fundamentals. Uses `/api/v3`, which FMP restricted to subscriptions from before 31 Aug 2025; newer free keys get an error here and the other sources cover the gap. |
 | **CoinGecko** | — | 5–15/min keyless | Crypto 24h high/low, market cap, volume, 1-year chart for 52-week range and performance |
 | **Coinbase Exchange** | — | 10/s | Real-time crypto price/bid/ask overlay; PAXG for real-time gold |
@@ -287,7 +289,7 @@ Auto-detects exports from **Robinhood · E\*Trade · Fidelity · Charles Schwab 
 
 <br/>
 
-- **Yahoo v7 batch and the crumb are permanently closed, not temporarily broken.** The batch endpoint returns `401 Unauthorized` for everyone, and `/v1/test/getcrumb` returns `401 Invalid Cookie` on both CDN hosts through any proxy. The crumb requires a Yahoo consent cookie issued by `fc.yahoo.com`, and a stateless passthrough proxy makes each request independently — it cannot carry that cookie, and the browser cannot hold a cross-origin cookie for Yahoo. **Fixing this requires a stateful backend, which is the one thing this project rules out.** Both paths are still attempted because they cost one request and cache their failure, but the working path is the per-symbol **v8 chart** endpoint.
+- **Yahoo v7 batch and the crumb are permanently closed, not temporarily broken.** The batch endpoint returns `401 Unauthorized` for everyone, and `/v1/test/getcrumb` returns `401 Invalid Cookie` on both CDN hosts through any proxy. The crumb requires a Yahoo consent cookie issued by `fc.yahoo.com`, and a stateless passthrough proxy makes each request independently — it cannot carry that cookie, and the browser cannot hold a cross-origin cookie for Yahoo. **Fixing this requires a stateful backend, which is the one thing this project rules out.** Each gets one try per session and is latched off on the first explicit `401`/`404`, so a known-dead endpoint can't keep burning the one surviving proxy every few minutes; the working path is the per-symbol **v8 chart** endpoint.
 - **Keyless `quoteSummary`** is capped at two failures per symbol per session — Yahoo gates it hard without consent cookies, so endless retries only burn shared proxy budget.
 - **FinnHub fundamentals** — profile, metrics, earnings, and recommendations fetched once per symbol per session and cached; per-refresh calls hit only the lightweight `/quote`. Dividend data comes from `/stock/metric`, not the dedicated `/stock/dividend` endpoint, which is premium-only and returns 403 on every free key.
 - **CoinGecko TTL** scales with portfolio size — a 3 s floor for ≤5 coins, 30 s for larger — minus a 1 s alignment buffer so the cache expires *before* the next tick rather than skipping every other fetch.
@@ -398,6 +400,8 @@ location.reload();
 ```
 
 Source-level events — auth failures, rate limits, WebSocket connect/close, quota errors, and top-level refresh exceptions — always log regardless.
+
+The up-front direct (no-proxy) attempt at Yahoo is off by default: Yahoo sends no CORS headers, so it can only succeed with a CORS-relaxing browser extension and otherwise logs two red errors per session. Opt in with `localStorage.setItem('stonks_direct_fetch', '1')`.
 
 ---
 

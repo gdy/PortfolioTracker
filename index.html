@@ -1823,13 +1823,13 @@
       </div>
       <div class="step">
         <span class="step-num">2.</span>
-        <span><span class="key-name">Alpaca</span> &mdash; Sign up at <a href="https://app.alpaca.markets/signup" target="_blank" rel="noopener noreferrer">alpaca.markets</a> for free API keys. Streams live prices for your 30 largest stock positions, plus real-time IEX quotes with bid/ask spreads and average volume.</span>
+        <span><span class="key-name">Alpaca</span> &mdash; Sign up at <a href="https://app.alpaca.markets/signup" target="_blank" rel="noopener noreferrer">alpaca.markets</a> for free API keys. Streams live prices for your 30 largest stock positions, plus real-time IEX quotes with bid/ask spreads and average volume. Generate the keys from a <strong>paper-trading</strong> account: market data is the same, and a paper key can&rsquo;t move real money.</span>
       </div>
       <div class="step">
         <span class="step-num">3.</span>
         <span><span class="key-name">FMP</span> (optional) &mdash; Only useful if you already have a key from before September 2025, when FMP retired the endpoints this app uses for newer free plans. Adds one more quote fallback.</span>
       </div>
-      <p class="welcome-note" style="margin-top:12px; margin-bottom:0;">Without any key, live prices still work: stocks and ETFs from StockAnalysis, crypto from CoinGecko, Coinbase and Kraken, commodities from Yahoo Finance. An Alpaca or FinnHub key additionally unlocks real-time streaming, and FinnHub adds full fundamentals. A superscript <span class="delay-mark" style="cursor:default">D</span> next to a price means that source serves it on a delay.</p>
+      <p class="welcome-note" style="margin-top:12px; margin-bottom:0;">Without any key, live prices still work: stocks and ETFs from StockAnalysis, crypto from Alpaca (no key needed), CoinGecko, Coinbase and Kraken, commodities from Yahoo Finance. An Alpaca or FinnHub key additionally unlocks real-time streaming, and FinnHub adds full fundamentals. A superscript <span class="delay-mark" style="cursor:default">D</span> next to a price means that source serves it on a delay.</p>
 
       <div class="welcome-tips" id="welcome-tips">
         <button type="button" class="welcome-tips-summary" aria-label="Tips and shortcuts" aria-expanded="false" aria-controls="welcome-tips-body" onclick="toggleWelcomeTips(this)"><span class="welcome-tips-arrow">&#9656;</span> <strong style="color:#e0e0e0;">Tips &amp; shortcuts</strong> <span style="color:#666; font-weight:normal; font-size:11px;">8 things worth knowing</span></button>
@@ -3744,10 +3744,16 @@ let lastWorkingProxy = 0; // remember which proxy worked last
 // Latch: once a direct fetch throws (CORS / network / timeout), Yahoo & friends
 // have no CORS headers so every other URL on the same origin will also fail.
 // Skip the up-front direct attempt for the rest of the session — saves ~4s
-// per proxy fetch on file:// / static hosting (GitHub Pages), which is most
-// of the deploys. A real 2xx response keeps the latch open so sites that do
-// support direct fetches never get degraded.
-let _directFetchBlocked = false;
+// per proxy fetch. A real 2xx response keeps the latch open.
+//
+// Starts LATCHED. Yahoo never sends CORS headers, so from any http(s) origin —
+// localhost included — the direct attempt fails before it starts; the only way
+// it ever succeeds is a CORS-relaxing browser extension. Trying it anyway cost
+// every visitor two red console errors per session (chart + crumb) for nothing.
+// Opt back in with localStorage.setItem('stonks_direct_fetch', '1').
+let _directFetchBlocked = (() => {
+  try { return localStorage.getItem('stonks_direct_fetch') !== '1'; } catch (_) { return true; }
+})();
 // Combine a per-attempt timeout with the refresh's abort signal so aborting a
 // refresh (Clear All, portfolio switch, or a superseding refresh) cancels its
 // in-flight proxy calls instead of letting them run to timeout and saturate the
@@ -3799,14 +3805,19 @@ async function fetchWithProxy(url, proxyIndex = -1, timeout = PROXY_FETCH_TIMEOU
     lastWorkingProxy = idx;
     return text;
   };
+  let firstErr;
   try {
     return await attempt(proxyIndex);
   } catch (err) {
+    firstErr = err;
     dbg(`Proxy ${proxyIndex} failed for ${url}:`, err.message);
   }
   const rest = [];
   for (let i = 0; i < PROXIES.length; i++) if (i !== proxyIndex) rest.push(i);
-  if (rest.length === 0) throw new Error('All proxies failed');
+  // With a single proxy, surface ITS error: callers latch a dead endpoint off
+  // for the session on an explicit HTTP 401/404, which a generic "all proxies
+  // failed" would hide (and an AbortError must keep its name).
+  if (rest.length === 0) throw firstErr;
   try {
     return await Promise.any(rest.map(attempt));
   } catch (_) {
@@ -3899,8 +3910,19 @@ async function fetchAnyVariantRace(urls, timeout = 9000, maxAttempts = 8, signal
 // --- Yahoo Finance: Get crumb ---
 let yfCrumb = null;
 let yfCrumbTime = 0;
-let _crumbInFlight = null; // dedupe concurrent crumb fetches (boot prewarm + first v7)
+let _crumbInFlight = null; // dedupe concurrent crumb fetches
+// Yahoo's crumb, v7 and v6 endpoints are closed to anonymous callers (see the
+// README graveyard). Each still gets ONE try per session, because the proxy
+// layer can't know that up front — but an explicit 401/403/404 through the
+// proxy is Yahoo refusing, not the proxy failing, and that will not change in
+// the next 3 minutes. Latch each one off for the session on that answer; a
+// proxy outage (5xx / timeout) keeps the existing timed retry.
+let _yahooCrumbDead = false;
+let _yahooV7Dead = false;
+let _yahooV6Dead = false;
+const _YAHOO_REFUSED = /^HTTP (401|403|404)$/;
 async function getYahooCrumb() {
+  if (_yahooCrumbDead) return null;
   if (yfCrumb && Date.now() - yfCrumbTime < YF_CRUMB_TTL) return yfCrumb;
   // Coalesce concurrent callers onto a single fetch. Without this, prewarming
   // the crumb at boot and the first refresh's v7 batch would each issue their
@@ -3917,7 +3939,12 @@ async function getYahooCrumb() {
         return yfCrumb;
       }
     } catch (e) {
-      console.warn('Could not get Yahoo crumb:', e.message);
+      if (_YAHOO_REFUSED.test(e.message)) {
+        _yahooCrumbDead = true;
+        console.warn('Yahoo crumb refused (' + e.message + ') — not retrying this session');
+      } else {
+        console.warn('Could not get Yahoo crumb:', e.message);
+      }
     }
     return null;
   })();
@@ -3937,7 +3964,7 @@ let yahooV7FailedTime = 0;       // timestamp of last failure
 async function fetchYahooQuotes(symbols, signal) {
   // Reset v7 failure flag after cooldown so transient proxy errors don't
   // permanently degrade all future refreshes to the slower per-symbol v8 path
-  if (yahooV7Failed && Date.now() - yahooV7FailedTime > YF_V7_RETRY_MS) {
+  if (yahooV7Failed && !_yahooV7Dead && Date.now() - yahooV7FailedTime > YF_V7_RETRY_MS) {
     yahooV7Failed = false;
   }
   let v7Results = {};
@@ -3989,7 +4016,12 @@ async function fetchYahooQuotes(symbols, signal) {
         }
       }
     } catch (e) {
-      console.warn('Yahoo v7 quote failed:', e.message);
+      if (_YAHOO_REFUSED.test(e.message)) {
+        _yahooV7Dead = true;
+        console.warn('Yahoo v7 batch refused (' + e.message + ') — not retrying this session');
+      } else {
+        console.warn('Yahoo v7 quote failed:', e.message);
+      }
       yahooV7Failed = true;
       yahooV7FailedTime = Date.now();
     }
@@ -4601,22 +4633,30 @@ async function fetchAlpacaQuotes(symbols) {
   return null;
 }
 
-// --- Alpaca crypto snapshots (free, real-time, no feed tiers) ---
+// --- Alpaca crypto snapshots (free, real-time, no feed tiers, NO KEY) ---
 // Alpaca's crypto data is not gated the way equities are: there is no IEX/SIP
-// split and no 15-minute delay on the free plan, so this is a genuinely
-// real-time source for anyone who already entered Alpaca keys for stocks. It
+// split, no 15-minute delay, and — verified 2026-09-18 against the live
+// endpoint — the snapshot call answers unauthenticated requests with
+// Access-Control-Allow-Origin: *. So it runs for every visitor, keys or not,
+// as one more keyless direct-CORS crypto source with real bid/ask. It
 // complements rather than replaces the Coinbase overlay — Coinbase covers coins
 // Alpaca doesn't list, and Alpaca covers a few Coinbase Exchange doesn't (TRX
 // among them). Both feed the same merge step, which prefers whichever source
-// actually has the symbol.
+// actually has the symbol. Keys are still sent when present (a keyed call
+// counts against the account's own quota rather than the anonymous pool).
+// Should Alpaca ever close the anonymous path, a 401/403 without keys latches
+// the keyless attempt off for the session — same rule as every other source
+// that refuses rather than fails.
 //
 // Symbols are 'BTC/USD' here, not the app's 'BTC-USD', and the response nests
 // everything under a "snapshots" key — unlike the equities snapshot endpoint,
 // which returns a bare symbol->snapshot map. Both differences are easy to get
 // wrong silently, so they're converted explicitly below.
+let _alpacaCryptoKeylessBlocked = false;
 async function fetchAlpacaCryptoQuotes(symbols) {
   const { keyId, secret } = getAlpacaKeys();
-  if (!keyId || !secret) return null;
+  const keyed = !!(keyId && secret);
+  if (!keyed && _alpacaCryptoKeylessBlocked) return null;
   const cryptoSyms = symbols.filter(isCryptoSymbol);
   if (cryptoSyms.length === 0) return null;
   const toAlpaca = s => s.replace(/-USD$/, '/USD');
@@ -4624,11 +4664,14 @@ async function fetchAlpacaCryptoQuotes(symbols) {
     encodeURIComponent(cryptoSyms.map(toAlpaca).join(','));
   try {
     const resp = await fetch(url, {
-      headers: { 'APCA-API-KEY-ID': keyId, 'APCA-API-SECRET-KEY': secret },
+      headers: keyed ? { 'APCA-API-KEY-ID': keyId, 'APCA-API-SECRET-KEY': secret } : {},
       signal: AbortSignal.timeout(ALPACA_TIMEOUT)
     });
     if (!resp.ok) {
-      if (resp.status === 401 || resp.status === 403) console.warn('Alpaca crypto auth failed:', resp.status);
+      if (resp.status === 401 || resp.status === 403) {
+        if (keyed) console.warn('Alpaca crypto auth failed:', resp.status);
+        else { _alpacaCryptoKeylessBlocked = true; console.warn('Alpaca crypto now requires a key (' + resp.status + ') — keyless attempts stopped for this session'); }
+      }
       return null;
     }
     const body = await resp.json();
@@ -4705,7 +4748,7 @@ async function fetchFmpQuotes(symbols) {
 
 // --- Yahoo v6 finance quote (alternative endpoint, sometimes works when v7/v8 are blocked) ---
 async function fetchYahooV6Quotes(symbols, signal) {
-  if (symbols.length === 0) return null;
+  if (symbols.length === 0 || _yahooV6Dead) return null;
   try {
     const url = 'https://query1.finance.yahoo.com/v6/finance/quote?symbols=' + symbols.map(yfEnc).join(',');
     const text = await fetchWithProxy(url, -1, PROXY_FETCH_TIMEOUT, signal);
@@ -4721,7 +4764,12 @@ async function fetchYahooV6Quotes(symbols, signal) {
       return { source: 'Yahoo Finance (v6)', data: results };
     }
   } catch (e) {
-    console.warn('Yahoo v6 fallback failed:', e.message);
+    if (_YAHOO_REFUSED.test(e.message)) {
+      _yahooV6Dead = true;
+      console.warn('Yahoo v6 refused (' + e.message + ') — not retrying this session');
+    } else {
+      console.warn('Yahoo v6 fallback failed:', e.message);
+    }
   }
   return null;
 }
@@ -6294,9 +6342,9 @@ async function _refreshAll(signal) {
   }).catch(() => null);
   const pAlpaca = hasAlpaca ? fetchAlpacaQuotes(symbols) : Promise.resolve(null);
   // Alpaca's crypto endpoint is a separate call on a separate host path with no
-  // feed tiers — free and real-time, unlike the equity IEX/SIP split. Only worth
-  // firing when the portfolio actually holds crypto and Alpaca keys are set.
-  const pAlpacaCrypto = (hasAlpaca && symbols.some(isCryptoSymbol))
+  // feed tiers — free, real-time, and keyless (see fetchAlpacaCryptoQuotes), so
+  // it runs whenever the portfolio holds crypto, keys or not.
+  const pAlpacaCrypto = symbols.some(isCryptoSymbol)
     ? fetchAlpacaCryptoQuotes(symbols) : Promise.resolve(null);
   const pFmp = hasFmp ? fetchFmpQuotes(symbols) : Promise.resolve(null);
   const pFree = !hasFinnHub ? fetchFinnhubFreeQuotes(symbols) : Promise.resolve(null);
@@ -6316,8 +6364,24 @@ async function _refreshAll(signal) {
   // steady-state tick is a no-op here (no double-flash), later sources can't
   // clobber an earlier one, and the authoritative merge below still runs with
   // every source. So this can only ever show a correct price sooner.
+  // Say what has landed, as it lands. The status used to sit on "Fetching
+  // quotes..." until wave 2 finished, which behind a slow proxy is 10-20 s after
+  // every stock and crypto row already had a price — it read as if nothing had
+  // arrived. Per source, not after the wave-1 await: that await also covers the
+  // proxied futures race (up to 9 s). The full attribution replaces this once
+  // wave 2 settles.
+  const _early = new Set();
+  const _noteEarly = (label) => {
+    if (!label || (signal && signal.aborted)) return;
+    for (const part of String(label).split(' + ')) {
+      const name = part.split('(')[0].trim();
+      if (name) _early.add(name);
+    }
+    setStatus('Data via ' + [..._early].join(' + ') + ' \u2014 fetching the rest\u2026', 'loading');
+  };
   const paintInterim = (src) => {
     if (!src || !src.data || (signal && signal.aborted)) return;
+    if (Object.keys(src.data).length > 0) _noteEarly(src.source);
     let painted = false;
     for (const [sym, d] of Object.entries(src.data)) {
       if (!d || d.price == null) continue;
@@ -6342,6 +6406,7 @@ async function _refreshAll(signal) {
   // which re-derives change from the token's 24h open and asserts the price live.
   const paintCommodityRT = (rt) => {
     if (!rt || (signal && signal.aborted)) return;
+    if (Object.keys(rt).length > 0) _noteEarly('Coinbase'); // matches the final attribution's credit for the overlay
     let painted = false;
     for (const [sym, d] of Object.entries(rt)) {
       if (!d || d.price == null) continue;
@@ -11350,12 +11415,9 @@ loadFromURL();
 // isn't a wall of "loading…" until the first refresh (which is gated by the
 // slowest source) completes. The refreshAll below overwrites them with live data.
 hydrateQuotes();
-// Prewarm the Yahoo crumb in parallel with the synchronous render work below
-// (and the upcoming parallel fetches), so the first refresh's v7 quote batch
-// doesn't pay a serial crumb round-trip on the critical path. Deduped inside
-// getYahooCrumb(), so the refresh reuses this in-flight fetch. Only worth it
-// when the portfolio has Yahoo-dependent (stock/commodity) symbols.
-if (portfolio.some(p => !isCryptoSymbol(p.symbol))) getYahooCrumb().catch(() => {});
+// (The Yahoo crumb used to be prewarmed here. It only ever served the v7 batch,
+// which is closed to anonymous callers, so the prewarm was one guaranteed
+// wasted request through the single surviving proxy on every load.)
 restoreSort(); // re-apply the sort column + direction saved last session
 buildHeader();
 renderTable();
