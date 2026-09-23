@@ -1868,6 +1868,7 @@
           </div>
         </div></div>
       </div>
+      <p class="welcome-note" style="margin-top:12px; margin-bottom:0; font-size:11px; color:#777;">Not investment advice. Prices, fundamentals and analyst ratings come from free third-party sources and may be delayed, incomplete or wrong &mdash; check with your broker before acting on anything shown here.</p>
       <div class="welcome-foot">
         <button class="dismiss-btn" onclick="dismissWelcome()">Close Welcome Guide</button>
         <span class="welcome-credit">Built by <a href="https://github.com/gdy" target="_blank" rel="noopener noreferrer">Grant</a> &middot; open source, MIT</span>
@@ -2084,10 +2085,7 @@ const COINGECKO_TIMEOUT = 8000;
 const FMP_TIMEOUT = 8000;
 const FINNHUB_TIMEOUT = 4000;
 const FINNHUB_FUND_TIMEOUT = 6000;
-const YAHOO_SUMMARY_TIMEOUT_PRIMARY = 7000;
-const YAHOO_SUMMARY_TIMEOUT_SECONDARY = 6000;
 const YAHOO_PERF_TIMEOUT = 7000;
-const YAHOO_AH_TIMEOUT = 12000;
 // Delays (ms)
 const FINNHUB_QUOTE_DELAY = 200;          // between sequential FinnHub /quote calls
 const FINNHUB_BATCH_DELAY = 1500;         // between fundamentals batches
@@ -2155,8 +2153,6 @@ const CG_MIN_INTERVAL = 30000;           // default cache TTL between CoinGecko 
 const CG_MIN_INTERVAL_SMALL = 12000;
 const CG_SMALL_PORTFOLIO_THRESHOLD = 5;  // ≤ this many cryptos = "small" → cache TTL tracks the user's refresh interval
 const CG_TICK_ALIGN_BUFFER = 1000;       // shave 1s off TTL so cache expires before the next tick fires
-const YF_CRUMB_TTL = 30 * 60 * 1000;     // crumbs expire ~30 minutes
-const YF_V7_RETRY_MS = 3 * 60 * 1000;    // retry v7 after 3 minutes
 const WS_FRESH_MS = 10000;               // how recent a WS trade must be to skip REST quote
 const WS_STALE_THRESHOLD = 60000;         // flag WS as "no data" if no trades in this long during active hours
 // Per-symbol failover from Alpaca to FinnHub. Alpaca's free stream carries IEX
@@ -2200,7 +2196,7 @@ function makeEmptyQuote(sym) {
     analystRating: null, // display label: "Strong Buy" / "Buy" / "Hold" / "Sell" / "Strong Sell"
     analystScore: null,  // 1.0 (strong buy) to 5.0 (strong sell), used for sort + tint
     analystCount: null,  // number of analysts contributing to the consensus
-    analystBreakdown: null, // FinnHub raw counts {strongBuy, buy, hold, sell, strongSell} or null (Yahoo source has no breakdown)
+    analystBreakdown: null, // FinnHub raw counts {strongBuy, buy, hold, sell, strongSell} or null
     analystPeriod: null,    // FinnHub reporting period (YYYY-MM-DD) or null
     // Provenance of `price`. Several free sources are delayed at the origin and
     // look identical to a real-time quote once they're in the table, so the user
@@ -2355,7 +2351,7 @@ const _alpacaSubAt = new Map();
 // evidence the stream is missing prints for that symbol - evidence that works
 // for a one-stock portfolio, where "another symbol is printing" cannot.
 const _restVolSeen = new Map();
-let fetchedSummary = new Set(); // track symbols we already fetched quoteSummary for
+let fetchedSummary = new Set(); // symbols whose fundamentals are complete (no fillFundamentals pass needed)
 let fetchedAfterHours = new Set(); // track symbols we already tried after-hours fetch for
 // sym -> last time the after-hours hunt tried it and found nothing. Overnight
 // there IS no pre/post print, so without a cooldown every off-hours heavy
@@ -2578,6 +2574,7 @@ function hydrateQuotes() {
     // within seconds), exactly like a cold load before the cache existed. See
     // HYDRATE_STRIP_FIELDS for why restoring them would freeze them forever.
     for (const k of HYDRATE_STRIP_FIELDS) q[k] = null;
+    if (typeof q.name !== 'string') q.name = s; // a cached non-string name must not reach the renderer
     quoteData[s] = q;
     if (typeof q._lastUpdate === 'number' && q._lastUpdate > newest) newest = q._lastUpdate;
     n++;
@@ -3003,7 +3000,13 @@ function prefetchSampleData() {
       }
     }).catch(() => {});
   }
-  fetchYahooQuotes(syms).then(r => warm(r, false)).catch(() => {});                        // slower: refines/fills gaps
+  // Only a futures row with no direct real-time route (crude) is worth one proxy
+  // call here. This used to run the whole sample through fetchYahooQuotes, which
+  // cost every first-time visitor ~7 requests to the shared proxy before they had
+  // clicked anything - the stocks and crypto were already warm from direct
+  // sources, and the rest went to endpoints that were closed.
+  const _warmFutures = _warmCommodities.filter(s => !COMMODITY_REALTIME_PROXY[s] && !COMMODITY_SPOT_SYMBOL[s]);
+  if (_warmFutures.length > 0) fetchCommodityQuotes(_warmFutures).then(r => warm(r, false)).catch(() => {});
 }
 function loadSampleData() {
   if (portfolio.length > 0 &&
@@ -3907,50 +3910,17 @@ async function fetchAnyVariantRace(urls, timeout = 9000, maxAttempts = 8, signal
   return Promise.any(attempts);
 }
 
-// --- Yahoo Finance: Get crumb ---
-let yfCrumb = null;
-let yfCrumbTime = 0;
-let _crumbInFlight = null; // dedupe concurrent crumb fetches
-// Yahoo's crumb, v7 and v6 endpoints are closed to anonymous callers (see the
-// README graveyard). Each still gets ONE try per session, because the proxy
-// layer can't know that up front — but an explicit 401/403/404 through the
-// proxy is Yahoo refusing, not the proxy failing, and that will not change in
-// the next 3 minutes. Latch each one off for the session on that answer; a
-// proxy outage (5xx / timeout) keeps the existing timed retry.
-let _yahooCrumbDead = false;
-let _yahooV7Dead = false;
-let _yahooV6Dead = false;
-const _YAHOO_REFUSED = /^HTTP (401|403|404)$/;
-async function getYahooCrumb() {
-  if (_yahooCrumbDead) return null;
-  if (yfCrumb && Date.now() - yfCrumbTime < YF_CRUMB_TTL) return yfCrumb;
-  // Coalesce concurrent callers onto a single fetch. Without this, prewarming
-  // the crumb at boot and the first refresh's v7 batch would each issue their
-  // own request (yfCrumb is still null until the first resolves) — doubling the
-  // proxy load and racing to set yfCrumb.
-  if (_crumbInFlight) return _crumbInFlight;
-  yfCrumb = null; // force re-fetch if expired
-  _crumbInFlight = (async () => {
-    try {
-      const text = await fetchWithProxy('https://query2.finance.yahoo.com/v1/test/getcrumb');
-      if (text && text.length < 50 && !text.includes('<')) {
-        yfCrumb = text.trim();
-        yfCrumbTime = Date.now();
-        return yfCrumb;
-      }
-    } catch (e) {
-      if (_YAHOO_REFUSED.test(e.message)) {
-        _yahooCrumbDead = true;
-        console.warn('Yahoo crumb refused (' + e.message + ') — not retrying this session');
-      } else {
-        console.warn('Could not get Yahoo crumb:', e.message);
-      }
-    }
-    return null;
-  })();
-  try { return await _crumbInFlight; }
-  finally { _crumbInFlight = null; }
-}
+// --- Yahoo endpoints this app no longer calls ---
+// The crumb (/v1/test/getcrumb), the v7 and v6 batch quotes and the v10
+// quoteSummary are all closed to anonymous callers (see the README graveyard);
+// the crumb needs a consent cookie a stateless proxy cannot carry. They used to
+// get one try per session and be latched off on a 401/404 - but through the
+// proxy they never answer 401/404. Measured from the production origin, they
+// come back as 500 or 522 after 14-20 s, so the latch never fired: each one was
+// retried all session, holding one of the browser's ~6 connections to the only
+// proxy host for its full timeout and starving the futures charts queued behind
+// it. The v8 chart is the only Yahoo endpoint still open, so it is the only one
+// called.
 
 // Encode symbol for query string parameters — handles futures (GC=F → GC%3DF)
 // Only use for ?key=value query params. For URL path segments, use yfPath() instead.
@@ -3958,267 +3928,37 @@ function yfEnc(sym) { return encodeURIComponent(sym); }
 // Encode symbol for URL path segments — = is valid in paths so only encode truly unsafe chars
 function yfPath(sym) { return sym.replace(/ /g, '%20'); }
 
-// --- Yahoo v7 batch quote ---
-let yahooV7Failed = false;       // skip v7 if it failed this refresh cycle
-let yahooV7FailedTime = 0;       // timestamp of last failure
+// --- Yahoo v8 chart, per symbol ---
+// Price, previous close, day and 52-week range, company name and pre/post-market
+// candles, one symbol per request through the proxy. Callers only hand this the
+// symbols no direct-CORS source could cover (see yahooNeeded in _refreshAll), so
+// in steady state it is rarely called at all. Batched in small groups with a
+// stagger so a large miss doesn't open every proxy connection at once.
 async function fetchYahooQuotes(symbols, signal) {
-  // Reset v7 failure flag after cooldown so transient proxy errors don't
-  // permanently degrade all future refreshes to the slower per-symbol v8 path
-  if (yahooV7Failed && !_yahooV7Dead && Date.now() - yahooV7FailedTime > YF_V7_RETRY_MS) {
-    yahooV7Failed = false;
-  }
-  let v7Results = {};
-
-  // Commodities (futures like GC=F) are never returned by v7 because the = breaks parsing.
-  // Kick off their v8 chart races in parallel with the v7 batch so gold doesn't have to wait
-  // for 20 stock symbols + crumb fetch through a slow proxy.
-  const commoditySyms = symbols.filter(isCommoditySymbol);
-  const v8Promises = commoditySyms.map(async (sym, i) => {
-    // Tiny stagger so we don't fire 5 commodities all at once through the same proxy
-    if (i > 0) await new Promise(r => setTimeout(r, 200 * i));
-    try {
-      const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true', 3, 8000, signal);
-      const data = JSON.parse(text);
-      if (data.chart && data.chart.result && data.chart.result[0]) {
-        return { sym, chart: normalizeYahooChart(sym, data.chart.result[0]) };
-      }
-    } catch (e) {
-      dbg('v8 chart failed for', sym, e.message);
-    }
-    return { sym, chart: null };
-  });
-
-  // v7 batch for non-commodity symbols, in parallel with the commodity races above
-  const stockSyms = symbols.filter(s => !isCommoditySymbol(s));
-  const v7Promise = (async () => {
-    if (yahooV7Failed || stockSyms.length === 0) return;
-    const crumb = await getYahooCrumb();
-    let url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + stockSyms.map(yfEnc).join(',');
-    if (crumb) url += '&crumb=' + encodeURIComponent(crumb);
-    try {
-      const text = await fetchWithProxy(url, -1, PROXY_FETCH_TIMEOUT, signal);
-      const data = JSON.parse(text);
-      if (data.quoteResponse && data.quoteResponse.result && data.quoteResponse.result.length > 0) {
-        // Only accept symbols we actually requested. Responses arrive via
-        // third-party CORS proxies, so a compromised proxy controls the body —
-        // an attacker "symbol" like "__proto__" used as a plain-object key
-        // would otherwise flow into Object.assign(quoteData, …) and pollute
-        // Object.prototype for the whole app.
-        const requested = new Set(stockSyms);
-        for (const q of data.quoteResponse.result) {
-          if (!requested.has(q.symbol)) continue;
-          const norm = normalizeYahoo(q);
-          v7Results[q.symbol] = norm;
-          // Only block the AH retry pass if we actually have a price — not just a marketState
-          if (norm.postMarketPrice != null || norm.preMarketPrice != null) {
-            fetchedAfterHours.add(q.symbol);
-          }
-        }
-      }
-    } catch (e) {
-      if (_YAHOO_REFUSED.test(e.message)) {
-        _yahooV7Dead = true;
-        console.warn('Yahoo v7 batch refused (' + e.message + ') — not retrying this session');
-      } else {
-        console.warn('Yahoo v7 quote failed:', e.message);
-      }
-      yahooV7Failed = true;
-      yahooV7FailedTime = Date.now();
-    }
-  })();
-
-  // Wait for both lanes
-  const [_, v8Results] = await Promise.all([v7Promise, Promise.all(v8Promises)]);
-  for (const r of v8Results) {
-    if (r && r.chart) {
-      v7Results[r.sym] = r.chart;
-      if (r.chart.postMarketPrice != null || r.chart.preMarketPrice != null) {
-        fetchedAfterHours.add(r.sym);
-      }
-    }
-  }
-
-  // Final fallback: any non-commodity symbol that v7 missed (e.g. delisted, bad ticker
-  // OR v7 batch failed entirely under yahooV7Failed). Batch in groups of 4 with a small
-  // stagger so a failed v7 doesn't cause 20× sequential ~5s fetches.
-  let stillMissing = symbols.filter(s => !v7Results[s] && !isCommoditySymbol(s));
-  // When v7 missed several symbols (typically the whole batch while
-  // yahooV7Failed is latched), try ONE batched v6 call before the per-symbol
-  // v8 chart fan-out: a single proxy request can cover everything, vs 3
-  // racing proxies per missing symbol. Whatever v6 still misses falls through
-  // to the v8 hunt below.
-  if (stillMissing.length >= 3) {
-    const v6 = await fetchYahooV6Quotes(stillMissing, signal);
-    if (v6 && v6.data) {
-      for (const [s, q6] of Object.entries(v6.data)) {
-        v7Results[s] = q6;
-        if (q6.postMarketPrice != null || q6.preMarketPrice != null) fetchedAfterHours.add(s);
-      }
-      stillMissing = stillMissing.filter(s => !v7Results[s]);
-    }
-  }
-  for (let bi = 0; bi < stillMissing.length; bi += STILL_MISSING_BATCH) {
+  const results = {};
+  for (let bi = 0; bi < symbols.length; bi += STILL_MISSING_BATCH) {
+    if (signal && signal.aborted) break;
     if (bi > 0) await new Promise(r => setTimeout(r, STILL_MISSING_BATCH_DELAY));
-    const batch = stillMissing.slice(bi, bi + STILL_MISSING_BATCH);
+    const batch = symbols.slice(bi, bi + STILL_MISSING_BATCH);
     await Promise.all(batch.map(async (sym, k) => {
-      // Tiny per-symbol stagger so they don't all hit the same proxy at the same instant
       if (k > 0) await new Promise(r => setTimeout(r, STILL_MISSING_STAGGER * k));
       try {
         const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true', 3, 8000, signal);
         const data = JSON.parse(text);
-        if (data.chart && data.chart.result && data.chart.result[0]) {
-          const chart = normalizeYahooChart(sym, data.chart.result[0]);
-          // normalizeYahooChart now returns null for empty-envelope responses
-          // (Yahoo returns these for unknown tickers like "GHH" for a UK stock
-          // entered without the .L suffix). Skip those so the symbol falls
-          // through to the "Unknown ticker" path in _refreshAll instead of
-          // being stored with price=undefined.
-          if (chart) {
-            v7Results[sym] = chart;
-            if (chart.postMarketPrice != null || chart.preMarketPrice != null) {
-              fetchedAfterHours.add(sym);
-            }
-          }
-        }
+        const r = data.chart && data.chart.result && data.chart.result[0];
+        // normalizeYahooChart returns null for the empty envelope Yahoo sends for
+        // an unknown ticker (e.g. "GHH" for the UK's GHH.L), so the symbol falls
+        // through to the "Unknown ticker" path instead of being stored with no price.
+        const chart = r ? normalizeYahooChart(sym, r) : null;
+        if (!chart) return;
+        results[sym] = chart;   // keyed by the symbol WE requested, never by the response
+        if (chart.postMarketPrice != null || chart.preMarketPrice != null) fetchedAfterHours.add(sym);
       } catch (e) {
         dbg('v8 chart failed for', sym, e.message);
       }
     }));
   }
-
-  if (Object.keys(v7Results).length > 0) {
-    const hasV7 = stockSyms.some(s => v7Results[s]);
-    return { source: hasV7 ? 'Yahoo Finance (v7)' : 'Yahoo Finance', data: v7Results };
-  }
-  return null;
-}
-
-// --- Yahoo quoteSummary per symbol (gets fundamentals) ---
-async function fetchYahooSummary(sym, signal) {
-  const modules = 'price,summaryDetail,defaultKeyStatistics,calendarEvents,financialData';
-  // Note: getYahooCrumb is intentionally NOT passed the refresh signal — it is
-  // shared/deduped across concurrent refreshes and cached ~30 min, so tying it to
-  // one refresh's abort could cancel the crumb another refresh still needs.
-  const crumb = await getYahooCrumb();
-
-  // Build URL variants. Try crumb-bearing URLs FIRST since they're more reliable —
-  // Yahoo's quoteSummary frequently 401s without a crumb. The previous order tried
-  // the crumbless URLs first and burned proxies before getting to the good URL.
-  const base1 = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/' + yfPath(sym) + '?modules=' + modules;
-  const base2 = 'https://query2.finance.yahoo.com/v10/finance/quoteSummary/' + yfPath(sym) + '?modules=' + modules;
-  const urls = [];
-  if (crumb) {
-    urls.push(base2 + '&crumb=' + encodeURIComponent(crumb));
-    urls.push(base1 + '&crumb=' + encodeURIComponent(crumb));
-  }
-  urls.push(base2);
-  urls.push(base1);
-
-  // Numbers only. This body arrives through a third-party CORS proxy, so any
-  // field can be any type; a string `raw` used to flow into quoteData and from
-  // there into innerHTML (analystCount was interpolated unformatted).
-  const getVal = (obj) => {
-    if (!obj) return null;
-    let v = null;
-    if (typeof obj === 'number') v = obj;
-    else if (obj.raw != null) v = obj.raw;
-    else if (typeof obj.fmt === 'string') v = parseFloat(obj.fmt.replace(/,/g, ''));
-    return (typeof v === 'number' && isFinite(v)) ? v : null;
-  };
-  const getFmt = (obj) => {
-    if (!obj) return null;
-    if (obj.fmt) return obj.fmt;
-    return null;
-  };
-
-  function parseResult(text) {
-    const data = JSON.parse(text);
-    const r = data.quoteSummary && data.quoteSummary.result && data.quoteSummary.result[0];
-    if (!r) return null;
-    const price = r.price || {};
-    const sd = r.summaryDetail || {};
-    const ks = r.defaultKeyStatistics || {};
-    const cal = r.calendarEvents || {};
-    const fd = r.financialData || {};
-    const recMean = getVal(fd.recommendationMean);
-    const recCount = getVal(fd.numberOfAnalystOpinions);
-    const recKeyLabel = ratingLabelFromYahooKey(fd.recommendationKey);
-    const recScoreLabel = ratingLabelFromScore(recMean);
-    return {
-      pe: getVal(sd.trailingPE) || getVal(ks.trailingPE),
-      eps: getVal(ks.trailingEps),
-      beta: getVal(ks.beta) || getVal(sd.beta),
-      dividend: getVal(sd.dividendRate),
-      dividendYield: getVal(sd.dividendYield) != null ? getVal(sd.dividendYield) * 100 : null,
-      exDivDate: getFmt(cal.exDividendDate) || getFmt(ks.lastDividendDate),
-      earningsDate: cal.earnings && cal.earnings.earningsDate && cal.earnings.earningsDate[0]
-        ? getFmt(cal.earnings.earningsDate[0]) || new Date(getVal(cal.earnings.earningsDate[0]) * 1000).toLocaleDateString()
-        : null,
-      bid: getVal(sd.bid),
-      ask: getVal(sd.ask),
-      avgVolume: getVal(sd.averageDailyVolume10Day) || getVal(sd.averageVolume10days),
-      marketCap: getVal(price.marketCap) || getVal(sd.marketCap),
-      open: getVal(price.regularMarketOpen),
-      postMarketPrice: getVal(price.postMarketPrice),
-      postMarketChange: getVal(price.postMarketChange),
-      preMarketPrice: getVal(price.preMarketPrice),
-      preMarketChange: getVal(price.preMarketChange),
-      marketState: price.marketState,
-      analystRating: recScoreLabel || recKeyLabel,
-      analystScore: recMean,
-      analystCount: recCount,
-    };
-  }
-
-  // Race the best URL across 3 proxies first. fillFundamentals batches multiple
-  // symbols in parallel, so this caps total parallel proxy connections at
-  // BATCH_SIZE × 3 (not BATCH_SIZE × 7 × 4 like the old sequential rotation).
-  try {
-    const text = await fetchWithProxyRace(urls[0], 3, YAHOO_SUMMARY_TIMEOUT_PRIMARY, signal);
-    const result = parseResult(text);
-    if (result) return result;
-  } catch (e) { /* fall through to second URL */ }
-  // Second-chance: try the alternate URL with a slightly smaller race
-  if (urls.length > 1) {
-    try {
-      const text = await fetchWithProxyRace(urls[1], 2, YAHOO_SUMMARY_TIMEOUT_SECONDARY, signal);
-      const result = parseResult(text);
-      if (result) return result;
-    } catch (e) { /* exhausted */ }
-  }
-  dbg('quoteSummary failed for', sym);
-  return null;
-}
-
-function normalizeYahoo(q) {
-  return { ...makeEmptyQuote(q.symbol),
-    name: q.shortName || q.longName || '',
-    price: q.regularMarketPrice,
-    change: q.regularMarketChange,
-    changePct: q.regularMarketChangePercent,
-    prevClose: q.regularMarketPreviousClose,
-    open: q.regularMarketOpen,
-    dayHigh: q.regularMarketDayHigh,
-    dayLow: q.regularMarketDayLow,
-    wk52High: q.fiftyTwoWeekHigh,
-    wk52Low: q.fiftyTwoWeekLow,
-    volume: q.regularMarketVolume,
-    avgVolume: q.averageDailyVolume10Day,
-    marketCap: q.marketCap,
-    pe: q.trailingPE,
-    eps: q.epsTrailingTwelveMonths,
-    beta: q.beta || null,
-    dividend: q.trailingAnnualDividendRate,
-    dividendYield: q.trailingAnnualDividendYield != null ? q.trailingAnnualDividendYield * 100 : null,
-    exDivDate: q.dividendDate ? new Date(q.dividendDate * 1000).toLocaleDateString() : null,
-    earningsDate: q.earningsTimestamp ? new Date(q.earningsTimestamp * 1000).toLocaleDateString() :
-                  q.earningsTimestampStart ? new Date(q.earningsTimestampStart * 1000).toLocaleDateString() : null,
-    bid: q.bid, ask: q.ask,
-    postMarketPrice: q.postMarketPrice, postMarketChange: q.postMarketChange,
-    preMarketPrice: q.preMarketPrice, preMarketChange: q.preMarketChange,
-    marketState: q.marketState,
-    _lastUpdate: Date.now(),
-  };
+  return Object.keys(results).length > 0 ? { source: 'Yahoo Finance', data: results } : null;
 }
 
 function normalizeYahooChart(sym, chart) {
@@ -4304,8 +4044,11 @@ function normalizeYahooChart(sym, chart) {
     }
   }
 
+  // The body arrives through a third-party proxy, so the name is only taken if it
+  // really is a string (see escAttr).
+  const _name = [meta.shortName, meta.longName].find(n => typeof n === 'string' && n);
   return { ...makeEmptyQuote(sym),
-    name: meta.shortName || meta.longName || sym,
+    name: _name || sym,
     price,
     change: price && prevClose ? price - prevClose : null,
     changePct: price && prevClose ? ((price - prevClose) / prevClose) * 100 : null,
@@ -4323,9 +4066,9 @@ function normalizeYahooChart(sym, chart) {
   };
 }
 
-// --- Analyst rating helpers (shared by FinnHub + Yahoo paths) ---
-// Map a 1-5 mean recommendation score to a display label. The cutoffs match
-// the Yahoo Finance / FinnHub convention (1=strong buy, 3=hold, 5=strong sell).
+// --- Analyst rating helpers (FinnHub) ---
+// Map a 1-5 mean recommendation score to a display label, using the usual
+// convention (1=strong buy, 3=hold, 5=strong sell).
 function ratingLabelFromScore(score) {
   if (score == null || isNaN(score)) return null;
   if (score < 1.5) return 'Strong Buy';
@@ -4354,17 +4097,32 @@ function ratingFromFinnhubRow(row) {
     period: row.period || null,
   };
 }
-// Yahoo `recommendationKey` is a snake_case string — map to our display label.
-function ratingLabelFromYahooKey(key) {
-  if (!key) return null;
-  const k = String(key).toLowerCase();
-  if (k === 'strong_buy') return 'Strong Buy';
-  if (k === 'buy') return 'Buy';
-  if (k === 'hold' || k === 'neutral') return 'Hold';
-  if (k === 'underperform' || k === 'sell') return 'Sell';
-  if (k === 'strong_sell') return 'Strong Sell';
-  return null;
+
+// --- FinnHub request budget ---
+// The free plan allows 60 REST calls a minute per key, and nothing here used to
+// count them: at a 2-5 s refresh interval every stock not currently streaming
+// cost a /quote call per heavy refresh, so 15 such stocks was several hundred
+// calls a minute and a steady stream of 429s. Every FinnHub REST call now draws
+// from one sliding one-minute window, kept a little under the limit so the
+// add-ticker path still has room. Running out isn't an error: prices keep
+// coming from the other sources, and whatever was skipped goes first next time.
+const FINNHUB_CALLS_PER_MIN = 50;
+const _finnhubCallTimes = [];
+function _finnhubBudgetLeft() {
+  const cutoff = Date.now() - 60000;
+  while (_finnhubCallTimes.length && _finnhubCallTimes[0] <= cutoff) _finnhubCallTimes.shift();
+  return FINNHUB_CALLS_PER_MIN - _finnhubCallTimes.length;
 }
+// All-or-nothing: spend `n` calls if they fit, otherwise spend none.
+function _finnhubTryTake(n) {
+  if (_finnhubBudgetLeft() < n) return false;
+  const now = Date.now();
+  for (let i = 0; i < n; i++) _finnhubCallTimes.push(now);
+  return true;
+}
+// Sym -> when FinnHub last quoted it, so a budget-limited refresh rotates through
+// the portfolio instead of re-asking about the same first few symbols forever.
+const _finnhubQuotedAt = new Map();
 
 // --- FinnHub API (reliable, free key required) ---
 // Fetches only /quote each refresh (1 call/symbol). Fundamentals (profile, metrics,
@@ -4412,6 +4170,10 @@ async function fetchFinnhubQuotes(symbols) {
       // process batch
       const fundPromises = batch.map(async sym => {
         if (fundRateLimited) return;
+        // Four calls per symbol from the shared budget. Out of budget stops the
+        // pass the same way a 429 does; the symbol stays unfetched and the next
+        // refresh picks it up.
+        if (!_finnhubTryTake(4)) { fundRateLimited = true; return; }
         try {
           const [profileResp, metricsResp, earningsResp, recResp] = await Promise.all([
             fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${key}`, { signal: AbortSignal.timeout(FINNHUB_FUND_TIMEOUT) }),
@@ -4469,7 +4231,7 @@ async function fetchFinnhubQuotes(symbols) {
           };
           fetchedFundamentals.add(sym);
           // Mark as summary-fetched too so fillFundamentals skips this symbol
-          // (avoids redundant Yahoo quoteSummary + FinnHub metrics calls)
+          // (avoids a redundant second round of FinnHub metrics calls)
           if (fundamentalsCache[sym].marketCap != null && fundamentalsCache[sym].pe != null &&
               fundamentalsCache[sym].beta != null && fundamentalsCache[sym].eps != null) {
             fetchedSummary.add(sym);
@@ -4485,10 +4247,14 @@ async function fetchFinnhubQuotes(symbols) {
   // Fetch /quote in batches of 10 (10 calls per batch, 1s delay between)
   // Skip symbols that have fresh WebSocket data (<10s old) — WS already provides real-time prices
   const now_ws = Date.now();
+  // Least-recently-quoted first, then trimmed to what the budget allows.
   const quoteSymbols = stockSymbols.filter(s => {
     const lastWs = wsLastTradeTime[s];
     return !lastWs || (now_ws - lastWs) >= WS_FRESH_MS;
-  });
+  }).sort((a, b) => (_finnhubQuotedAt.get(a) || 0) - (_finnhubQuotedAt.get(b) || 0));
+  quoteSymbols.length = Math.min(quoteSymbols.length, Math.max(0, _finnhubBudgetLeft()));
+  _finnhubTryTake(quoteSymbols.length);
+  for (const s of quoteSymbols) _finnhubQuotedAt.set(s, now_ws);
   // Track rate-limit state across batches. FinnHub's free tier is 60 calls/min
   // global per key — if one symbol returns 429 the rest of this refresh will
   // too. Bail out instead of wasting the next 1 s delay + N×10 more calls only
@@ -4742,34 +4508,6 @@ async function fetchFmpQuotes(symbols) {
     }
   } catch (e) {
     console.warn('FMP fetch failed:', e.message);
-  }
-  return null;
-}
-
-// --- Yahoo v6 finance quote (alternative endpoint, sometimes works when v7/v8 are blocked) ---
-async function fetchYahooV6Quotes(symbols, signal) {
-  if (symbols.length === 0 || _yahooV6Dead) return null;
-  try {
-    const url = 'https://query1.finance.yahoo.com/v6/finance/quote?symbols=' + symbols.map(yfEnc).join(',');
-    const text = await fetchWithProxy(url, -1, PROXY_FETCH_TIMEOUT, signal);
-    const data = JSON.parse(text);
-    const quotes = data.quoteResponse && data.quoteResponse.result;
-    if (quotes && quotes.length > 0) {
-      const requested = new Set(symbols); // proxy-response key guard (see fetchYahooQuotes)
-      const results = {};
-      for (const q of quotes) {
-        if (!requested.has(q.symbol)) continue;
-        results[q.symbol] = normalizeYahoo(q);
-      }
-      return { source: 'Yahoo Finance (v6)', data: results };
-    }
-  } catch (e) {
-    if (_YAHOO_REFUSED.test(e.message)) {
-      _yahooV6Dead = true;
-      console.warn('Yahoo v6 refused (' + e.message + ') — not retrying this session');
-    } else {
-      console.warn('Yahoo v6 fallback failed:', e.message);
-    }
   }
   return null;
 }
@@ -5058,8 +4796,8 @@ async function fetchStockAnalysisQuotes(symbols, signal) {
           dayLow: isFinite(Number(d.l)) ? Number(d.l) : null,
           volume: isFinite(Number(d.v)) ? Number(d.v) : null,
           // h52/l52 are the 52-week range. Worth taking from here even though
-          // this is a 'price' source: the only other providers are Yahoo's
-          // quoteSummary (401s without a key) and FinnHub (needs one), so
+          // this is a 'price' source: the only other keyless provider is
+          // Yahoo's chart through the proxy, and FinnHub needs a key, so
           // without this the 52-Wk Range column is permanently empty for a
           // keyless user.
           wk52High: isFinite(Number(d.h52)) ? Number(d.h52) : null,
@@ -5604,8 +5342,7 @@ async function fetchPerformanceData(symbols, signal) {
     // weekly (interval=1wk) was lighter on the proxies but drifted the YTD anchor
     // up to a week past the first trading day, throwing YTD off by >1% vs the
     // figure shown on Google/Yahoo. Daily keeps the anchor exact, and the
-    // ~250-point payload is still small enough — the real reliability win was
-    // running perf before the doomed keyless quoteSummary calls (see _refreshAll).
+    // ~250-point payload is still small enough.
     let gotPerf = false;
     try {
       const text = await fetchWithProxyRace('https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) +
@@ -5789,125 +5526,79 @@ async function fetchAlpacaSupplemental(symbols) {
   // supplemental done
 }
 
-// --- Fill missing fundamentals from quoteSummary or FinnHub metrics ---
-// Keyless quoteSummary mostly 401s (Yahoo gates it behind consent cookies the
-// CORS proxies strip). Without a cap, every heavy refresh re-raced proxies for
-// every symbol forever — pure wasted proxy budget. After this many failures per
-// symbol we stop for the session; success still latches via fetchedSummary.
+// --- Fill missing fundamentals from FinnHub metrics ---
+// For symbols the batched pass in fetchFinnhubQuotes didn't cover (it stopped on
+// a 429 or ran out of budget, or the symbol arrived mid-refresh). Needs a real
+// key: FinnHub's public demo token is dead, and Yahoo's quoteSummary, which used
+// to lead here, is closed to anonymous callers (see the note above
+// fetchYahooQuotes) - so a keyless user makes no calls here at all, where it used
+// to spend up to four doomed proxy requests per stock. Capped per symbol per
+// session, so a symbol FinnHub can't cover isn't re-asked on every heavy refresh.
 const SUMMARY_MAX_FAILS = 2;
-let _summaryFailCounts = {}; // sym -> failed quoteSummary attempts this session
+let _summaryFailCounts = {}; // sym -> failed fundamentals attempts this session
 async function fillFundamentals(symbols, signal) {
+  const finnhubKey = getApiKey();
+  if (!finnhubKey) return;
   const toFetch = symbols.filter(s => {
     if (!quoteData[s] || fetchedSummary.has(s) || errorSymbols.has(s)) return false;
     if (isCryptoSymbol(s) || isCommoditySymbol(s)) return false;
     if ((_summaryFailCounts[s] || 0) >= SUMMARY_MAX_FAILS) return false;
-    // Skip if FinnHub already gave us a complete fundamentals cache for this symbol
-    const fc = fundamentalsCache[s];
-    if (fc && fc.pe != null && fc.beta != null && fc.marketCap != null) return false;
+    // The batched pass already asked FinnHub about this symbol; the same
+    // endpoints can only give the same answer.
+    if (fundamentalsCache[s]) return false;
     return true;
   });
   if (toFetch.length === 0) return;
 
-  const finnhubKey = getApiKey() || 'demo';
-
-  // Process in small batches. Each fetchYahooSummary races proxies in parallel,
-  // so BATCH=3 means up to 9 simultaneous proxy connections — enough to be fast
-  // without overwhelming the proxy fleet (shared with performance data, after-hours,
-  // and commodity retry paths). Smaller BATCH also keeps us under FinnHub's 60/min limit.
   for (let i = 0; i < toFetch.length; i += FILL_FUND_BATCH) {
-    // Stop issuing fundamentals fetches once the refresh is superseded — this
-    // per-symbol pass is the heaviest proxy consumer, so leaving it running after
-    // a Clear All / reload is what starves the live refresh's price fetches.
     if (signal && signal.aborted) return;
     if (i > 0) await new Promise(r => setTimeout(r, FILL_FUND_BATCH_DELAY));
     const batch = toFetch.slice(i, i + FILL_FUND_BATCH);
-    const promises = batch.map(async sym => {
+    let limited = false;
+    await Promise.all(batch.map(async sym => {
       const q = quoteData[sym];
-      if (!q) return;
-
-      // Try Yahoo quoteSummary first
-      const summary = await fetchYahooSummary(sym, signal);
-      if (summary) {
-        fetchedSummary.add(sym);
-        if (q.pe == null && summary.pe != null) q.pe = summary.pe;
-        if (q.eps == null && summary.eps != null) q.eps = summary.eps;
-        if (q.beta == null && summary.beta != null) q.beta = summary.beta;
-        if (q.dividend == null && summary.dividend != null) q.dividend = summary.dividend;
-        if (q.dividendYield == null && summary.dividendYield != null) q.dividendYield = summary.dividendYield;
-        if (q.exDivDate == null && summary.exDivDate != null) q.exDivDate = summary.exDivDate;
-        if (q.earningsDate == null && summary.earningsDate != null) q.earningsDate = summary.earningsDate;
-        if (q.bid == null && summary.bid != null) q.bid = summary.bid;
-        if (q.ask == null && summary.ask != null) q.ask = summary.ask;
-        if (q.avgVolume == null && summary.avgVolume != null) q.avgVolume = summary.avgVolume;
-        if (q.marketCap == null && summary.marketCap != null) q.marketCap = summary.marketCap;
-        if (q.open == null && summary.open != null) q.open = summary.open;
-        if (q.postMarketPrice == null && summary.postMarketPrice != null) {
-          q.postMarketPrice = summary.postMarketPrice;
-          q.postMarketChange = summary.postMarketChange;
-        }
-        if (q.preMarketPrice == null && summary.preMarketPrice != null) {
-          q.preMarketPrice = summary.preMarketPrice;
-          q.preMarketChange = summary.preMarketChange;
-        }
-        if (q.marketState == null && summary.marketState != null) q.marketState = summary.marketState;
-        if (q.analystRating == null && summary.analystRating != null) {
-          q.analystRating = summary.analystRating;
-          q.analystScore = summary.analystScore;
-          q.analystCount = summary.analystCount;
-          // Yahoo financialData has no per-bucket breakdown; leave as null
-        }
-        // Only block the AH retry pass if we actually have a price
-        if (summary.postMarketPrice != null || summary.preMarketPrice != null) {
-          fetchedAfterHours.add(sym);
-        }
-        return;
-      }
-      _summaryFailCounts[sym] = (_summaryFailCounts[sym] || 0) + 1;
-
-      // Fallback: FinnHub metrics (CORS-enabled with a real key; the public
-      // demo token is dead — latched off after the first 401 so keyless users
-      // don't pay two doomed round-trips per symbol per refresh).
-      if (!isCryptoSymbol(sym) && !fundamentalsCache[sym] && !(finnhubKey === 'demo' && _finnhubDemoBlocked)) {
-        try {
-          const [metricsResp, profileResp] = await Promise.all([
-            fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${finnhubKey}`, { signal: _fetchTimeoutSignal(FINNHUB_FUND_TIMEOUT, signal) }),
-            fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${finnhubKey}`, { signal: _fetchTimeoutSignal(FINNHUB_FUND_TIMEOUT, signal) }),
-          ]);
-          if (metricsResp.status === 429) { console.warn('FinnHub rate limited in fillFundamentals for', sym); return; }
-          if ((metricsResp.status === 401 || metricsResp.status === 403) && finnhubKey === 'demo') { _finnhubDemoBlocked = true; return; }
-          if (metricsResp.ok) {
-            const metrics = await metricsResp.json();
-            const m = metrics.metric || {};
-            const keyCount = Object.keys(m).length;
-            // metrics loaded
-            if (keyCount > 0) {
-              if (q.avgVolume == null && m['10DayAverageTradingVolume'] != null) q.avgVolume = m['10DayAverageTradingVolume'] * 1e6;
-              if (q.pe == null) q.pe = m.peBasicExclExtraTTM || m.peTTM || null;
-              if (q.eps == null) q.eps = m.epsBasicExclExtraItemsTTM || null;
-              if (q.beta == null && m.beta != null) q.beta = m.beta;
-              if (q.wk52High == null && m['52WeekHigh'] != null) q.wk52High = m['52WeekHigh'];
-              if (q.wk52Low == null && m['52WeekLow'] != null) q.wk52Low = m['52WeekLow'];
-              if (q.dividend == null && m.dividendPerShareAnnual != null) q.dividend = m.dividendPerShareAnnual;
-              if (q.dividendYield == null && m.dividendYieldIndicatedAnnual != null) q.dividendYield = m.dividendYieldIndicatedAnnual;
-              if (q.perfYTD == null && m.yearToDatePriceReturnDaily != null) q.perfYTD = m.yearToDatePriceReturnDaily;
-              if (q.perf6M == null) q.perf6M = m['6MonthPriceReturnDaily'] || m['26WeekPriceReturnDaily'] || null;
-              if (q.perf1Y == null && m['52WeekPriceReturnDaily'] != null) q.perf1Y = m['52WeekPriceReturnDaily'];
-              if (profileResp.ok) {
-                const profile = await profileResp.json();
-                if (q.name === sym && profile.name) q.name = profile.name;
-                if (q.marketCap == null && profile.marketCapitalization) q.marketCap = profile.marketCapitalization * 1e6;
-              }
-              fetchedSummary.add(sym);
+      if (!q || limited) return;
+      // Two calls per symbol, drawn from the same per-key budget as every other
+      // FinnHub REST call. Out of budget is not a failure: the next refresh retries.
+      if (!_finnhubTryTake(2)) { limited = true; return; }
+      try {
+        const [metricsResp, profileResp] = await Promise.all([
+          fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${yfEnc(sym)}&metric=all&token=${finnhubKey}`, { signal: _fetchTimeoutSignal(FINNHUB_FUND_TIMEOUT, signal) }),
+          fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${yfEnc(sym)}&token=${finnhubKey}`, { signal: _fetchTimeoutSignal(FINNHUB_FUND_TIMEOUT, signal) }),
+        ]);
+        if (metricsResp.status === 429) { limited = true; console.warn('FinnHub rate limited in fillFundamentals for', sym); return; }
+        if (metricsResp.ok) {
+          const metrics = await metricsResp.json();
+          const m = metrics.metric || {};
+          if (Object.keys(m).length > 0) {
+            if (q.avgVolume == null && m['10DayAverageTradingVolume'] != null) q.avgVolume = m['10DayAverageTradingVolume'] * 1e6;
+            if (q.pe == null) q.pe = m.peBasicExclExtraTTM || m.peTTM || null;
+            if (q.eps == null) q.eps = m.epsBasicExclExtraItemsTTM || null;
+            if (q.beta == null && m.beta != null) q.beta = m.beta;
+            if (q.wk52High == null && m['52WeekHigh'] != null) q.wk52High = m['52WeekHigh'];
+            if (q.wk52Low == null && m['52WeekLow'] != null) q.wk52Low = m['52WeekLow'];
+            if (q.dividend == null && m.dividendPerShareAnnual != null) q.dividend = m.dividendPerShareAnnual;
+            if (q.dividendYield == null && m.dividendYieldIndicatedAnnual != null) q.dividendYield = m.dividendYieldIndicatedAnnual;
+            if (q.perfYTD == null && m.yearToDatePriceReturnDaily != null) q.perfYTD = m.yearToDatePriceReturnDaily;
+            if (q.perf6M == null) q.perf6M = m['6MonthPriceReturnDaily'] || m['26WeekPriceReturnDaily'] || null;
+            if (q.perf1Y == null && m['52WeekPriceReturnDaily'] != null) q.perf1Y = m['52WeekPriceReturnDaily'];
+            if (profileResp.ok) {
+              const profile = await profileResp.json();
+              if (q.name === sym && typeof profile.name === 'string' && profile.name) q.name = profile.name;
+              if (q.marketCap == null && profile.marketCapitalization) q.marketCap = profile.marketCapitalization * 1e6;
             }
-          } else {
-            dbg('FinnHub metrics HTTP', metricsResp.status, 'for', sym);
+            fetchedSummary.add(sym);
           }
-        } catch (e) {
-          dbg('FinnHub metrics fallback failed for', sym, e.message);
+        } else {
+          dbg('FinnHub metrics HTTP', metricsResp.status, 'for', sym);
         }
+      } catch (e) {
+        if (e && e.name === 'AbortError' && signal && signal.aborted) return;
+        dbg('FinnHub metrics fallback failed for', sym, e.message);
       }
-    });
-    await Promise.all(promises);
+      if (!fetchedSummary.has(sym)) _summaryFailCounts[sym] = (_summaryFailCounts[sym] || 0) + 1;
+    }));
+    if (limited) return;
   }
 }
 
@@ -5953,21 +5644,22 @@ async function fetchOneSymbolNow(sym) {
         return;
       }
 
-      // Stocks AND commodities: race three independent paths in parallel and
-      // apply whichever resolves first with a valid price. Direct-CORS sources
-      // (FinnHub, Alpaca) typically return in 200–500 ms vs. 1–3 s for the
-      // proxied Yahoo path, so racing them shaves visible "loading..." time
-      // when the user has those keys configured. The proxied Yahoo race is
-      // still always included as a fallback for symbols those APIs don't cover
-      // (commodities, low-volume tickers, free-tier IEX gaps).
+      // Stocks AND commodities: race the direct-CORS paths in parallel and apply
+      // whichever resolves first with a valid price. For a stock, the proxied
+      // Yahoo chart runs only if every direct racer fails: StockAnalysis alone
+      // answers in ~30 ms, so racing the proxy alongside it cost every added
+      // ticker two requests to the shared proxy for a result that was never used.
+      // Commodities have no direct source for most symbols, so Yahoo races with
+      // the token overlay from the start.
       const isCommodity = isCommoditySymbol(sym);
       const finnhubKey = getApiKey();
       const alpacaKeys = getAlpacaKeys();
       const racers = [];
 
       // FinnHub /quote — direct CORS. Skips commodities (FinnHub stock endpoint
-      // doesn't cover futures). One call, ~200–500 ms typical latency.
-      if (finnhubKey && !isCommodity) {
+      // doesn't cover futures). One call, ~200–500 ms typical latency, and only
+      // if the per-key budget has room (see _finnhubTryTake).
+      if (finnhubKey && !isCommodity && _finnhubTryTake(1)) {
         racers.push((async () => {
           const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${yfEnc(sym)}&token=${finnhubKey}`,
                                 { signal: AbortSignal.timeout(5000) });
@@ -5982,7 +5674,8 @@ async function fetchOneSymbolNow(sym) {
         })());
       }
 
-      // Alpaca snapshot — direct CORS. Skips crypto/commodities.
+      // Alpaca snapshot — direct CORS. Skips crypto/commodities. Built by the same
+      // converter as the batched path, so the feed's delay is recorded here too.
       if (alpacaKeys.keyId && alpacaKeys.secret && !isCommodity) {
         racers.push((async () => {
           const feed = alpacaWorkingFeed != null ? alpacaWorkingFeed : 'iex';
@@ -5992,35 +5685,21 @@ async function fetchOneSymbolNow(sym) {
             signal: AbortSignal.timeout(5000)
           });
           if (!r.ok) throw new Error('alpaca ' + r.status);
-          const snap = await r.json();
-          const trade = snap.latestTrade || snap.trade || {};
-          const quote = snap.latestQuote || snap.quote || {};
-          const bar = snap.dailyBar || snap.bar || {};
-          const prevBar = snap.prevDailyBar || {};
-          const price = trade.p || bar.c;
-          if (!price) throw new Error('alpaca no price');
-          const prevClose = prevBar.c || null;
-          return { ...makeEmptyQuote(sym),
-            name: sym, price,
-            change: prevClose ? price - prevClose : null,
-            changePct: prevClose ? ((price - prevClose) / prevClose) * 100 : null,
-            prevClose, open: bar.o || null, dayHigh: bar.h || null, dayLow: bar.l || null,
-            volume: bar.v || null,
-            bid: quote.bp || null, ask: quote.ap || null,
-            _lastUpdate: Date.now(),
-          };
+          const q = _alpacaSnapToQuote(sym, await r.json(), ALPACA_FEED_DELAY_MIN[feed] || 0);
+          if (!q) throw new Error('alpaca no price');
+          return q;
         })());
       }
 
       // stockanalysis.com — keyless and direct-CORS, so it usually wins this race
-      // outright (~30 ms warm vs 1-3 s for anything going through the proxy
-      // fleet). Equities and ETFs only; commodities still depend on the Yahoo
-      // and PAXG racers below.
-      racers.push((async () => {
-        const r = await fetchStockAnalysisQuotes([sym]);
-        if (!r || !r.data || !r.data[sym]) throw new Error('stockanalysis no data');
-        return r.data[sym];
-      })());
+      // outright. Equities and ETFs only.
+      if (!isCommodity) {
+        racers.push((async () => {
+          const r = await fetchStockAnalysisQuotes([sym]);
+          if (!r || !r.data || !r.data[sym]) throw new Error('stockanalysis no data');
+          return r.data[sym];
+        })());
+      }
 
       // PAXG real-time gold overlay — for GC=F only, Coinbase Exchange's
       // tokenized-gold ticker is direct CORS, real-time, no auth, ~1% premium
@@ -6037,36 +5716,37 @@ async function fetchOneSymbolNow(sym) {
             change: pc ? st.price - pc : null,
             changePct: pc ? ((st.price - pc) / pc) * 100 : null,
             dayHigh: st.dayHigh, dayLow: st.dayLow,
+            delayedBy: 0,
             _lastUpdate: Date.now() };
         })());
       }
 
-      // Yahoo v8 chart via proxy race — always included as the authoritative
-      // source. For commodities it's now the slowest racer but provides the
-      // freshest price + previousClose so change/changePct render correctly.
-      racers.push((async () => {
+      // Yahoo v8 chart via the proxy — both CDN hosts raced.
+      const yahooRacer = async () => {
         const urls = [
           'https://query1.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true',
           'https://query2.finance.yahoo.com/v8/finance/chart/' + yfPath(sym) + '?range=2d&interval=5m&includePrePost=true',
         ];
         const text = await fetchAnyVariantRace(urls, 9000, 6);
         const data = JSON.parse(text);
-        let q = null;
-        if (data.quoteResponse && data.quoteResponse.result && data.quoteResponse.result[0]) {
-          q = normalizeYahoo(data.quoteResponse.result[0]);
-        }
-        if (!q && data.chart && data.chart.result && data.chart.result[0]) {
-          q = normalizeYahooChart(sym, data.chart.result[0]);
-        }
+        const r = data.chart && data.chart.result && data.chart.result[0];
+        const q = r ? normalizeYahooChart(sym, r) : null;
         if (!q || q.price == null) throw new Error('yahoo no quote');
         return q;
-      })());
+      };
+      if (isCommodity) racers.push(yahooRacer());
 
       try {
         // Promise.any resolves on the first success; rejections from slower
         // racers are silently absorbed unless ALL of them fail, in which case
         // an AggregateError propagates and the catch logs it.
-        const q = await Promise.any(racers);
+        let q;
+        try {
+          q = await Promise.any(racers);
+        } catch (e) {
+          if (isCommodity) throw e;
+          q = await yahooRacer();   // stock no direct source could price
+        }
         _applyOneSymbolQuote(sym, q);
         // Kick off a background fundamentals warmer so PE/EPS/beta/marketCap
         // and the analyst rating start filling in immediately, instead of
@@ -6097,6 +5777,7 @@ async function fetchOneSymbolNow(sym) {
 const _fundamentalsWarmInFlight = new Set();
 async function _warmFinnhubFundamentals(sym, key) {
   if (fetchedFundamentals.has(sym) || _fundamentalsWarmInFlight.has(sym)) return;
+  if (!_finnhubTryTake(4)) return; // the refresh's batched pass will get to it
   _fundamentalsWarmInFlight.add(sym);
   try {
     const now = new Date();
@@ -6332,7 +6013,7 @@ async function _refreshAll(signal) {
       const cur = quoteData[s];
       if (cur && cur.name && cur.name !== s) continue;
       // Name-only lookups back off: while the proxy is down (or Yahoo simply has
-      // no name) this would otherwise re-fire v7 + chart + v6 every refresh.
+      // no name) this would otherwise re-fire a chart request every refresh.
       const now = Date.now();
       if (now - (_yahooNameTriedAt.get(s) || 0) < YAHOO_NAME_RETRY_MS) continue;
       _yahooNameTriedAt.set(s, now);
@@ -6440,11 +6121,7 @@ async function _refreshAll(signal) {
   // Mark all symbols as attempted (for UI: show "loading..." vs "retrying...")
   for (const s of symbols) attemptedSymbols.add(s);
 
-  // If Yahoo failed, try v6 endpoint as last resort
-  let yahooFinal = yahooResult;
-  if (!yahooFinal && yahooNeeded.length > 0) {
-    yahooFinal = await fetchYahooV6Quotes(yahooNeeded, signal);
-  }
+  const yahooFinal = yahooResult;
 
   // Pick primary source: prefer the one with the most matching symbols
   const allResults = [
@@ -6557,6 +6234,9 @@ async function _refreshAll(signal) {
           if (q.change == null) q.change = p.prev.change;
           if (q.changePct == null) q.changePct = p.prev.changePct;
           if (q.prevClose == null) q.prevClose = p.prev.prevClose;
+          // The kept price keeps its own provenance, not the new source's claim.
+          q.delayedBy = p.prev.delayedBy;
+          q.delayedNote = p.prev.delayedNote;
         }
         // Carry forward sticky deferred-fetch fields (perf, 52-wk, fundamentals,
         // analyst) the fresh primary lacks, so a price-only refresh doesn't blank
@@ -6571,6 +6251,32 @@ async function _refreshAll(signal) {
           // for already-named rows, the name has to survive the overwrite here.
           if ((!q.name || q.name === sym) && p.prev.name && p.prev.name !== sym) q.name = p.prev.name;
         }
+      }
+    }
+    // Alpaca's free snapshots come from IEX alone: one venue with a few percent of
+    // consolidated volume. Its latest trade can be minutes or hours old on a
+    // thinly-traded name, its "previous daily bar" closes on IEX's last print
+    // rather than the official close, and its volume counts IEX's share only. So
+    // whenever Alpaca won primary (it ranks ahead of StockAnalysis on a tie), a
+    // user who added Alpaca keys got a staler price and a day change measured
+    // from the wrong reference than a user with no keys at all. StockAnalysis
+    // carries the consolidated tape, so it supplies those fields wherever it
+    // priced the symbol; Alpaca still contributes the real bid/ask it alone has.
+    // Streamed trades then land on top of the official previous close.
+    if (result === alpacaResult && saResult) {
+      for (const sym of symbols) {
+        const q = quoteData[sym], sa = saResult.data[sym];
+        if (!q || !sa || q !== alpacaResult.data[sym] || sa.price == null) continue;
+        q.price = sa.price;
+        for (const k of ['prevClose', 'open', 'dayHigh', 'dayLow', 'volume']) {
+          if (sa[k] != null) q[k] = sa[k];
+        }
+        if (q.prevClose) {
+          q.change = q.price - q.prevClose;
+          q.changePct = (q.change / q.prevClose) * 100;
+        }
+        if (q.marketState == null && sa.marketState != null) q.marketState = sa.marketState;
+        q.delayedBy = 0; q.delayedNote = null;   // SA is real-time, so a delayed_sip fill no longer applies
       }
     }
     // Mark a stock "Unknown ticker" only when a STOCK-capable source actually
@@ -6689,6 +6395,10 @@ async function _refreshAll(signal) {
           q.changePct = sData.changePct;
           if (sData.prevClose != null) q.prevClose = sData.prevClose;
           if (sData.name && sData.name !== sym) q.name = sData.name;
+          // The price's provenance comes with it: a delayed_sip fill arriving
+          // here used to lose its marker and read as live.
+          q.delayedBy = sData.delayedBy;
+          q.delayedNote = sData.delayedNote;
         }
         // Fill missing fields from any source
         if (q.name === sym && sData.name && sData.name !== sym) q.name = sData.name;
@@ -6849,12 +6559,9 @@ async function _refreshAll(signal) {
   }
 
   // Proxy-dependent tasks run sequentially to avoid saturating the shared proxy
-  // pool. Performance goes FIRST: it's pure price-history that succeeds keylessly
-  // via Yahoo's chart, whereas the keyless fundamentals path (quoteSummary) mostly
-  // 401s — running fundamentals first would burn the proxy budget on doomed calls
-  // and leave YTD/6M/1Y blank. With a FinnHub key, fundamentals are already in
-  // fundamentalsCache from the main batch, so needsSummary is small here and the
-  // order barely matters.
+  // pool. Performance is the only proxied step: it's pure price history from
+  // Yahoo's chart. fillFundamentals goes straight to FinnHub (direct, keyed) and
+  // does nothing for a keyless user.
   const proxyTask = (async () => {
     if (needsPerf.length > 0) {
       await fetchPerformanceData(needsPerf, signal);
@@ -6874,17 +6581,18 @@ async function _refreshAll(signal) {
 
   if (signal && signal.aborted) return;
 
-  // After-hours pass: for symbols that still lack after-hours data (e.g. FinnHub was primary
-  // and doesn't provide after-hours), fetch via a SINGLE Yahoo v7 batch request (1 proxy call
-  // instead of N per-symbol calls, dramatically reducing proxy rate-limiting).
+  // After-hours pass: for symbols that still lack pre/post-market data (StockAnalysis
+  // normally supplies it; FinnHub and Alpaca don't), read it out of Yahoo's v8
+  // chart candles, one symbol at a time. This used to lead with a v7 batch, which
+  // is closed to anonymous callers (see the note above fetchYahooQuotes).
   const needsAfterHours = symbols.filter(s => {
     const q = quoteData[s];
     return q && !errorSymbols.has(s) && !fetchedAfterHours.has(s) &&
       !isCryptoSymbol(s) && !isCommoditySymbol(s) &&
       // Skip while the market is OPEN: there's no fresh pre/post data to find
       // mid-session, but postMarketPrice stays null all day — without this gate
-      // every refresh re-fired the v7 batch + per-symbol v8 chart hunts for the
-      // whole portfolio. marketState refreshes with each quote, so this releases
+      // every refresh re-fired the per-symbol v8 chart hunt for the whole
+      // portfolio. marketState refreshes with each quote, so this releases
       // by itself the moment the session flips to POST (no sticky set involved).
       q.marketState !== 'REGULAR' &&
       q.postMarketPrice == null && q.preMarketPrice == null &&
@@ -6892,55 +6600,7 @@ async function _refreshAll(signal) {
   });
   if (needsAfterHours.length > 0) {
     let ahUpdated = false;
-    // Strategy 1: Yahoo v7 batch — one proxy request for ALL symbols (race both CDN domains)
-    // Skipped while v7 is latched as failing (it 401s for anonymous callers).
-    if (!yahooV7Failed) try {
-      const crumb = await getYahooCrumb();
-      const ahSymList = needsAfterHours.map(yfEnc).join(',');
-      const ahBase1 = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + ahSymList;
-      const ahBase2 = 'https://query2.finance.yahoo.com/v7/finance/quote?symbols=' + ahSymList;
-      const ahCrumb = crumb ? '&crumb=' + encodeURIComponent(crumb) : '';
-      const text = await Promise.any([
-        fetchWithProxy(ahBase1 + ahCrumb, -1, YAHOO_AH_TIMEOUT, signal),
-        fetchWithProxy(ahBase2 + ahCrumb, -1, YAHOO_AH_TIMEOUT, signal),
-      ]);
-      const data = JSON.parse(text);
-      if (data.quoteResponse && data.quoteResponse.result) {
-        // Requested-set guard (see fetchYahooQuotes). Critical here because
-        // quoteData["__proto__"] evaluates to Object.prototype — truthy — so an
-        // attacker-controlled symbol from a compromised proxy would turn the
-        // writes below into app-wide prototype pollution.
-        const ahRequested = new Set(needsAfterHours);
-        for (const raw of data.quoteResponse.result) {
-          const sym = raw.symbol;
-          if (!ahRequested.has(sym)) continue;
-          const q = quoteData[sym];
-          if (!q) continue;
-          if (q.postMarketPrice == null && raw.postMarketPrice != null) {
-            q.postMarketPrice = raw.postMarketPrice;
-            q.postMarketChange = raw.postMarketChange || (raw.postMarketPrice - (raw.regularMarketPrice || q.price || 0));
-            ahUpdated = true;
-          }
-          if (q.preMarketPrice == null && raw.preMarketPrice != null) {
-            q.preMarketPrice = raw.preMarketPrice;
-            q.preMarketChange = raw.preMarketChange || (raw.preMarketPrice - (raw.regularMarketPreviousClose || q.prevClose || 0));
-            ahUpdated = true;
-          }
-          if (q.marketState == null && raw.marketState) q.marketState = raw.marketState;
-          // Only mark as "AH fetched" when we actually got a price. marketState alone
-          // is not enough — Yahoo v7 sometimes returns metadata without postMarketPrice
-          // even after-hours, and we still want the v8 chart fallback to try.
-          if (raw.postMarketPrice != null || raw.preMarketPrice != null) {
-            fetchedAfterHours.add(sym);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('AH v7 batch failed:', e.message);
-    }
-    // Strategy 2: For any symbols STILL missing, try v8 chart (extracts AH from candle data)
-    const stillNeeds = needsAfterHours.filter(s => !fetchedAfterHours.has(s) &&
-      quoteData[s] && quoteData[s].postMarketPrice == null && quoteData[s].preMarketPrice == null);
+    const stillNeeds = needsAfterHours;
     if (stillNeeds.length > 0) {
       // Process sequentially with delays to avoid proxy rate limits
       for (let i = 0; i < stillNeeds.length; i++) {
@@ -7041,7 +6701,9 @@ function esc(s) { if (!s) return s; const d = document.createElement('div'); d.t
 // cover the few places a raw count or score is concatenated directly.
 function _finiteOrNull(v) { return (typeof v === 'number' && isFinite(v)) ? v : null; }
 function _countOrNull(v) { return (typeof v === 'number' && isFinite(v) && v > 0) ? Math.round(v) : null; }
-function escAttr(s) { return (s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// Coerces first: a number or object here (a malformed upstream name, say) used
+// to throw inside renderTable, and names are cached, so it threw on every boot.
+function escAttr(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 // Display-only strings taken VERBATIM out of a third-party JSON payload —
 // Yahoo's pre-formatted `fmt` values for ex-dividend and earnings dates, and the
 // equivalent date strings from FinnHub and FMP. Every other quote field that
@@ -8762,8 +8424,8 @@ function initRowContextMenu() {
 // ==================== ANALYST RATING POPOVER ====================
 // Click an analyst rating cell to open a richer detail panel: scale bar with
 // the symbol's mean position, FinnHub breakdown bar (Strong Buy / Buy / Hold /
-// Sell / Strong Sell counts), and source/period metadata. Falls back gracefully
-// when the data came from Yahoo (no per-bucket breakdown available).
+// Sell / Strong Sell counts), and source/period metadata. Shows the count alone
+// when a rating arrives without a per-bucket breakdown.
 function openAnalystPopover(symbol, el) {
   const q = quoteData[symbol];
   if (!q || !q.analystRating) return; // nothing to show
@@ -8836,8 +8498,7 @@ function openAnalystPopover(symbol, el) {
   // Meta line — source attribution + analyst count
   const meta = document.getElementById('ap-meta');
   const cnt = _countOrNull(q.analystCount);
-  const source = q.analystBreakdown ? 'FinnHub' : 'Yahoo Finance';
-  meta.textContent = `${cnt ? cnt + ' analyst' + (cnt === 1 ? '' : 's') + ' • ' : ''}via ${source}`;
+  meta.textContent = `${cnt ? cnt + ' analyst' + (cnt === 1 ? '' : 's') + ' • ' : ''}via FinnHub`;
   // Position: pin near the clicked element, but clamp to viewport so the
   // wider analyst popover doesn't run off the right edge of the screen.
   const rect = el.getBoundingClientRect();
