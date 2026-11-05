@@ -13,7 +13,7 @@
   an arbitrary server. Adding a data source means adding its host here too;
   a missing host fails as a CSP violation in the console, not silently.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://finnhub.io wss://ws.finnhub.io https://data.alpaca.markets wss://stream.data.alpaca.markets https://api.coingecko.com https://api.exchange.coinbase.com https://api.binance.us https://api.kraken.com https://api.gold-api.com https://financialmodelingprep.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com https://api.allorigins.win; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://finnhub.io wss://ws.finnhub.io https://data.alpaca.markets wss://stream.data.alpaca.markets https://api.coingecko.com https://api.exchange.coinbase.com https://api.binance.us https://api.kraken.com https://api.gold-api.com https://api.hyperliquid.xyz https://financialmodelingprep.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com https://api.allorigins.win; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Static Portfolio Tracker</title>
 <meta name="description" content="A real-time portfolio tracker for stocks, crypto, and commodities in a single static HTML file. No server, no build step, no dependencies, no account — your positions never leave your browser.">
@@ -1829,7 +1829,7 @@
         <span class="step-num">3.</span>
         <span><span class="key-name">FMP</span> (optional) &mdash; Only useful if you already have a key from before September 2025, when FMP retired the endpoints this app uses for newer free plans. Adds one more quote fallback.</span>
       </div>
-      <p class="welcome-note" style="margin-top:12px; margin-bottom:0;">Without any key, live prices still work: crypto from Alpaca (no key needed), CoinGecko, Coinbase and Kraken; about 170 large US stocks and ETFs from their tokens on Kraken; other stocks and commodities from Yahoo Finance, refreshed less often. A free Alpaca or FinnHub key gives every US stock its real price and unlocks real-time streaming, and FinnHub adds full fundamentals. A superscript <span class="delay-mark" style="cursor:default">D</span> next to a price means that source serves it on a delay; a <span class="delay-mark" style="cursor:default">T</span> means it is the price of a token that tracks the stock.</p>
+      <p class="welcome-note" style="margin-top:12px; margin-bottom:0;">Without any key, live prices still work: crypto from Alpaca (no key needed), CoinGecko, Coinbase and Kraken; about 170 large US stocks and ETFs from their tokens on Kraken; other stocks and commodities from Yahoo Finance, refreshed less often. A free Alpaca or FinnHub key gives every US stock its real price and unlocks real-time streaming, and FinnHub adds full fundamentals. A superscript <span class="delay-mark" style="cursor:default">D</span> next to a price means that source serves it on a delay; a <span class="delay-mark" style="cursor:default">T</span> means it is the price of a token or contract that tracks it, with the details in its tooltip.</p>
 
       <div class="welcome-tips" id="welcome-tips">
         <button type="button" class="welcome-tips-summary" aria-label="Tips and shortcuts" aria-expanded="false" aria-controls="welcome-tips-body" onclick="toggleWelcomeTips(this)"><span class="welcome-tips-arrow">&#9656;</span> <strong style="color:#e0e0e0;">Tips &amp; shortcuts</strong> <span style="color:#666; font-weight:normal; font-size:11px;">8 things worth knowing</span></button>
@@ -2335,6 +2335,12 @@ let _alpacaWsConsecCloses = 0;
 let _alpacaWsOpenedRealTime = 0;
 let _alpacaWsSymbolCap = ALPACA_WS_MAX_SYMBOLS;
 let _alpacaWsHalt = null;               // { code, note } once Alpaca refuses in a way retrying can't fix
+// Set when Alpaca's REST API answers 401: the saved keys are wrong (a bad key
+// gets 401 on every feed, unlike a 403, which is a plan limit on one feed). Every
+// keyed Alpaca call stops until keys are saved again, and the rest of the app
+// treats the user as keyless meanwhile, so the Yahoo lookups that only run
+// without a working key (a token row's previous close) aren't skipped.
+let _alpacaKeysRejected = false;
 let wsRenderPending = false; // debounce WebSocket-triggered renders
 let wsOpenedAt = 0; // time WS last opened (for stale-stream grace period)
 let wsLastAnyTrade = 0; // time any WS trade last arrived (0 = none since open)
@@ -2670,6 +2676,7 @@ function saveAlpacaKeys() {
   flashConfirm('confirm-alpaca');
   // New keys get a fresh attempt at the stream: drop any halt from the old ones.
   _alpacaWsHalt = null;
+  _alpacaKeysRejected = false;
   _alpacaWsConsecCloses = 0;
   disconnectAlpacaWebSocket();
   connectAlpacaWebSocket();
@@ -2677,6 +2684,11 @@ function saveAlpacaKeys() {
 }
 function getAlpacaKeys() {
   return { keyId: localStorage.getItem('stonks_alpaca_key_id') || '', secret: localStorage.getItem('stonks_alpaca_secret') || '' };
+}
+// The keys to fetch data with: none once Alpaca has rejected them (see
+// _alpacaKeysRejected). getAlpacaKeys() still returns what is saved, for the form.
+function alpacaDataKeys() {
+  return _alpacaKeysRejected ? { keyId: '', secret: '' } : getAlpacaKeys();
 }
 function saveFmpKey() {
   const key = document.getElementById('fmp-key').value.trim();
@@ -3014,12 +3026,12 @@ function prefetchSampleData() {
       }
     }).catch(() => {});
   }
-  // Only a futures row with no direct real-time route (crude) is worth one proxy
-  // call here. This used to run the whole sample through fetchYahooQuotes, which
+  // Only a futures row with no direct real-time route (the ags) is worth one
+  // proxy call here. This used to run the whole sample through fetchYahooQuotes, which
   // cost every first-time visitor ~7 requests to the shared proxy before they had
   // clicked anything - the stocks and crypto were already warm from direct
   // sources, and the rest went to endpoints that were closed.
-  const _warmFutures = _warmCommodities.filter(s => !COMMODITY_REALTIME_PROXY[s] && !COMMODITY_SPOT_SYMBOL[s]);
+  const _warmFutures = _warmCommodities.filter(s => !COMMODITY_REALTIME_PROXY[s] && !COMMODITY_SPOT_SYMBOL[s] && !COMMODITY_PERP_SYMBOL[s]);
   if (_warmFutures.length > 0) fetchCommodityQuotes(_warmFutures).then(r => warm(r, false)).catch(() => {});
 }
 function loadSampleData() {
@@ -3253,6 +3265,7 @@ function importSettings(file) {
       // to be replaced when the key changed (connectFinnhubWebSocket leaves an
       // open socket alone).
       _alpacaWsHalt = null;
+      _alpacaKeysRejected = false;
       disconnectAlpacaWebSocket();
       if (finnhubWs && getApiKey() !== priorFinnhubKey) {
         try { finnhubWs.close(); } catch (_) {}
@@ -4324,8 +4337,12 @@ async function _alpacaSnapshotPage(base, feed, keyId, secret) {
       signal: AbortSignal.timeout(ALPACA_TIMEOUT)
     });
     if (resp.ok) return await resp.json();
-    if (resp.status === 401 || resp.status === 403) {
-      console.warn('Alpaca auth failed (' + resp.status + ') for feed:', feed || 'default');
+    if (resp.status === 401) {
+      _alpacaKeysRejected = true;
+      console.warn('Alpaca rejected the saved keys (401)');
+      renderAlpacaStreamStatus();
+    } else if (resp.status === 403) {
+      console.warn('Alpaca auth failed (403) for feed:', feed || 'default');
     }
   } catch (e) { console.warn('Alpaca attempt failed:', e.message); }
   return null;
@@ -4353,12 +4370,13 @@ function _alpacaSnapToQuote(sym, snap, delayMin) {
   };
 }
 async function fetchAlpacaQuotes(symbols) {
-  const { keyId, secret } = getAlpacaKeys();
+  const { keyId, secret } = alpacaDataKeys();
   if (!keyId || !secret) return null;
   // Filter out crypto and commodities — the stock endpoint doesn't handle them.
   // Crypto is covered separately by fetchAlpacaCryptoQuotes (different host path,
-  // no feed tiers, free and real-time).
-  const stockSyms = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s));
+  // no feed tiers, free and real-time). Non-US listings (SHOP.TO) are left to
+  // Yahoo: one of them in the batch could fail the request for every symbol.
+  const stockSyms = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s) && _alpacaStreamable(s));
   if (stockSyms.length === 0) return null;
   const base = 'https://data.alpaca.markets/v2/stocks/snapshots?symbols=' + stockSyms.join(',');
   // Try IEX first (real-time, free) then the server default. Whichever answers
@@ -4366,6 +4384,7 @@ async function fetchAlpacaQuotes(symbols) {
   const feedsToTry = alpacaWorkingFeed != null ? [alpacaWorkingFeed] : ['iex', ''];
   let data = null, usedFeed = null;
   for (const feed of feedsToTry) {
+    if (_alpacaKeysRejected) break;   // a 401 holds for every feed
     const page = await _alpacaSnapshotPage(base, feed, keyId, secret);
     if (page) {
       data = page; usedFeed = feed;
@@ -4391,7 +4410,7 @@ async function fetchAlpacaQuotes(symbols) {
     // missed, and tag them delayed so the table shows them as delayed rather
     // than passing a 15-minute-old print off as a live quote.
     const missing = stockSyms.filter(s => !results[s]);
-    if (missing.length > 0 && usedFeed !== 'delayed_sip') {
+    if (missing.length > 0 && usedFeed !== 'delayed_sip' && !_alpacaKeysRejected) {
       const dsBase = 'https://data.alpaca.markets/v2/stocks/snapshots?symbols=' + missing.join(',');
       const dsPage = await _alpacaSnapshotPage(dsBase, 'delayed_sip', keyId, secret);
       if (dsPage) {
@@ -4434,7 +4453,7 @@ async function fetchAlpacaQuotes(symbols) {
 // wrong silently, so they're converted explicitly below.
 let _alpacaCryptoKeylessBlocked = false;
 async function fetchAlpacaCryptoQuotes(symbols) {
-  const { keyId, secret } = getAlpacaKeys();
+  const { keyId, secret } = alpacaDataKeys();
   const keyed = !!(keyId && secret);
   if (!keyed && _alpacaCryptoKeylessBlocked) return null;
   const cryptoSyms = symbols.filter(isCryptoSymbol);
@@ -4664,7 +4683,7 @@ function scheduleCommodityBackfill(syms) {
 // ~6 connections the browser allows to that single proxy host.
 const SPOT_BASIS_REFRESH_MS = 10 * 60 * 1000;
 function _spotBasisIsFresh(sym) {
-  if (!COMMODITY_SPOT_SYMBOL[sym]) return false;
+  if (!COMMODITY_SPOT_SYMBOL[sym] && !COMMODITY_PERP_SYMBOL[sym]) return false;
   const q = quoteData[sym];
   return !!(q && q._spotBasis && q.price != null &&
             Date.now() - (q._spotBasisAt || 0) < SPOT_BASIS_REFRESH_MS);
@@ -5334,8 +5353,8 @@ async function fetchPerformanceData(symbols, signal) {
     if (gotPerf) continue;
 
     // Fallback: Alpaca historical bars
-    const { keyId, secret } = getAlpacaKeys();
-    if (keyId && secret && !isCryptoSymbol(sym) && !isCommoditySymbol(sym)) {
+    const { keyId, secret } = alpacaDataKeys();
+    if (keyId && secret && !isCryptoSymbol(sym) && !isCommoditySymbol(sym) && _alpacaStreamable(sym)) {
       for (const feed of ['iex', '']) {
         try {
           const feedParam = feed ? `&feed=${feed}` : '';
@@ -5417,9 +5436,9 @@ async function fetchCryptoSupplemental(symbols) {
 
 // --- Alpaca supplemental data (avg volume from recent bars) ---
 async function fetchAlpacaSupplemental(symbols) {
-  const { keyId, secret } = getAlpacaKeys();
+  const { keyId, secret } = alpacaDataKeys();
   if (!keyId || !secret) return;
-  const stockSyms = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s) &&
+  const stockSyms = symbols.filter(s => !isCryptoSymbol(s) && !isCommoditySymbol(s) && _alpacaStreamable(s) &&
     quoteData[s] && quoteData[s].avgVolume == null);
   if (stockSyms.length === 0) return;
 
@@ -5619,7 +5638,7 @@ async function fetchOneSymbolNow(sym) {
       // the token overlay from the start.
       const isCommodity = isCommoditySymbol(sym);
       const finnhubKey = getApiKey();
-      const alpacaKeys = getAlpacaKeys();
+      const alpacaKeys = alpacaDataKeys();
       const racers = [];
 
       // FinnHub /quote — direct CORS. Skips commodities (FinnHub stock endpoint
@@ -5642,7 +5661,7 @@ async function fetchOneSymbolNow(sym) {
 
       // Alpaca snapshot — direct CORS. Skips crypto/commodities. Built by the same
       // converter as the batched path, so the feed's delay is recorded here too.
-      if (alpacaKeys.keyId && alpacaKeys.secret && !isCommodity) {
+      if (alpacaKeys.keyId && alpacaKeys.secret && !isCommodity && _alpacaStreamable(sym)) {
         racers.push((async () => {
           const feed = alpacaWorkingFeed != null ? alpacaWorkingFeed : 'iex';
           const url = `https://data.alpaca.markets/v2/stocks/${encodeURIComponent(sym)}/snapshot${feed ? '?feed=' + feed : ''}`;
@@ -5908,7 +5927,7 @@ async function _refreshAll(signal) {
 
   // Run all API sources in parallel for speed + fallback resilience
   const hasFinnHub = !!getApiKey();
-  const alpacaKeys = getAlpacaKeys();
+  const alpacaKeys = alpacaDataKeys();
   const hasAlpaca = !!(alpacaKeys.keyId && alpacaKeys.secret);
   const hasFmp = !!getFmpKey();
   const hasCrypto = symbols.some(s => COINGECKO_IDS[s]);
@@ -6062,7 +6081,7 @@ async function _refreshAll(signal) {
   // which re-derives change from the token's 24h open and asserts the price live.
   const paintCommodityRT = (rt) => {
     if (!rt || (signal && signal.aborted)) return;
-    if (Object.keys(rt).length > 0) _noteEarly('Coinbase'); // matches the final attribution's credit for the overlay
+    for (const d of Object.values(rt)) if (d && d.src) _noteEarly(d.src); // matches the final attribution
     let painted = false;
     for (const [sym, d] of Object.entries(rt)) {
       if (!d || d.price == null) continue;
@@ -6291,18 +6310,30 @@ async function _refreshAll(signal) {
     if (missingCommodities.some(s => quoteData[s])) {
       addSource('Yahoo Finance');
     }
-    // Credit Coinbase if it provided a real-time gold (PAXG) overlay
-    if (realtimeCommodityOverlay && Object.keys(realtimeCommodityOverlay).length > 0) {
-      addSource('Coinbase');
+    // Credit whichever venue supplied each real-time commodity overlay
+    if (realtimeCommodityOverlay) {
+      for (const d of Object.values(realtimeCommodityOverlay)) if (d && d.src) addSource(d.src);
     }
-    setStatus('Data via ' + [...sourceNames].join(' + '), 'live');
+    // Wrong keys are the likeliest first-run mistake; until now the only sign of
+    // them was a console warning while the table quietly fell back to keyless.
+    if (_alpacaKeysRejected && getAlpacaKeys().keyId) {
+      setStatus('Data via ' + [...sourceNames].join(' + ') + ' \u2014 Alpaca rejected your keys; check them in Settings', 'error');
+    } else {
+      setStatus('Data via ' + [...sourceNames].join(' + '), 'live');
+    }
     updateWsIndicator();
     document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
   } else {
-    // No primary source returned data — check if commodity retry got anything
-    const hasCommodityData = missingCommodities.some(s => quoteData[s]);
+    // No primary source returned data — check if the commodity retry or a
+    // real-time overlay (which needs no primary) priced anything. Without the
+    // overlay check, a commodities-only portfolio priced live through a proxy
+    // outage still announced that every source was down.
+    const retried = missingCommodities.some(s => quoteData[s]);
+    const rtSources = realtimeCommodityOverlay
+      ? [...new Set(Object.values(realtimeCommodityOverlay).map(d => d && d.src).filter(Boolean))] : [];
+    const hasCommodityData = retried || rtSources.length > 0;
     if (hasCommodityData) {
-      setStatus('Data via Yahoo Finance', 'live');
+      setStatus('Data via ' + [...(retried ? ['Yahoo Finance'] : []), ...rtSources].join(' + '), 'live');
       updateWsIndicator();
       document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
     } else {
@@ -9920,6 +9951,7 @@ function renderAlpacaStreamStatus() {
   const { keyId, secret } = getAlpacaKeys();
   let text;
   if (!keyId || !secret) text = 'Add Alpaca keys above to use it.';
+  else if (_alpacaKeysRejected) text = 'Alpaca rejected these keys. Check both values and save again.';
   else if (!isAlpacaStreamEnabled()) text = 'Off.';
   else if (_alpacaWsHalt) text = _alpacaWsHalt.note;
   else if (_alpacaStreamLive()) {
@@ -10126,12 +10158,13 @@ function _rankedStreamSymbols() {
     // renders and churning subscriptions for no reason.
     .sort((a, b) => (sizeOf(b) - sizeOf(a)) || a.localeCompare(b));
 }
-// Alpaca's stream is US equities only and uses dotted share classes (BRK.B).
-// A symbol in any other shape could get a whole subscription batch rejected, so
-// those go to FinnHub or polling instead. The class suffix is limited to A-C on
-// purpose: other single letters after a dot are mostly foreign exchanges in
-// Yahoo-style tickers (VOD.L London, XYZ.V TSX Venture), and two-letter
-// suffixes nearly always are (SHOP.TO, SAP.DE).
+// Alpaca's stream and stock endpoints are US equities only and use dotted share
+// classes (BRK.B). A symbol in any other shape could get a whole subscription
+// batch - or a whole batched snapshots/bars request, and with it every stock's
+// price - rejected, so those go to FinnHub, Yahoo or polling instead. The class
+// suffix is limited to A-C on purpose: other single letters after a dot are
+// mostly foreign exchanges in Yahoo-style tickers (VOD.L London, XYZ.V TSX
+// Venture), and two-letter suffixes nearly always are (SHOP.TO, SAP.DE).
 function _alpacaStreamable(sym) {
   return /^[A-Z]{1,5}(\.[A-C])?$/.test(sym);
 }
@@ -10271,24 +10304,45 @@ function _etNow(ts) {
   const etOffsetH = isDST ? -4 : -5;
   return new Date(utcMs + etOffsetH * 3600000);
 }
+// NYSE full-day closures and 1:00 pm ET early closes, as published at
+// https://www.nyse.com/markets/hours-calendars (checked 2026-11-04). Without
+// them a holiday reads as a normal session: the stream badge reports a closed
+// market as "Live (no data)" and the after-hours column hides all day. Dates
+// past the end of the table fall back to the plain weekday schedule - extend it
+// when NYSE publishes the next year.
+const NYSE_HOLIDAYS = new Set([
+  '2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25',
+  '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25',
+  '2027-01-01', '2027-01-18', '2027-02-15', '2027-03-26', '2027-05-31',
+  '2027-06-18', '2027-07-05', '2027-09-06', '2027-11-25', '2027-12-24',
+  '2028-01-17', '2028-02-21', '2028-04-14', '2028-05-29', '2028-06-19',
+  '2028-07-04', '2028-09-04', '2028-11-23', '2028-12-25',
+]);
+const NYSE_EARLY_CLOSES = new Set(['2026-11-27', '2026-12-24', '2027-11-26', '2028-07-03', '2028-11-24']);
+// For a Date from _etNow(): is the exchange shut all day?
+function _isMarketHoliday(et) {
+  const day = et.getUTCDay();
+  return day === 0 || day === 6 || NYSE_HOLIDAYS.has(et.toISOString().slice(0, 10));
+}
 function getMarketPhase() {
   // Returns 'active' during US market + extended hours (4am-8pm ET weekdays),
-  // 'after' for weeknight off-hours (8pm-4am ET), or 'closed' for weekends.
+  // 'after' for weeknight off-hours (8pm-4am ET), or 'closed' for weekends and
+  // exchange holidays.
   const et = _etNow();
-  const day = et.getUTCDay(); // 0=Sun, 6=Sat
   const hour = et.getUTCHours();
-  if (day === 0 || day === 6) return 'closed';
+  if (_isMarketHoliday(et)) return 'closed';
   if (hour >= 4 && hour < 20) return 'active';
   return 'after'; // weeknight off-hours (8pm-4am ET)
 }
-// True during the US regular cash session (9:30am-4:00pm ET, weekdays) — the
-// window in which there is NO current pre/post-market price to show.
+// True during the US regular cash session (9:30am-4:00pm ET on trading days,
+// 1:00pm on early-close days) — the window in which there is NO current
+// pre/post-market price to show.
 function isRegularMarketHours(ts) {
   const et = _etNow(ts);
-  const day = et.getUTCDay();
-  if (day === 0 || day === 6) return false;
+  if (_isMarketHoliday(et)) return false;
   const mins = et.getUTCHours() * 60 + et.getUTCMinutes();
-  return mins >= 570 && mins < 960; // 09:30 .. 16:00
+  const close = NYSE_EARLY_CLOSES.has(et.toISOString().slice(0, 10)) ? 780 : 960;
+  return mins >= 570 && mins < close; // 09:30 .. 16:00 (13:00)
 }
 // Whether to hide the after-hours / pre-market cell. During the regular session
 // any pre/post value still in quoteData is STALE — the refresh preserves those
@@ -10332,8 +10386,9 @@ function _preserveAcrossTick(fresh, existing, fields) {
 // byte-identical copies of this.
 function _applyRealtimeCommodity(q, sym, rt) {
   if (rt.spot) {
-    // Spot feeds send a price and nothing else, and they quote SPOT while the
-    // row is a dated futures contract - silver spot 64.93 against "Silver Dec
+    // Spot feeds (and the energy perps, which are priced the same way) send a
+    // price and nothing else, and they quote SPOT while the row is a dated
+    // futures contract - silver spot 64.93 against "Silver Dec
     // 26" at 65.15, for instance. Carrying the futures previous close across
     // untouched would fold that basis straight into the day change: 0.34% of
     // $65 is $0.22, against a typical daily move of about $1. So convert the
@@ -10365,6 +10420,7 @@ function _applyRealtimeCommodity(q, sym, rt) {
     if (q.dayLow != null && q.price < q.dayLow) q.dayLow = q.price;
     if (!q.name || q.name === sym) q.name = commodityName(sym);
     q.delayedBy = 0; q.delayedNote = null;
+    q.tokenNote = rt.note || null;   // set for a perp stand-in, see COMMODITY_PERP_SYMBOL
     q._lastUpdate = Date.now();
     return;
   }
@@ -10385,6 +10441,7 @@ function _applyRealtimeCommodity(q, sym, rt) {
   // is live", so delayMarkHtml won't fall back to marking it delayed on the
   // grounds that it is a futures symbol.
   q.delayedBy = 0; q.delayedNote = null;
+  q.tokenNote = null;
   q._lastUpdate = Date.now();
 }
 
@@ -10502,8 +10559,9 @@ async function _krakenCommodityStats(pairs) {
 // These are SPOT prices; the rows are dated futures contracts. _applyRealtimeCommodity
 // converts the previous close onto the spot basis so the day change stays
 // honest. Copper is 'HG' here, not the XCU you would expect.
-// Commodities with no real-time route at all (no token, no spot feed): crude,
-// Brent, natural gas and the ags. There IS a real-time, keyless, direct-CORS
+// Commodities with no real-time route at all (no token, no spot feed, no perp):
+// the ags - and crude, Brent and natural gas whenever Hyperliquid (below) is
+// unreachable. There IS a real-time, keyless, direct-CORS
 // quote for an ETF that tracks each - but an ETF is a different instrument, not
 // a better feed (USO trades near $162 while WTI is near $104, and the ratio
 // drifts with roll), so it is offered as a pointer in the delay tooltip rather
@@ -10557,8 +10615,79 @@ async function _spotMetalPrice(code) {
   }
 }
 
+// Energy futures, keyless and direct-CORS: the perpetual contracts that track
+// them on Hyperliquid's "xyz" market. Before this, crude, Brent and natural gas
+// had exactly one source - Yahoo's chart through the one public proxy - so a
+// proxy outage left them on "retrying..." for as long as it lasted (measured:
+// CL=F 522'd in most of the October 2026 audits). Verified 2026-11-04 against
+// the dated contracts: xyz:CL 87.39 vs Coinbase's regulated nano crude 87.35,
+// xyz:NATGAS 2.938 vs 2.936, xyz:BRENTOIL 93.98 vs Yahoo's 94.29.
+//   - A perp is a different instrument, like the stock tokens, and it trades
+//     around the clock, so these rows carry the "T" marker with a note saying
+//     so. It is priced through the spot path of _applyRealtimeCommodity: the
+//     previous close is converted from the futures quote at the observed ratio,
+//     so contract basis and roll stay out of the day change.
+//   - One allMids call (~3 KB, weight 2 of the 1200/min per-IP budget) covers
+//     every contract, and it is cached briefly so a tick asks once, not per row.
+//   - Its "prevDayPx" is the price 24 hours ago, not a settlement, so it is not
+//     used; with no futures quote yet the change is a dash.
+// Metals stay on gold-api's spot feed; xyz lists them too, but that would be a
+// third route to rows that already have two.
+const COMMODITY_PERP_SYMBOL = {
+  'CL=F': 'xyz:CL',
+  'BZ=F': 'xyz:BRENTOIL',
+  'NG=F': 'xyz:NATGAS',
+};
+const PERP_TIMEOUT = 3000;
+const PERP_TTL = 4000;
+const PERP_FAIL_THRESHOLD = 3;
+const PERP_COOLDOWN = 60000;
+let _perpMidsCache = null;                // { mids, t }
+let _perpMidsLoading = null;
+let _perpSkipUntil = 0;
+let _perpFailStreak = 0;
+let _perpDisabled = false;                // latched on 403/451: a refusal, not an outage
+async function _perpMids() {
+  if (_perpMidsCache && Date.now() - _perpMidsCache.t < PERP_TTL) return _perpMidsCache.mids;
+  if (_perpDisabled || Date.now() < _perpSkipUntil) return null;
+  if (_perpMidsLoading) return _perpMidsLoading;
+  _perpMidsLoading = (async () => {
+    try {
+      const r = await fetch('https://api.hyperliquid.xyz/info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'allMids', dex: 'xyz' }),
+        signal: AbortSignal.timeout(PERP_TIMEOUT),
+      });
+      if (r.status === 403 || r.status === 451) { _perpDisabled = true; return null; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      if (!j || typeof j !== 'object') throw new Error('no mids');
+      _perpFailStreak = 0;
+      _perpMidsCache = { mids: j, t: Date.now() };
+      return j;
+    } catch (e) {
+      if (++_perpFailStreak >= PERP_FAIL_THRESHOLD) {
+        _perpSkipUntil = Date.now() + PERP_COOLDOWN;
+        _perpFailStreak = 0;
+        dbg('Hyperliquid unreachable - backing off for ' + (PERP_COOLDOWN / 1000) + 's');
+      }
+      return null;
+    } finally {
+      _perpMidsLoading = null;
+    }
+  })();
+  return _perpMidsLoading;
+}
+async function _perpPrice(coin) {
+  const mids = await _perpMids();
+  if (!mids || !Object.prototype.hasOwnProperty.call(mids, coin)) return null;
+  const price = Number(mids[coin]);
+  return isFinite(price) && price > 0 ? price : null;
+}
+
 async function _overlayRealtimeCommodities(commoditySyms) {
-  const targets = commoditySyms.filter(s => COMMODITY_REALTIME_PROXY[s] || COMMODITY_KRAKEN_PROXY[s] || COMMODITY_SPOT_SYMBOL[s]);
+  const targets = commoditySyms.filter(s => COMMODITY_REALTIME_PROXY[s] || COMMODITY_KRAKEN_PROXY[s] || COMMODITY_SPOT_SYMBOL[s] || COMMODITY_PERP_SYMBOL[s]);
   if (targets.length === 0) return null;
   const cbOpen = Date.now() >= _cbSkipUntil; // Coinbase breaker closed?
   const overlay = {}; // user sym → { price, prevClose?, dayHigh?, dayLow? }
@@ -10567,17 +10696,32 @@ async function _overlayRealtimeCommodities(commoditySyms) {
     // Coinbase is breakered or came back empty. Sequential on purpose: the
     // point is a fallback, not two requests per tick in the happy path.
     let st = null;
-    if (cbOpen && COMMODITY_REALTIME_PROXY[sym]) st = await _coinbaseStats(COMMODITY_REALTIME_PROXY[sym]);
-    if (!st && COMMODITY_KRAKEN_PROXY[sym]) st = await _krakenCommodityStats(COMMODITY_KRAKEN_PROXY[sym]);
+    if (cbOpen && COMMODITY_REALTIME_PROXY[sym]) {
+      st = await _coinbaseStats(COMMODITY_REALTIME_PROXY[sym]);
+      if (st) st = { ...st, src: 'Coinbase' };
+    }
+    if (!st && COMMODITY_KRAKEN_PROXY[sym]) {
+      st = await _krakenCommodityStats(COMMODITY_KRAKEN_PROXY[sym]);
+      if (st) st = { ...st, src: 'Kraken' };
+    }
     // Last tier: spot. For silver/platinum/palladium/copper it is the ONLY
     // real-time route (no token exists); for gold it is a third fallback behind
     // Coinbase and Kraken.
     if (!st && COMMODITY_SPOT_SYMBOL[sym]) {
       const spot = await _spotMetalPrice(COMMODITY_SPOT_SYMBOL[sym]);
-      if (spot != null) st = { price: spot, spot: true };
+      if (spot != null) st = { price: spot, spot: true, src: 'gold-api' };
+    }
+    if (!st && COMMODITY_PERP_SYMBOL[sym]) {
+      const coin = COMMODITY_PERP_SYMBOL[sym];
+      const px = await _perpPrice(coin);
+      if (px != null) st = { price: px, spot: true, src: 'Hyperliquid',
+        note: 'Price of the ' + coin.slice(4) + ' perpetual on Hyperliquid, a contract that tracks ' +
+              commodityName(sym) + ' futures. It trades separately and around the clock, so it can ' +
+              'differ from the exchange price, most of all outside market hours.' };
     }
     if (!st) return;
-    overlay[sym] = { price: st.price, prevClose: st.prevClose, dayHigh: st.dayHigh, dayLow: st.dayLow, spot: st.spot === true };
+    overlay[sym] = { price: st.price, prevClose: st.prevClose, dayHigh: st.dayHigh, dayLow: st.dayLow,
+                     spot: st.spot === true, src: st.src || null, note: st.note || null };
   }));
   return Object.keys(overlay).length > 0 ? overlay : null;
 }
@@ -10710,7 +10854,10 @@ async function refreshAlwaysOnOnly() {
         errorSymbols.delete(sym);
         updated = true;
       }
-      if (!commoditySourceLabel) commoditySourceLabel = 'Coinbase';
+      if (!commoditySourceLabel) {
+        const venues = [...new Set(Object.values(realtimeOverlay).map(d => d && d.src).filter(Boolean))];
+        if (venues.length) commoditySourceLabel = venues.join(' + ');
+      }
     }
   }
 
@@ -10820,11 +10967,12 @@ function setupAutoRefresh() {
             refreshAlwaysOnOnly().catch(e => dbg('off-hours refresh failed:', e && e.message));
           }
         } else {
-          // Weekend: only crypto/commodity, no stock API calls
+          // Weekend or exchange holiday: only crypto/commodity, no stock API calls
           if (hasAlwaysOn) {
             refreshAlwaysOnOnly().catch(e => dbg('off-hours refresh failed:', e && e.message));
           } else {
-            setStatus('Market closed \u2014 auto-refresh paused (weekend)', '');
+            const wd = _etNow().getUTCDay();
+            setStatus('Market closed \u2014 auto-refresh paused (' + (wd === 0 || wd === 6 ? 'weekend' : 'holiday') + ')', '');
           }
         }
       }
