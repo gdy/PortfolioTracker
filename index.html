@@ -13,7 +13,7 @@
   an arbitrary server. Adding a data source means adding its host here too;
   a missing host fails as a CSP violation in the console, not silently.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://finnhub.io wss://ws.finnhub.io https://data.alpaca.markets wss://stream.data.alpaca.markets https://api.coingecko.com https://api.exchange.coinbase.com https://api.binance.us https://api.kraken.com https://api.gold-api.com https://api.hyperliquid.xyz https://financialmodelingprep.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com https://api.allorigins.win; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://gdy.goatcounter.com; font-src 'self' data:; connect-src 'self' https://finnhub.io wss://ws.finnhub.io https://data.alpaca.markets wss://stream.data.alpaca.markets https://api.coingecko.com https://api.exchange.coinbase.com https://api.binance.us https://api.kraken.com https://api.gold-api.com https://api.hyperliquid.xyz https://financialmodelingprep.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com https://api.allorigins.win; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Static Portfolio Tracker</title>
 <meta name="description" content="A real-time portfolio tracker for stocks, crypto, and commodities in a single static HTML file. No server, no build step, no dependencies, no account — your positions never leave your browser.">
@@ -11020,6 +11020,51 @@ dateInput.addEventListener('input', updateDateLabel);
 dateInput.addEventListener('change', updateDateLabel);
 updateDateLabel();
 
+// ==================== VISIT COUNTER ====================
+// One anonymous page-view count per load, so the author can see how many people
+// open the app and which sites sent them. GitHub Pages measures nothing, and
+// the repo's own traffic stats only count visits to the GitHub repository.
+//
+// Built to keep the app's promises rather than the usual analytics snippet:
+//   - No script. GoatCounter's count.js would be a remote script, which the CSP
+//     blocks on purpose (any script on this origin can read the API keys). This
+//     is a single image request, the "pixel" GoatCounter documents, so the CSP
+//     only gains its host under img-src.
+//   - Nothing about the portfolio. The page is always reported as "/", never the
+//     URL: a shared-portfolio link carries its positions in the hash. The
+//     referrer is cut to the referring site's origin (https://alpaca.markets),
+//     and the request itself carries no Referer under the no-referrer policy.
+//   - Only the official deployment counts, so localhost, file:// and forks
+//     report nothing to someone else's dashboard.
+//   - Visitors who ask not to be tracked (Global Privacy Control or Do Not
+//     Track) aren't counted, and neither are automated browsers.
+// GoatCounter sets no cookies and never writes IP addresses or user agents to
+// disk (it keeps a session hash in memory for 8 hours to count unique visits).
+const VISIT_COUNTER_HOST = 'gdy.github.io';
+const GOATCOUNTER_CODE = 'gdy';   // the site code from goatcounter.com; empty disables counting
+function countVisit(host = location.hostname) {
+  try {
+    if (!GOATCOUNTER_CODE || host !== VISIT_COUNTER_HOST) return null;
+    if (navigator.globalPrivacyControl === true || navigator.doNotTrack === '1') return null;
+    if (navigator.webdriver) return null;
+    // GoatCounter's own opt-out convention, so the author's visits don't count:
+    // localStorage.setItem('skipgc', 't') in this browser.
+    try { if (localStorage.getItem('skipgc') === 't') return null; } catch (_) {}
+    let ref = '';
+    try {
+      const r = new URL(document.referrer);
+      if (r.hostname !== host && (r.protocol === 'https:' || r.protocol === 'http:')) ref = r.origin;
+    } catch (_) { /* no referrer, or not a URL */ }
+    const params = new URLSearchParams({ p: '/', t: 'Static Portfolio Tracker', r: ref,
+                                         rnd: Math.random().toString(36).slice(2) });
+    const url = 'https://' + GOATCOUNTER_CODE + '.goatcounter.com/count?' + params;
+    new Image().src = url;   // fire and forget; a blocked or failed count changes nothing
+    return url;
+  } catch (_) {
+    return null;
+  }
+}
+
 // ==================== INIT ====================
 // Migrate existing shorthand symbols (e.g. BTC -> BTC-USD, GOLD -> GC=F)
 let migrated = false;
@@ -11236,6 +11281,7 @@ initAlpacaStreamSetting();
 // lands, which is also when ranking switches from the cold-start cost-basis
 // fallback to real market value.
 connectStreams();
+countVisit();
 if (portfolio.length > 0) refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
 // Warm sample-data quotes in the background for first-time users (empty portfolio,
 // welcome guide not yet dismissed) so the Load Sample Data button paints instantly
