@@ -750,10 +750,13 @@
     overflow-y: auto; color: #d0d0d0;
   }
   .import-modal h3 { margin-bottom: 12px; color: #e0e0e0; font-size: 15px; }
+  /* The glyph is 18px, but the tap target is 44px: on a phone an 11x18 "x"
+     took several tries to hit. The negative margin keeps the glyph where it was. */
   .import-modal .close-btn,
   .welcome-banner .close-btn {
     float: right; background: none; border: none; color: #888;
     font-size: 18px; cursor: pointer; line-height: 1;
+    padding: 13px; margin: -13px -13px 0 0;
   }
   .import-modal .close-btn:hover,
   .welcome-banner .close-btn:hover { color: #fff; }
@@ -1071,8 +1074,8 @@
   .analyst-popover .ap-breakdown-list .ap-bucket-pct { color: #666; text-align: right; min-width: 36px; }
   .analyst-popover .ap-meta { font-size: 10px; color: #666; margin-top: 8px; padding-top: 8px; border-top: 1px solid #2a2a44; }
   .analyst-popover .ap-close {
-    position: absolute; top: 6px; right: 8px;
-    background: none; border: none; color: #666; font-size: 16px; cursor: pointer; padding: 0; line-height: 1;
+    position: absolute; top: -4px; right: -2px;   /* glyph stays at 6px / 8px; the padding is the tap target */
+    background: none; border: none; color: #666; font-size: 16px; cursor: pointer; padding: 10px; line-height: 1;
   }
   .analyst-popover .ap-close:hover { color: #fff; }
   @keyframes alertPulse { 0%,100% { box-shadow: none; } 50% { box-shadow: inset 0 0 12px rgba(255,200,0,0.15); } }
@@ -1263,6 +1266,10 @@
     /* Portfolio bar */
     .portfolio-bar select { flex: 1; font-size: 16px; min-height: 36px; }
     .portfolio-btn { width: 36px; height: 36px; font-size: 16px; }
+
+    /* The Settings panel's secondary buttons and Show Charts are sized for a
+       mouse (18-22px tall); give them a finger-sized target here. */
+    #settings-wrap .btn, .alloc-toggle { min-height: 32px; }
 
     /* Allocation chart */
     .allocation-wrap { flex-direction: column; }
@@ -1621,7 +1628,7 @@
 
 <div class="import-overlay" id="import-overlay" onclick="if(event.target===this)closeImportModal()">
   <div class="import-modal">
-    <button class="close-btn" onclick="closeImportModal()">&times;</button>
+    <button class="close-btn" onclick="closeImportModal()" aria-label="Close import">&times;</button>
     <h3>Import Positions</h3>
     <div class="import-dropzone" id="import-dropzone" onclick="document.getElementById('import-file').click()">
       Drop a CSV file here or click to browse
@@ -1644,7 +1651,7 @@
 <!-- Column Picker -->
 <div class="import-overlay" id="column-picker-overlay" onclick="if(event.target===this)toggleColumnPicker()">
   <div class="import-modal column-picker-modal" style="width:400px;">
-    <button class="close-btn" onclick="toggleColumnPicker()">&times;</button>
+    <button class="close-btn" onclick="toggleColumnPicker()" aria-label="Close field picker">&times;</button>
     <h3 id="column-picker-title">Visible Columns</h3>
     <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
       <button class="btn" onclick="hiddenColumns=[];saveHiddenColumns();renderColumnPicker();buildHeader();renderTable();">Show All</button>
@@ -1659,7 +1666,7 @@
 <!-- Share Modal -->
 <div class="import-overlay" id="share-overlay" onclick="if(event.target===this)document.getElementById('share-overlay').classList.remove('show')">
   <div class="import-modal" style="width:480px;">
-    <button class="close-btn" onclick="document.getElementById('share-overlay').classList.remove('show')">&times;</button>
+    <button class="close-btn" onclick="document.getElementById('share-overlay').classList.remove('show')" aria-label="Close share">&times;</button>
     <h3>Share Portfolio</h3>
     <p style="color:#888; font-size:12px; margin-bottom:10px;">Anyone with this link can view your positions (symbols, shares, cost basis, dates). No API keys or notes are shared.</p>
     <textarea id="share-url" readonly style="width:100%; height:60px; background:#0a0a15; border:1px solid #444; color:#4a9eff; font-size:12px; padding:8px; border-radius:3px; resize:none;"></textarea>
@@ -1673,7 +1680,7 @@
 <!-- Keyboard Shortcuts Overlay -->
 <div class="import-overlay" id="shortcuts-overlay" onclick="if(event.target===this)document.getElementById('shortcuts-overlay').classList.remove('show')">
   <div class="import-modal" style="width:380px;">
-    <button class="close-btn" onclick="document.getElementById('shortcuts-overlay').classList.remove('show')">&times;</button>
+    <button class="close-btn" onclick="document.getElementById('shortcuts-overlay').classList.remove('show')" aria-label="Close shortcuts">&times;</button>
     <h3>Keyboard Shortcuts</h3>
     <div style="display:grid; grid-template-columns:auto 1fr; gap:6px 16px; font-size:13px; color:#ccc;">
       <kbd style="background:#1a1a30; padding:2px 8px; border-radius:3px; font-size:11px; text-align:center;">?</kbd><span>Show this help</span>
@@ -1690,7 +1697,7 @@
 
 <!-- Analyst Rating Popover -->
 <div class="analyst-popover" id="analyst-popover" style="display:none;" onclick="event.stopPropagation()">
-  <button class="ap-close" onclick="_closeAnalystPopover()" title="Close">&#215;</button>
+  <button class="ap-close" onclick="_closeAnalystPopover()" title="Close" aria-label="Close analyst ratings">&#215;</button>
   <div class="ap-header">
     <span class="ap-sym" id="ap-sym"></span>
     <span class="ap-period" id="ap-period"></span>
@@ -1829,7 +1836,7 @@
         <span class="step-num">3.</span>
         <span><span class="key-name">FMP</span> (optional) &mdash; Only useful if you already have a key from before September 2025, when FMP retired the endpoints this app uses for newer free plans. Adds one more quote fallback.</span>
       </div>
-      <p class="welcome-note" style="margin-top:12px; margin-bottom:0;">Without any key, live prices still work: crypto from Alpaca (no key needed), CoinGecko, Coinbase and Kraken; about 170 large US stocks and ETFs from their tokens on Kraken; other stocks and commodities from Yahoo Finance, refreshed less often. A free Alpaca or FinnHub key gives every US stock its real price and unlocks real-time streaming, and FinnHub adds full fundamentals. A superscript <span class="delay-mark" style="cursor:default">D</span> next to a price means that source serves it on a delay; a <span class="delay-mark" style="cursor:default">T</span> means it is the price of a token or contract that tracks it, with the details in its tooltip.</p>
+      <p class="welcome-note" style="margin-top:12px; margin-bottom:0;">Without any key, live prices still work: crypto from Alpaca (no key needed), CoinGecko, Coinbase and Kraken; about 170 large US stocks and ETFs from their tokens on Kraken; metals from a spot feed and crude, Brent and natural gas from contracts that track them; other stocks and agricultural commodities from Yahoo Finance, refreshed less often. A free Alpaca or FinnHub key gives every US stock its real price and unlocks real-time streaming, and FinnHub adds full fundamentals. A superscript <span class="delay-mark" style="cursor:default">D</span> next to a price means that source serves it on a delay; a <span class="delay-mark" style="cursor:default">T</span> means it is the price of a token or contract that tracks it, with the details in its tooltip.</p>
 
       <div class="welcome-tips" id="welcome-tips">
         <button type="button" class="welcome-tips-summary" aria-label="Tips and shortcuts" aria-expanded="false" aria-controls="welcome-tips-body" onclick="toggleWelcomeTips(this)"><span class="welcome-tips-arrow">&#9656;</span> <strong style="color:#e0e0e0;">Tips &amp; shortcuts</strong> <span style="color:#666; font-weight:normal; font-size:11px;">8 things worth knowing</span></button>
@@ -2171,6 +2178,7 @@ const WS_STREAM_ALIVE_MS = 60000;         // ...but only if the stream printed s
 // like a stream that missed everything.
 const WS_VOL_WINDOW_MAX_MS = 900000;
 const OFF_HOURS_FULL_INTERVAL = 60000;    // min interval between full off-hours refreshes
+const CLOSED_FILL_INTERVAL = 5 * 60 * 1000; // weekends/holidays: retry for rows still missing a name or previous close
 const WS_RECONNECT_DELAY = 5000;
 const WS_HEALTHY_MS = 30000;              // socket must stay open this long to clear the reconnect backoff
 const FLASH_TITLE_INTERVAL = 900;
@@ -6772,6 +6780,13 @@ function fmtPrice(n) {
   else maxD = 8;
   return _nf(2, maxD).format(n);
 }
+// A change is shown to the precision of the price that moved, not its own size.
+// fmtPrice gives sub-$1 amounts four or more decimals, which a penny token's price
+// needs, but it turned a $0.54 move in a $260 stock into "+0.5423".
+function fmtChange(chg, price) {
+  if (chg == null || isNaN(chg)) return '\u2014';
+  return Math.abs(price) >= 1 ? _nf(2, 2).format(chg) : fmtPrice(chg);
+}
 function fmtDollar(n) {
   if (n == null || isNaN(n)) return '\u2014';
   return (n < 0 ? '-' : '') + '$' + fmt(Math.abs(n));
@@ -6869,12 +6884,12 @@ function afterHoursHtml(q, price, opts) {
   if (q.postMarketPrice != null) {
     const chg = q.postMarketChange != null ? q.postMarketChange : (q.postMarketPrice - (price || 0));
     return `<span class="after-hours">${labels ? 'AH: ' : ''}${fmtPrice(q.postMarketPrice)} `
-      + `<span class="${cc(chg)}">${chg >= 0 ? '+' : ''}${fmtPrice(chg)}</span></span>`;
+      + `<span class="${cc(chg)}">${chg >= 0 ? '+' : ''}${fmtChange(chg, q.postMarketPrice)}</span></span>`;
   }
   if (q.preMarketPrice != null) {
     const chg = q.preMarketChange != null ? q.preMarketChange : (q.preMarketPrice - (q.prevClose || price || 0));
     return `<span class="after-hours">${labels ? 'PM: ' : ''}${fmtPrice(q.preMarketPrice)} `
-      + `<span class="${cc(chg)}">${chg >= 0 ? '+' : ''}${fmtPrice(chg)}</span></span>`;
+      + `<span class="${cc(chg)}">${chg >= 0 ? '+' : ''}${fmtChange(chg, q.preMarketPrice)}</span></span>`;
   }
   return empty;
 }
@@ -6957,7 +6972,7 @@ function getCellHtml(col, pos, q, computed) {
     }
     case 'name': { const _nm = quoteName(pos.symbol, q); return `<td class="left" style="color:#888; max-width:140px; overflow:hidden; text-overflow:ellipsis; cursor:pointer;" title="${escAttr(_nm)}" onclick="event.stopPropagation();openRowMenu('${sym}',this)">${computed.isError ? '<span class="error-text">Not found</span>' : esc(_nm)}</td>`; }
     case 'last': return `<td class="${cc(change)}">${priceCell}</td>`;
-    case 'change': return `<td class="${cc(change)}">${change != null ? (change >= 0 ? '+' : '') + fmtPrice(change) : '\u2014'}</td>`;
+    case 'change': return `<td class="${cc(change)}">${change != null ? (change >= 0 ? '+' : '') + fmtChange(change, price) : '\u2014'}</td>`;
     case 'changePct': return `<td class="${cc(changePct)}">${changePct != null ? fmtPct(changePct) : '\u2014'}</td>`;
     case 'afterHours': return `<td>${ahDisplay}</td>`;
     case 'shares': return `<td><div class="num-wrap"><input class="cell-input" type="number" value="${pos.shares}" onchange="updateShares('${sym}', this.value)" /><div class="num-spin"><button onclick="stepInput(this,1,'${sym}','shares')">&#9650;</button><button onclick="stepInput(this,-1,'${sym}','shares')">&#9660;</button></div></div></td>`;
@@ -7320,7 +7335,7 @@ function updatePriceCells() {
         }
         case 'change':
           td.className = cc(change);
-          td.textContent = change != null ? (change >= 0 ? '+' : '') + fmtPrice(change) : '\u2014';
+          td.textContent = change != null ? (change >= 0 ? '+' : '') + fmtChange(change, price) : '\u2014';
           break;
         case 'changePct':
           td.className = cc(changePct);
@@ -7428,7 +7443,7 @@ function updateMobileCardPrices() {
     const changeEl = card.querySelector('.mobile-card-change');
     if (changeEl) {
       let txt = '';
-      if (change != null) txt += (change >= 0 ? '+' : '') + fmtPrice(change);
+      if (change != null) txt += (change >= 0 ? '+' : '') + fmtChange(change, price);
       if (changePct != null) txt += (txt ? ' ' : '') + '(' + fmtPct(changePct) + ')';
       changeEl.textContent = txt;
       applySignClass(changeEl, changePct);
@@ -7938,7 +7953,7 @@ function renderMobileCards() {
         <div class="mobile-card-right">
           <div class="mobile-card-price ${cc(change)}">${priceHtml}</div>
           <div class="mobile-card-change ${cc(changePct)}">
-            ${change != null ? (change >= 0 ? '+' : '') + fmtPrice(change) : ''}
+            ${change != null ? (change >= 0 ? '+' : '') + fmtChange(change, price) : ''}
             ${changePct != null ? '(' + fmtPct(changePct) + ')' : ''}
           </div>
         </div>
@@ -10967,8 +10982,29 @@ function setupAutoRefresh() {
             refreshAlwaysOnOnly().catch(e => dbg('off-hours refresh failed:', e && e.message));
           }
         } else {
-          // Weekend or exchange holiday: only crypto/commodity, no stock API calls
-          if (hasAlwaysOn) {
+          // Weekend or exchange holiday: only crypto/commodity, no stock API calls -
+          // except to finish a row the market-closed schedule would otherwise
+          // leave half-filled all weekend. The one full refresh at page load is
+          // the only chance to learn a row's company name and previous close, and
+          // if the proxy was down for it, a token-priced stock sat on its ticker
+          // and a dashed day change until Monday. So while any such row is
+          // missing either, a full refresh runs every CLOSED_FILL_INTERVAL; the
+          // per-symbol Yahoo throttle inside it keeps that to one lookup each.
+          const now = Date.now();
+          // The refresh at page load was the first attempt; without this the
+          // first tick would fire another straight away, inside the per-symbol
+          // Yahoo throttle, re-asking only the proxy-bound futures.
+          if (!offHoursLastFullRefresh) offHoursLastFullRefresh = now;
+          const unfinished = portfolio.some(p => {
+            if (isCryptoSymbol(p.symbol)) return false;
+            const q = quoteData[p.symbol];
+            if (!q || q.price == null) return !isCommoditySymbol(p.symbol);
+            return q.prevClose == null || (!isCommoditySymbol(p.symbol) && (!q.name || q.name === p.symbol));
+          });
+          if (unfinished && !refreshInProgress && now - offHoursLastFullRefresh >= CLOSED_FILL_INTERVAL) {
+            offHoursLastFullRefresh = now;
+            refreshAll().catch(e => console.warn('refreshAll failed:', e));
+          } else if (hasAlwaysOn) {
             refreshAlwaysOnOnly().catch(e => dbg('off-hours refresh failed:', e && e.message));
           } else {
             const wd = _etNow().getUTCDay();

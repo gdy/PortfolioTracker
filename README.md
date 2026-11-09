@@ -286,7 +286,7 @@ Auto-detects exports from **Robinhood · E\*Trade · Fidelity · Charles Schwab 
 | **gold-api.com** | — | direct CORS, none stated | Real-time spot metals: silver, platinum, palladium, copper (symbol `HG`, not `XCU`) and gold. The only real-time source for the four non-gold metals, and the one that takes them off the proxy entirely. Overlay only — failures fall back to the delayed futures quote. |
 | **Hyperliquid** | — | direct CORS, 1200 weight/min per IP (`allMids` = 2) | Real-time perps tracking crude, Brent and natural gas (`xyz:CL`, `xyz:BRENTOIL`, `xyz:NATGAS`), marked **T**. One batched call per tick; overlay only, with a circuit breaker, and latched off on a `403`/`451`. |
 
-> **Verified 2026-11-04** against the live endpoints, from the production origin. Free financial APIs change access terms without notice: since the previous audit StockAnalysis closed its API to other sites, and FinnHub's public demo token stayed dead, so both were removed (see the graveyard below). Treat the dates as when each row was last checked, not when the code was written.
+> **Verified 2026-11-09** against the live endpoints, from the production origin. Free financial APIs change access terms without notice: since the previous audit StockAnalysis closed its API to other sites, and FinnHub's public demo token stayed dead, so both were removed (see the graveyard below). Treat the dates as when each row was last checked, not when the code was written.
 
 <details>
 <summary>Implementation notes — caching, cooldowns, and call budgets</summary>
