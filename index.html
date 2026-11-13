@@ -1736,6 +1736,7 @@
   <div class="row-menu-sym" id="row-menu-sym"></div>
   <button class="row-menu-item" onclick="_rowMenuAct('alert')">&#128276; Set price alert</button>
   <button class="row-menu-item" onclick="_rowMenuAct('copy')">&#128203; Copy symbol</button>
+  <button class="row-menu-item" id="row-menu-stock" onclick="_rowMenuAct('stock')" style="display:none;"></button>
   <button class="row-menu-item danger" onclick="_rowMenuAct('remove')">&#10005; Remove position</button>
 </div>
 
@@ -1892,7 +1893,7 @@
   <span class="sn-body">
     <strong>Safari clears saved data after 7 days away.</strong>
     Your positions live in this browser only, and Safari deletes that storage if you don&rsquo;t open the page for a week.
-    Open it weekly, keep a backup with <strong>Settings &rarr; Export Settings</strong>, or use <strong>Share</strong> to save a link to your positions.
+    Open it weekly, keep a backup with <strong>Export</strong> (a CSV you can import again), or use <strong>Share</strong> to save a link to your positions.
     Adding it to your Home Screen also keeps the data outside Safari&rsquo;s cleanup.
   </span>
   <button class="sn-dismiss" onclick="dismissStorageNotice()">Got it</button>
@@ -2479,7 +2480,29 @@ function redo() {
   syncWsSubscriptions();
   updateUndoRedoButtons();
 }
+// Esc closes the topmost open surface, whichever it is. Only the column menu,
+// the shortcuts list and the Welcome guide used to answer it - and none of them
+// while a field had focus, which is exactly where the import and alert boxes
+// put it - although the shortcuts list itself promises "Esc: Close overlays".
+function _closeTopSurface() {
+  const shown = id => { const el = document.getElementById(id); return !!el && el.style.display === 'block'; };
+  const open = id => { const el = document.getElementById(id); return !!el && el.classList.contains('show'); };
+  if (shown('col-menu')) { _closeColMenu(); return true; }
+  if (shown('row-menu')) { _closeRowMenu(); return true; }
+  if (shown('alert-popover')) { _closeAlertPopover(); return true; }
+  if (shown('analyst-popover')) { _closeAnalystPopover(); return true; }
+  if (open('shortcuts-overlay')) { document.getElementById('shortcuts-overlay').classList.remove('show'); return true; }
+  if (open('share-overlay')) { document.getElementById('share-overlay').classList.remove('show'); return true; }
+  if (open('column-picker-overlay')) { toggleColumnPicker(); return true; }
+  if (open('import-overlay')) { closeImportModal(); return true; }
+  if (open('welcome-wrap')) { dismissWelcome(); return true; }
+  return false;
+}
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (_closeTopSurface()) e.preventDefault();
+    return;
+  }
   const tag = document.activeElement && document.activeElement.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return;
   const k = e.key;
@@ -2492,15 +2515,6 @@ document.addEventListener('keydown', e => {
   } else if (k === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
     const so = document.getElementById('shortcuts-overlay');
     if (so) so.classList.toggle('show');
-  } else if (k === 'Escape') {
-    // Transient menus first — Esc should dismiss the topmost thing.
-    const cm = document.getElementById('col-menu');
-    if (cm && cm.style.display === 'block') { _closeColMenu(); e.preventDefault(); return; }
-    const so = document.getElementById('shortcuts-overlay');
-    if (so && so.classList.contains('show')) { so.classList.remove('show'); e.preventDefault(); return; }
-    // Welcome guide is a modal dialog now, so Esc should close it like the rest.
-    const ww = document.getElementById('welcome-wrap');
-    if (ww && ww.classList.contains('show')) { dismissWelcome(); e.preventDefault(); }
   }
 });
 
@@ -2770,6 +2784,20 @@ function normalizeSymbolInput(raw) {
     .replace(/\//g, '.')      // BRK/B -> BRK.B
     .replace(/[^A-Z0-9.\-=]/g, '');
 }
+// What a typed or imported ticker means. Bare crypto and commodity shorthand is
+// read as the asset (BTC -> BTC-USD, GOLD -> GC=F), which is what most people
+// typing it want - but a good many of those letters are also listed securities:
+// BTC and ETH are Grayscale's mini trusts, SUI is Sun Communities, LTC is LTC
+// Properties, CORN is the Teucrium fund this app's own tooltip points to. Read
+// as crypto, 100 shares of the BTC trust is 100 bitcoin. So the conversion is
+// always reported (`mappedFrom`), and a ".US" suffix opts out of it: BTC.US is
+// the security with ticker BTC.
+function resolveSymbolInput(raw, keepTicker) {
+  const s = normalizeSymbolInput(raw);
+  if (/^[A-Z0-9]{1,10}\.US$/.test(s)) return { symbol: s.slice(0, -3), mappedFrom: null };
+  const mapped = keepTicker ? null : (CRYPTO_MAP[s] || COMMODITY_MAP[s]);
+  return mapped ? { symbol: mapped, mappedFrom: s } : { symbol: s, mappedFrom: null };
+}
 // Also accept the Yahoo symbol directly
 const COMMODITY_SYMBOLS = new Set(Object.values(COMMODITY_MAP));
 const CRYPTO_VALUES = new Set(Object.values(CRYPTO_MAP));
@@ -2847,7 +2875,9 @@ function addPosition() {
   const sharesEl = document.getElementById('shares-input');
   const costEl = document.getElementById('cost-input');
   const dateEl = document.getElementById('date-input');
-  let symbol = normalizeSymbolInput(tickerEl.value);
+  // Crypto and commodity shorthand maps to the asset (BTC -> BTC-USD,
+  // GOLD -> GC=F); see resolveSymbolInput for the ".US" way out.
+  const { symbol, mappedFrom } = resolveSymbolInput(tickerEl.value);
   // Validation: missing/invalid fields focus the offending input and leave
   // every other input — including the ticker — untouched.
   if (!symbol) {
@@ -2855,10 +2885,6 @@ function addPosition() {
     tickerEl.focus();
     return;
   }
-  // Auto-map crypto shorthand (BTC -> BTC-USD)
-  if (CRYPTO_MAP[symbol]) symbol = CRYPTO_MAP[symbol];
-  // Auto-map commodity shorthand (GOLD -> GC=F)
-  if (COMMODITY_MAP[symbol]) symbol = COMMODITY_MAP[symbol];
   const sharesRaw = parseFloat(sharesEl.value);
   if (!isFinite(sharesRaw) || sharesRaw === 0) {
     setStatus('Enter shares for ' + symbol + ' (negative for short)', 'error');
@@ -2906,7 +2932,10 @@ function addPosition() {
   } else {
     tickerEl.focus();
   }
-  const fetchingMsg = 'Fetching data for ' + symbol + '...';
+  // Say so when shorthand was converted, and how to get the security instead.
+  const fetchingMsg = mappedFrom
+    ? 'Added ' + mappedFrom + ' as ' + (CRYPTO_NAMES[symbol] || commodityName(symbol)) + ' (' + symbol + '). For the stock or ETF with that ticker, enter ' + mappedFrom + '.US'
+    : 'Fetching data for ' + symbol + '...';
   setStatus(fetchingMsg, 'loading');
   // Fire a targeted single-symbol fetch immediately so the new symbol's price
   // shows up without waiting for the in-progress refresh to complete. This is
@@ -2918,7 +2947,7 @@ function addPosition() {
   fetchOneSymbolNow(symbol).then(() => {
     const el = document.getElementById('status-text');
     if (!el || el.textContent !== fetchingMsg) return;
-    if (quoteData[symbol] && quoteData[symbol].price != null) {
+    if (!mappedFrom && quoteData[symbol] && quoteData[symbol].price != null) {
       setStatus(symbol + ' loaded', 'live');
     }
   });
@@ -2926,7 +2955,12 @@ function addPosition() {
   if (refreshInProgress) {
     pendingRefreshAfter = true;
   }
-  refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
+  refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => {
+    syncWsSubscriptions();
+    // The refresh's own status replaced the note about the conversion within
+    // milliseconds; put it back so it can actually be read (until the next tick).
+    if (mappedFrom && portfolio.some(p => p.symbol === symbol)) setStatus(fetchingMsg, 'live');
+  });
 }
 
 // ---- Sample / demo data ----
@@ -3267,6 +3301,14 @@ function importSettings(file) {
       document.getElementById('fmp-key').value = getFmpKey();
       applyPortfolioBarVisibility();
       initAlpacaStreamSetting();
+      // The imported refresh settings were saved but not applied until a reload.
+      const _selIv = document.getElementById('refresh-interval');
+      const _iv = localStorage.getItem('stonks_refresh_interval');
+      if (_iv && [..._selIv.options].some(o => o.value === _iv)) _selIv.value = _iv;
+      const _ar = localStorage.getItem('stonks_auto_refresh');
+      if (_ar !== null) document.getElementById('auto-refresh').checked = _ar === '1';
+      syncAutoRefreshToggle();
+      setupAutoRefresh();
       buildHeader(); renderTable(); updateSummary();
       // Imported keys and stream preference take effect without a reload. An
       // open FinnHub socket is still authenticated with the old key, so it has
@@ -3291,8 +3333,10 @@ function importSettings(file) {
 
 // ==================== IMPORT ====================
 let pendingImport = [];
+let _importKeepTickers = false; // preview checkbox: don't read BTC, GOLD... as crypto/commodities
 
 function openImportModal() {
+  _importKeepTickers = false;
   document.getElementById('import-overlay').classList.add('show');
   document.getElementById('import-text').value = '';
   document.getElementById('import-preview').innerHTML = '';
@@ -3514,7 +3558,13 @@ function parseDate(val) {
   if (/^\d{4}-\d{2}-\d{2}/.test(val)) return val.slice(0, 10);
   // US format: 01/15/2024 or 1/15/2024
   const us = val.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-  if (us) return `${us[3]}-${us[1].padStart(2,'0')}-${us[2].padStart(2,'0')}`;
+  if (us) {
+    // 25/12/2024 can only be day-first; read as month-first it became the
+    // invalid date 2024-25-12. An ambiguous 03/04/2024 stays month-first.
+    let mm = us[1], dd = us[2];
+    if (+mm > 12 && +dd <= 12) { const t = mm; mm = dd; dd = t; }
+    return `${us[3]}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+  }
   // Try native parse as fallback. Format from the LOCAL date fields rather than
   // toISOString(): a bare date string parses as local midnight, and converting
   // that to UTC moves the date a day BACKWARD for anyone east of UTC — e.g.
@@ -3576,7 +3626,9 @@ function parseImportData(text) {
     const cols = parseCSVLine(line, delim);
     if (cols.length <= Math.max(symIdx, sharesIdx)) continue;
 
-    let symbol = normalizeSymbolInput(cols[symIdx]);
+    // Crypto/commodity shorthand maps to the asset unless the user ticked "keep
+    // the tickers as written" in the preview (see resolveSymbolInput).
+    const { symbol, mappedFrom } = resolveSymbolInput(cols[symIdx], _importKeepTickers);
     if (!symbol || symbol.length > 10) continue;
 
     let shares = num(cols[sharesIdx]);
@@ -3626,11 +3678,7 @@ function parseImportData(text) {
       purchaseDate = parseDate(cols[dateIdx]);
     }
 
-    // Map crypto/commodity shorthand
-    if (CRYPTO_MAP[symbol]) symbol = CRYPTO_MAP[symbol];
-    if (COMMODITY_MAP[symbol]) symbol = COMMODITY_MAP[symbol];
-
-    positions.push({ symbol, shares, costBasis, purchaseDate, lastPrice });
+    positions.push({ symbol, shares, costBasis, purchaseDate, lastPrice, mappedFrom });
   }
   positions._debug = _debugHeader;
   return positions;
@@ -3679,6 +3727,25 @@ function previewImport() {
   html += `<div style="margin-top:6px;color:#3c8;">${pendingImport.length} position(s) ready to import`
     + (hidden > 0 ? ` <span style="color:#888;">(showing first ${PREVIEW_MAX_ROWS})</span>` : '')
     + `</div>`;
+  // Say which tickers were read as crypto or commodities, and offer the way out.
+  // A brokerage export can hold securities with the same letters (BTC and ETH
+  // are Grayscale trusts, SUI is a REIT), and nothing else in the preview would
+  // show that 100 shares had just become 100 coins.
+  const _conv = [];
+  for (const p of pendingImport) {
+    if (p.mappedFrom && !_conv.some(c => c.from === p.mappedFrom)) _conv.push({ from: p.mappedFrom, to: p.symbol });
+  }
+  let _convNote = '';
+  if (_conv.length > 0 || _importKeepTickers) {
+    const list = _conv.slice(0, 12).map(c => esc(c.from) + ' &rarr; ' + esc(CRYPTO_NAMES[c.to] || commodityName(c.to))).join(', ')
+      + (_conv.length > 12 ? ', &hellip;' : '');
+    // Goes ABOVE the table: the preview scrolls, and below it this was off-screen.
+    _convNote = `<div style="margin-bottom:8px;padding:6px 8px;border:1px solid #654;border-radius:3px;color:#db8;font-size:11px;line-height:1.5;">`
+      + (_conv.length > 0 ? `Read as crypto or commodities: ${list}.<br>` : '')
+      + `<label style="cursor:pointer;color:#ccc;text-transform:none;letter-spacing:0;font-size:11px;display:inline;"><input type="checkbox" id="import-keep-tickers"${_importKeepTickers ? ' checked' : ''} `
+      + `onchange="_importKeepTickers=this.checked;previewImport()" style="vertical-align:middle;" /> `
+      + `These are stocks or ETFs &mdash; keep the tickers as written</label></div>`;
+  }
   // Debug info: show detected column mappings — escape everything that came
   // from the uploaded CSV (header cells, raw line, and column labels).
   if (pendingImport._debug) {
@@ -3694,7 +3761,7 @@ function previewImport() {
       + `Last Price → col ${colName(d.priceIdx)}<br>`
       + `Type/Side → col ${colName(d.typeIdx)}</div></details>`;
   }
-  previewEl.innerHTML = html;
+  previewEl.innerHTML = _convNote + html;
 }
 
 function executeImport() {
@@ -4068,10 +4135,20 @@ function normalizeYahooChart(sym, chart) {
         }
       }
       if (regEnd) {
+        // Before the open, the newest candle past the last regular session is
+        // one of THIS morning's pre-market prints, and it used to be shown under
+        // the after-hours label ("AH:"). It is pre-market when the clock says so
+        // and the candle falls inside today's pre-market window.
+        const preStart = ctp && ctp.pre && ctp.pre.start;
         for (let i = chart.timestamp.length - 1; i >= 0; i--) {
           if (chart.timestamp[i] > regEnd && closes[i] != null) {
-            postMarketPrice = closes[i];
-            postMarketChange = price ? postMarketPrice - price : null;
+            if (marketState === 'PRE' && preStart && chart.timestamp[i] >= preStart) {
+              preMarketPrice = closes[i];
+              preMarketChange = price ? preMarketPrice - price : null;
+            } else {
+              postMarketPrice = closes[i];
+              postMarketChange = price ? postMarketPrice - price : null;
+            }
             break;
           }
         }
@@ -4358,19 +4435,44 @@ async function _alpacaSnapshotPage(base, feed, keyId, secret) {
 // Turn one snapshot object into a quote. `delayMin` is the origin delay of the
 // feed it came from, so a delayed_sip price is labelled instead of being shown
 // as if it were live.
-function _alpacaSnapToQuote(sym, snap, delayMin) {
+// The ET calendar day of one of Alpaca's RFC 3339 timestamps, or null. Cut to
+// whole seconds first: they carry nine fractional digits, which not every
+// engine's Date.parse accepts.
+function _alpacaEtDay(ts) {
+  const m = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/.exec(typeof ts === 'string' ? ts : '');
+  if (!m) return null;
+  const t = Date.parse(m[0] + 'Z');
+  return isFinite(t) ? _etNow(t).toISOString().slice(0, 10) : null;
+}
+// `stockSession` is set by the equity callers only (crypto's daily bar rolls at
+// midnight UTC, so the rule below doesn't apply to it).
+function _alpacaSnapToQuote(sym, snap, delayMin, stockSession) {
   const trade = snap.latestTrade || snap.trade || {};
   const quote = snap.latestQuote || snap.quote || {};
   const bar = snap.dailyBar || snap.bar || {};
   const prevBar = snap.prevDailyBar || {};
   const price = trade.p || bar.c;
-  const prevClose = prevBar.c || null;
+  let prevClose = prevBar.c || null;
+  // A daily bar only starts with the regular session, so before the 9:30 open
+  // "dailyBar" is still the last completed session and "prevDailyBar" is the one
+  // before it - while latestTrade can already be one of this morning's
+  // pre-market prints. Measuring that print against prevDailyBar folds two
+  // days' moves into the day change (and into P&L Today) until the open. When
+  // the trade is from a later day than the daily bar, that bar's close IS the
+  // previous close, and its open, range and volume are the last session's, not
+  // today's.
+  let barIsPrior = false;
+  if (stockSession && bar.c) {
+    const tradeDay = _alpacaEtDay(trade.t), barDay = _alpacaEtDay(bar.t);
+    if (tradeDay && barDay && tradeDay > barDay) { barIsPrior = true; prevClose = bar.c; }
+  }
   if (!price) return null;
   return { ...makeEmptyQuote(sym),
     price, change: prevClose ? price - prevClose : null,
     changePct: prevClose ? ((price - prevClose) / prevClose) * 100 : null,
-    prevClose, open: bar.o || null, dayHigh: bar.h || null, dayLow: bar.l || null,
-    volume: bar.v || null,
+    prevClose, open: barIsPrior ? null : (bar.o || null),
+    dayHigh: barIsPrior ? null : (bar.h || null), dayLow: barIsPrior ? null : (bar.l || null),
+    volume: barIsPrior ? null : (bar.v || null),
     bid: quote.bp || null, ask: quote.ap || null,
     delayedBy: delayMin,   // 0 for iex/default — positively asserts real-time
     delayedNote: delayMin > 0 ? 'Alpaca delayed SIP feed' : null,
@@ -4407,7 +4509,7 @@ async function fetchAlpacaQuotes(symbols) {
     for (const sym of stockSyms) {
       const snap = data[sym];
       if (!snap) continue;
-      const q = _alpacaSnapToQuote(sym, snap, baseDelay);
+      const q = _alpacaSnapToQuote(sym, snap, baseDelay, true);
       if (q) results[sym] = q;
     }
     // IEX only carries prints that crossed IEX itself — a few percent of
@@ -4425,7 +4527,7 @@ async function fetchAlpacaQuotes(symbols) {
         for (const sym of missing) {
           const snap = dsPage[sym];
           if (!snap) continue;
-          const q = _alpacaSnapToQuote(sym, snap, ALPACA_FEED_DELAY_MIN['delayed_sip']);
+          const q = _alpacaSnapToQuote(sym, snap, ALPACA_FEED_DELAY_MIN['delayed_sip'], true);
           if (q) results[sym] = q;
         }
       }
@@ -5246,7 +5348,8 @@ async function fetchCryptoQuotes(symbols) {
     });
     if (resp.status === 429) {
       console.warn('CoinGecko rate limited — using cached data');
-      return _cgCache.data;
+      // Still overlay the exchange price, as every other cached path does.
+      return _cgCache.data ? await _overlayCoinbasePrices(_cgCache.data) : null;
     }
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
@@ -5307,11 +5410,18 @@ async function fetchPerformanceData(symbols, signal) {
     while (startIdx < endIdx && !closes[startIdx]) startIdx++;
     const yearStartUnix = new Date(now.getFullYear(), 0, 1).getTime() / 1000;
     const sixMAgoUnix = nowUnix - 183 * 86400;
-    let ytdPrice = null, sixMPrice = null, oneYPrice = closes[startIdx];
+    // YTD is measured from the LAST close of the previous year, the way every
+    // quote page does it. Anchoring on the first close of this year instead left
+    // out the first trading day's move (AAPL read +31.2% against a real +30.8%).
+    // A symbol that listed this year has no such close; its first one stands in.
+    let ytdPrice = null, ytdFirst = null, sixMPrice = null, oneYPrice = closes[startIdx];
     for (let i = 0; i < timestamps.length; i++) {
-      if (ytdPrice == null && timestamps[i] >= yearStartUnix && closes[i]) ytdPrice = closes[i];
-      if (sixMPrice == null && timestamps[i] >= sixMAgoUnix && closes[i]) sixMPrice = closes[i];
+      if (!closes[i]) continue;
+      if (timestamps[i] < yearStartUnix) ytdPrice = closes[i];
+      else if (ytdFirst == null) ytdFirst = closes[i];
+      if (sixMPrice == null && timestamps[i] >= sixMAgoUnix) sixMPrice = closes[i];
     }
+    if (ytdPrice == null) ytdPrice = ytdFirst;
     if (quoteData[sym]) {
       if (ytdPrice) quoteData[sym].perfYTD = ((currentPrice - ytdPrice) / ytdPrice) * 100;
       if (sixMPrice) quoteData[sym].perf6M = ((currentPrice - sixMPrice) / sixMPrice) * 100;
@@ -5421,8 +5531,10 @@ async function fetchCryptoSupplemental(symbols) {
         if (q.wk52High == null) q.wk52High = high;
         if (q.wk52Low == null) q.wk52Low = low;
 
-        // YTD: find first price on or after Jan 1
-        const yearStartMs = new Date(new Date().getFullYear(), 0, 1).getTime();
+        // YTD: the daily points are stamped 00:00 UTC, so the one AT Jan 1 UTC is
+        // the previous year's closing price - the anchor YTD is measured from.
+        // (Local midnight skipped it for anyone west of UTC and took Jan 2's.)
+        const yearStartMs = Date.UTC(new Date().getUTCFullYear(), 0, 1);
         const sixMAgoMs = Date.now() - 183 * 86400000;
         let ytdPrice = null, sixMPrice = null;
         const oneYPrice = prices[0][1];
@@ -5678,7 +5790,7 @@ async function fetchOneSymbolNow(sym) {
             signal: AbortSignal.timeout(5000)
           });
           if (!r.ok) throw new Error('alpaca ' + r.status);
-          const q = _alpacaSnapToQuote(sym, await r.json(), ALPACA_FEED_DELAY_MIN[feed] || 0);
+          const q = _alpacaSnapToQuote(sym, await r.json(), ALPACA_FEED_DELAY_MIN[feed] || 0, true);
           if (!q) throw new Error('alpaca no price');
           return q;
         })());
@@ -8245,7 +8357,9 @@ function exportCSV() {
     // names and notes are free text from data sources and the user.
     rows.push([pos.symbol, quoteName(pos.symbol, q),
       priceNum(price), priceNum(q.change), num(q.changePct),
-      pos.shares, priceNum(pos.costBasis), pos.purchaseDate||'',
+      // Cost basis keeps six decimals, not a price's two: it is the user's own
+      // data (often a weighted average), and this file is their backup.
+      pos.shares, num(pos.costBasis, 6), pos.purchaseDate||'',
       num(mktVal), num(dayPL), num(totalPL),
       num(totalPLPct), priceNum(q.prevClose), priceNum(q.open),
       num(q.volume, 0), num(q.marketCap, 0), num(q.pe), num(q.eps), num(q.beta),
@@ -8325,6 +8439,14 @@ function openRowMenu(symbol, el, clientX, clientY) {
   _rowMenuAnchor = el;
   const pop = document.getElementById('row-menu');
   document.getElementById('row-menu-sym').textContent = symbol;
+  // Offered only on a row that shorthand turned into a coin or a future while a
+  // listed security has the same ticker (see _listedTwin).
+  const _twinBtn = document.getElementById('row-menu-stock');
+  if (_twinBtn) {
+    const twin = _listedTwin(symbol);
+    _twinBtn.style.display = twin ? '' : 'none';
+    if (twin) _twinBtn.textContent = '⇄ Track the stock/ETF ' + twin + ' instead';
+  }
   pop.style.display = 'block';
   const pad = 4;
   const w = pop.offsetWidth || 168;
@@ -8349,11 +8471,41 @@ function _closeRowMenu() {
   const pop = document.getElementById('row-menu');
   if (pop) pop.style.display = 'none';
 }
+// Shorthand that is ALSO the ticker of a listed US security (each one checked
+// against Yahoo on 2026-11-12: two Grayscale trusts, a Bitwise ETF, two REITs, a
+// bond ETF, a bank ADR...). Typing or importing it gives the coin or future, and
+// this is the list of rows that get a one-click way back to the security. A
+// ticker that isn't on it can still be entered as TICKER.US.
+const SHORTHAND_ALSO_LISTED = new Set(['BTC', 'ETH', 'XRP', 'LTC', 'SUI', 'LINK', 'NEAR', 'BCH', 'ATOM', 'APT', 'ARB', 'VET', 'TRX', 'GOLD', 'CORN']);
+function _listedTwin(symbol) {
+  for (const k of SHORTHAND_ALSO_LISTED) {
+    if ((CRYPTO_MAP[k] || COMMODITY_MAP[k]) === symbol) return portfolio.some(p => p.symbol === k) ? null : k;
+  }
+  return null;
+}
 function _rowMenuAct(action) {
   const sym = _rowMenuSym;
   const anchor = _rowMenuAnchor;
   _closeRowMenu();
   if (!sym) return;
+  if (action === 'stock') {
+    const twin = _listedTwin(sym);
+    const pos = portfolio.find(p => p.symbol === sym);
+    if (!twin || !pos) return;
+    pushUndo(); // undoable, like every other edit
+    pos.symbol = twin;
+    if (notes[sym] != null) { notes[twin] = notes[sym]; delete notes[sym]; saveNotes(); }
+    delete quoteData[sym]; delete prevPrices[sym]; delete _cbCache[sym];
+    attemptedSymbols.delete(twin); errorSymbols.delete(twin); delete _notFoundStreak[twin];
+    savePortfolio();
+    renderTable(true);
+    updateSummary();
+    setStatus('Now tracking the stock/ETF ' + twin + ' (Ctrl+Z to undo)', 'loading');
+    fetchOneSymbolNow(twin);
+    if (refreshInProgress) pendingRefreshAfter = true;
+    refreshAll().catch(e => console.warn('refreshAll failed:', e)).then(() => syncWsSubscriptions());
+    return;
+  }
   if (action === 'remove') {
     removePosition(sym); // undoable via Ctrl+Z
   } else if (action === 'alert') {
@@ -11102,18 +11254,12 @@ function countVisit(host = location.hostname) {
 }
 
 // ==================== INIT ====================
-// Migrate existing shorthand symbols (e.g. BTC -> BTC-USD, GOLD -> GC=F)
-let migrated = false;
-for (const pos of portfolio) {
-  if (CRYPTO_MAP[pos.symbol]) {
-    pos.symbol = CRYPTO_MAP[pos.symbol];
-    migrated = true;
-  } else if (COMMODITY_MAP[pos.symbol]) {
-    pos.symbol = COMMODITY_MAP[pos.symbol];
-    migrated = true;
-  }
-}
-if (migrated) savePortfolio();
+// (A boot-time pass used to rewrite any stored shorthand symbol - BTC to
+// BTC-USD, GOLD to GC=F. Every entry path has converted shorthand on the way in
+// for a long time, so it had nothing left to migrate; and a stored bare ticker
+// now means the security with that ticker, entered as BTC.US - see
+// resolveSymbolInput - which that pass would have turned back into the coin.
+// It also ran before initPortfolios() loaded the real portfolio.)
 
 // Restore saved auto-refresh settings
 // Only restore an interval the <select> actually offers — assigning an unknown
